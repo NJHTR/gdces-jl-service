@@ -92,6 +92,26 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 配置警告的排查（2026-11-06 01:55，未完全定位）
+
+现象：app-server 启动时报一次
+
+```
+ERROR easycode_app_server: easyCode is ignoring 1 unrecognized configuration setting.
+```
+
+排查结果（两次实测）：
+
+```
+最小配置（provider + [features] memories）        → 0 次
+完整 501 配置，走 exec 路径                        → 0 次
+完整 501 配置，走 app-server 路径                  → 1 次（启动时）
+```
+
+**所以不是 `[memories]` 或 `[agent_roles]` 的问题**，是 app-server 特有的校验。
+影响：引擎只打一行警告然后继续跑，功能未见异常。
+暂不阻塞，记在这里 —— 如果再出现奇怪行为，先怀疑它。
+
 ## 语音沉淀（2026-11-06 01:45）
 
 和照片同一套机制：**说的和拍的都留一句话，能查回来**。
