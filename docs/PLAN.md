@@ -70,3 +70,17 @@
 - 有实测输出（贴在提交信息或 `STATUS.md` 里）
 - 契约（`contracts/openapi.yaml`）同步更新
 - 已知坑写进 `DECISIONS.md` 或对应 README
+
+### M7 Agent 自由化（设计完成，待实施）
+
+> 详细设计见 `docs/ARCHITECTURE-AGENT.md`。
+> 核心：后端只提供能力和工具，不做意图识别、不做正则、不做结构拆解。
+
+- [ ] **P0 拆掉后端硬编码**：提示词搬进 AGENTS.md、删 clean_reply/parse_answer/
+      _cites_from_output、删"按时间窗猜 doc_id"
+- [ ] **P1 多模态 parts**：消息改成 parts 数组（文字/图片/语音/定位任意组合），
+      ASR 与视觉作为工具
+- [ ] **P2 常驻 Agent 运行时**：会话复用、SSE 直推、agent_event 表
+- [ ] **P3 多 Agent**：spawn_agent / wait，角色与工具白名单，文件交接
+- [ ] **P4 循环与校验**：validate_doc 与提交钩子共用 schema，Review⇄Draft 至多 3 轮
+- [ ] **P5 观测与成本**：每 agent 的 token/耗时/工具次数，任务事件回放
