@@ -18,6 +18,7 @@ import pymysql
 
 留 Python：它跟子进程、文件、git 打交道。
 """
+from .appserver import run_stream
 from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
@@ -726,21 +727,29 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
             "依据：规范号 + 条号；没有就写无\n"
             "待补：还缺哪些字段，用、隔开；没有就写无"
         )
-        cmd = [ENGINE, "exec", "-C", ws,
-               "--dangerously-bypass-approvals-and-sandbox",
-               "--json", "-o", out_file]
-        # 顺序要紧：`-i <FILE>...` 是变长参数，会把后面的东西全当文件名，
-        # 所以 prompt 必须排在 -i 之前。
-        cmd.append(text + hint)
-        for img in (images or []):
-            cmd += ["-i", img]
+        # 两种后端共用后面的解析：事件来源不同，事件形状一样
+        proc = None
+        if ENGINE_MODE == "appserver":
+            line_iter = (json.dumps(ev, ensure_ascii=False) + "\n"
+                         for ev in run_stream(project_id, text + hint, images))
+        else:
+            cmd = [ENGINE, "exec", "-C", ws,
+                   "--dangerously-bypass-approvals-and-sandbox",
+                   "--json", "-o", out_file]
+            # 顺序要紧：`-i <FILE>...` 是变长参数，会把后面的东西全当文件名，
+            # 所以 prompt 必须排在 -i 之前。
+            cmd.append(text + hint)
+            for img in (images or []):
+                cmd += ["-i", img]
 
         before = q("SELECT COALESCE(MAX(id),0) AS m FROM doc WHERE project_id=%s", (project_id,))
         doc_before = before[0]["m"] if before else 0
 
         steps, by_cmd_id, lines = [], {}, []
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                text=True, bufsize=1, env=ENGINE_ENV)
+        if proc is None and ENGINE_MODE != "appserver":
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    text=True, bufsize=1, env=ENGINE_ENV)
+            line_iter = proc.stdout
 
         # 看门狗：进程完全不出声时 for 循环会永远等下去（之前挂满 15 分钟才被兜底扫掉）
         def _watchdog(p, secs):
@@ -753,13 +762,16 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                         pass
             threading.Thread(target=run, daemon=True).start()
 
-        _watchdog(proc, 300)
+        if proc is not None:
+            _watchdog(proc, 300)
         deadline = time.time() + 600
-        for line in proc.stdout:
+        appserver_started = time.time()
+        for line in line_iter:
             lines.append(line)
             if time.time() > deadline:
-                proc.kill()
-                raise subprocess.TimeoutExpired(cmd, 600)
+                if proc is not None:
+                    proc.kill()
+                raise subprocess.TimeoutExpired("easycode", 600)
 
             line = line.strip()
             if not line.startswith("{"):
@@ -806,7 +818,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                 steps.append(step)
                 by_cmd_id[cid] = step
             _set_progress(task_id, steps)
-        proc.wait()
+        if proc is not None:
+            proc.wait()
 
         now_end = time.time()
         for st in steps:
@@ -891,7 +904,8 @@ def run_turn(task_id, project_id, user_id, text, images=None):
     with _user_lock(project_id, user_id):
         with TURN_SLOTS:
             exec_sql("UPDATE task SET status='running', started_at=NOW(3) WHERE id=%s", (task_id,))
-            if ENGINE_MODE == "cli":
+            # appserver 和 cli 用的是同一套"引擎跑一轮"，区别只在事件从哪来
+            if ENGINE_MODE in ("cli", "appserver"):
                 _run_cli_turn(task_id, project_id, user_id, text, images)
             else:
                 _run_agent_loop_inner(task_id, project_id, user_id, text)
