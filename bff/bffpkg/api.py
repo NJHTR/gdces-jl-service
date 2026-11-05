@@ -250,7 +250,11 @@ def main():
     threading.Thread(target=notify_worker, daemon=True).start()
     threading.Thread(target=sweeper, daemon=True).start()
     start_jobs()
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    # 监听 0.0.0.0：MCP 工具容器在 jl-net（172.19.0.0/16）里，
+    # 只绑 127.0.0.1 的话容器永远 fetch failed，文书就入不了库（踩过）。
+    # 要收回只给本机访问，设 BIND_HOST=127.0.0.1。
+    bind_host = os.environ.get("BIND_HOST") or "0.0.0.0"
+    srv = ThreadingHTTPServer((bind_host, PORT), Handler)
     sys.stderr.write(f"jl-bff 已启动 :{PORT}\n")
     srv.serve_forever()
 

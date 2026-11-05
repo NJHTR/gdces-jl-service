@@ -194,7 +194,28 @@ def build_context(project_id, user_id, query=None):
 
     parts = [f"【项目】{proj['name']}" + (f"（{proj['code']}）" if proj.get("code") else "")]
     if meta:
-        parts.append("【工程概况】" + json.dumps(meta, ensure_ascii=False))
+        # 不再把 21 个字段的 JSON 全塞进来（agent 需要细节时 get_project 能拿到）。
+        # 这里只留每份文书都用得上的事实，且一行说完。
+        bits = []
+        for key, label in (("addr", ""), ("category", ""), ("structure", ""),
+                           ("area", "㎡"), ("floors", "")):
+            val = (meta.get(key) or "").strip() if isinstance(meta.get(key), str) else meta.get(key)
+            if val:
+                bits.append(f"{val}{label}")
+        span = ""
+        if meta.get("start") and meta.get("finish"):
+            span = f"工期 {meta['start']} ~ {meta['finish']}"
+        line = " · ".join(x for x in [" · ".join(bits), span] if x)
+        if line:
+            parts.append("【工程概况】" + line)
+
+        who = []
+        for key, label in (("owner", "建设单位"), ("builder", "施工"), ("supervisor", "监理"),
+                           ("design", "设计"), ("survey", "勘察")):
+            if meta.get(key):
+                who.append(f"{label} {meta[key]}")
+        if who:
+            parts.append("【参建】" + " · ".join(who))
     pm_all, um_all = len(pm), len(um)
     pm, um = pick_memories(pm, query), pick_memories(um, query)
     sys.stderr.write(f"[ctx] 记忆候选 project={pm_all} user={um_all} → 注入 {len(pm)}+{len(um)}\n")
@@ -210,22 +231,13 @@ def build_context(project_id, user_id, query=None):
     except Exception:
         pass
 
-    manual = tool_manual()
+    # ---- 以下三行是「指针」，不是行为规则 ----
+    # 工具清单不写死：跑 `jl-tool list` 永远是最新的（以前写死过，加工具忘了改）。
     parts.append(
-        "【可用工具】本机已装好命令行工具 jl-tool，**直接用，不需要先 list**。"
-        "参数必须是 JSON，格式：jl-tool <工具名> '{\"键\":\"值\"}'\n"
-        + (manual or "  （清单没取到，可以跑 jl-tool list 看看）")
-        + "\n规则：\n"
-        "1. 用户说「出/写/生成 通知单、记录、日志」时，**必须真的调用 create_doc_draft**，"
-        "不能只在回复里描述文书内容。\n"
-        "2. 写文书前先用 search_standards 查到依据，把条号写进 bases。\n"
-        "3. 出稿前先调 validate_doc 自查字段：缺什么它会告诉你，"
-        "缺的就留空、别编，交给人补。\n"
-        "4. create_doc_draft 会把文件写进项目工作区并 git 提交。"
-    )
-    parts.append(
-        "【说话方式】像一个监理工程师在跟同事说话：短、具体、说人话。"
-        "该说问题说问题，该说缺什么说缺什么，不用套模板，也不用复述你查了哪些工具。"
+        "【交付】出文书必须用 `jl-tool create_doc_draft` —— 它写文件、提交、入库。\n"
+        "手写 md 不会出现在系统里，用户看不到（实测过）。工具报错要重试或明说，不许改成手写。\n"
+        "工具清单跑 `jl-tool list`；用法、出稿流程、说话风格见 "
+        "`data/knowledge/skills/`，需要时再读。"
     )
     parts.append(f"【当前】项目 {project_id} · 用户 {user_id}")
     return "\n\n".join(parts)
@@ -988,6 +1000,18 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         if review_text:
             answer["review"] = review_text
 
+        # 对账：文件写了但没入库的，要让人看见（不然用户以为系统里有，其实没有）
+        try:
+            orphans = _unregistered_docs(project_id, started)
+            if orphans:
+                trace.append({"kind": "note", "icon": "warn", "text": "没入库的文书",
+                              "output": "\n".join(orphans[:5])})
+                answer["warning"] = "%d 份文书文件没登记入库：%s" % (
+                    len(orphans), "、".join(orphans[:3]))
+                sys.stderr.write("[doc] 未入库文书 %d 份：%s\n" % (len(orphans), orphans[:3]))
+        except Exception as exc:
+            sys.stderr.write("[doc] 对账失败：%s\n" % exc)
+
         exec_sql(
             "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync, cites, answer) "
             "VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1,%s,%s)",
@@ -995,26 +1019,6 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
              json.dumps(trace, ensure_ascii=False) if trace else None, trace_sum, ms, task_id,
              json.dumps(cites, ensure_ascii=False) if cites else None,
              json.dumps(answer, ensure_ascii=False) if answer else None))
-        # 出了文书就让 agent 自己复核一轮（同一个会话，不是多 agent）
-        try:
-            if (ENGINE_MODE == "appserver" and doc_row
-                    and (os.environ.get("REVIEW_PASS") or "1") != "0"):
-                got = _review_pass(task_id, project_id, doc_row["id"], final_text)
-                if got:
-                    rtext, rtrace, rdoc = got
-                    exec_sql(
-                        "INSERT INTO message (project_id, user_id, client_id, role, text, trace, "
-                        "trace_sum, ms, task_id, sync) VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1)",
-                        (project_id, user_id, f"rv-{task_id}-{int(time.time())}",
-                         clean_reply(rtext),
-                         json.dumps(rtrace, ensure_ascii=False) if rtrace else None,
-                         "复核（子 agent）", 0, task_id))
-                    sys.stderr.write(f"[review] task {task_id} 复核完成 doc={rdoc}\n")
-                    # 复核可能出了新版，任务指向最新的那份
-                    doc_row = {"id": rdoc} if rdoc else doc_row
-        except Exception as exc:
-            sys.stderr.write(f"[review] 复核轮异常：{exc}\n")
-
         exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, finished_at=NOW(3) WHERE id=%s",
                  (thread_id, new_doc[0]["id"] if new_doc else None, task_id))
         sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令)\n")
@@ -1068,6 +1072,30 @@ def render_agents_md(project_id, user_id):
     with open(f"{ws}/AGENTS.md", "w", encoding="utf-8") as f:
         f.write("# 项目上下文（由服务自动生成，勿手改）\n\n" + ctx + "\n")
     return ctx
+
+
+def _unregistered_docs(project_id, started_at):
+    """本轮新增但没入库的文书文件（按文件名对账，不看模型输出）"""
+    ws = f"{WS_ROOT}/{project_id}"
+    docs_dir = os.path.join(ws, "docs")
+    if not os.path.isdir(docs_dir):
+        return []
+    rows = q("SELECT path FROM doc WHERE project_id=%s", (project_id,))
+    known = {(r.get("path") or "").split("/")[-1] for r in rows}
+    out = []
+    for root, _dirs, files in os.walk(docs_dir):
+        for fn in files:
+            if not fn.endswith(".md"):
+                continue
+            full = os.path.join(root, fn)
+            try:
+                if os.path.getmtime(full) < started_at:
+                    continue
+            except OSError:
+                continue
+            if fn not in known:
+                out.append(fn)
+    return out
 
 
 # ---------------------------------------------------------------- _parse_jsonl
