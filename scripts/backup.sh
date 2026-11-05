@@ -25,7 +25,8 @@ say() { echo "$(date '+%F %T') $*" >> "$LOG"; }
 PW=$(grep '^MYSQL_ROOT_PASSWORD=' "$R/.env" | cut -d= -f2)
 
 # 1) 数据库
-if docker exec jl-mysql mysqldump -uroot -p"$PW" --single-transaction --routines jl 2>/dev/null \
+if docker exec jl-mysql mysqldump -uroot -p"$PW" --default-character-set=utf8mb4 \
+     --single-transaction --routines jl 2>/dev/null \
      | gzip > "$B/db-$STAMP.sql.gz"; then
   say "db 备份 $(du -h "$B/db-$STAMP.sql.gz" | cut -f1)"
 else

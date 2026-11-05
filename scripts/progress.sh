@@ -35,15 +35,16 @@ line "LLM 备用" "$(grep -q '^DASHSCOPE_API_KEY=' .env 2>/dev/null && echo "百
 head2 "数据"
 PW=$(grep '^MYSQL_PASSWORD=' .env 2>/dev/null | cut -d= -f2)
 if [ -n "${PW:-}" ]; then
-  docker exec jl-mysql mysql -ujl -p"$PW" -N -e "
+  # 必须带 utf8mb4：不带的话 state='待补' 匹配不到，一直显示 0（实测 132 被查成 0）
+  docker exec jl-mysql mysql -ujl -p"$PW" --default-character-set=utf8mb4 -N -e "
     SELECT CONCAT('项目 ', (SELECT COUNT(*) FROM jl.project),
            ' | 文书 ', (SELECT COUNT(*) FROM jl.doc),
            ' | 待补 ', (SELECT COUNT(*) FROM jl.doc WHERE state='待补'),
            ' | 消息 ', (SELECT COUNT(*) FROM jl.message),
            ' | 任务 ', (SELECT COUNT(*) FROM jl.task),
            ' | 记忆 ', (SELECT COUNT(*) FROM jl.memory),
-           ' | 审计 ', (SELECT COUNT(*) FROM jl.audit_log));" 2>/dev/null | sed 's/^/  /'
-  docker exec jl-mysql mysql -ujl -p"$PW" -N -e "
+           ' | 审计 ', (SELECT COUNT(*) FROM jl.audit_log));" 2>&1 | grep -v '^mysql: \[Warning\]' | sed 's/^/  /'
+  docker exec jl-mysql mysql -ujl -p"$PW" --default-character-set=utf8mb4 -N -e "
     SELECT CONCAT('  最近 3 个任务: ', GROUP_CONCAT(CONCAT(id,' ',status) ORDER BY id DESC SEPARATOR ' | '))
     FROM (SELECT id, status FROM jl.task ORDER BY id DESC LIMIT 3) t;" 2>/dev/null
 else
