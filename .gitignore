@@ -14,3 +14,8 @@ __pycache__/
 *.pyc
 
 service-java/target/
+
+# 知识包要版本化（规范/模板/技能是数据，也是资产）
+!data/knowledge/
+!data/knowledge/**
+
