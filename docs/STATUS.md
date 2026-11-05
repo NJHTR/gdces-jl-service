@@ -92,6 +92,62 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R8 第二步：phase1 为什么一个都不claim（2026-11-06 01:20）
+
+### 已确认的事实
+
+```
+1) 手工跑 claim 的 SQL（state_5.sqlite）→ 6 条候选线程，条件全满足
+   memory_mode=enabled、source=vscode、updated_at 在窗口内
+2) 日志 tag 里有 memories.max_rollouts_per_startup=8 → [memories] 段确实被解析
+3) 整理任务 memory_consolidate_global = done；MEMORY.md / memory_summary.md 已生成
+4) 但 jobs 表里没有任何 memory_stage1 行，stage1_outputs 仍 0
+```
+
+**所以不是“没有候选”，是候选没有被认领。**
+
+### claim 的源码路径（记文件:行号）
+
+```
+state/src/runtime/memories.rs:153  claim_stage1_jobs_for_startup
+  SQL 条件：memory_mode='enabled'、source in (cli,vscode,atlas,chatgpt)、
+           id != 当前线程、updated_at 在 [max_age, now - idle_hours]
+  之后还有两道：stage1_source_needs_update() → try_claim_stage1_job()
+```
+
+### 两条待查线索
+
+**① 一条被忽略的配置项**
+
+```
+ERROR easycode_app_server: easyCode is ignoring 1 unrecognized configuration setting.
+```
+还没定位是哪个键。若是 `extract_model` 之类的名字不对，phase1 会退回默认模型，
+可能在 `build_request_context` 阶段就失败 —— 而它排在 claim **之前**，
+失败时任务直接返回，一条日志都不留（这正是我们看到的现象）。
+
+**② 整理 agent 缺工具**
+
+```
+ERROR tools::router: error=unsupported call: write_file
+ERROR tools::router: error=apply_patch verification failed …
+```
+整理 agent 想写 `memories/` 下的文件，但 `write_file` 报 unsupported，
+patch 也失败 —— 它最后仍然标记 done，但没写出内容。
+这解释了为什么 MEMORY.md 只有骨架。
+
+### 下一轮的做法（明确到动作）
+
+给引擎打一个小补丁（我们本来就有源码和编译链）：
+
+```
+memories/write/src/start.rs  在三个提前返回点各加一行 info! 日志：
+  ephemeral / feature 未开 / non-root agent  → 各打一条，带原因
+  并在 phase1::run 前后打 info：候选数、认领数
+```
+
+重编译 ~12 分钟，然后一次就能看到卡在哪。**不再猜。**
+
 ## R8 第一步：模型进目录 + 整理 agent 活了（2026-11-06 01:10）
 
 ### 做了什么

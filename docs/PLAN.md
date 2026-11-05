@@ -121,7 +121,8 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 - [x] `qwen3.7-plus` 加进 models.json（补丁 0003），重编译并部署
 - [x] 复测：整理任务从 failed_agent → done，生成了 MEMORY.md / memory_summary.md 骨架
       **但 phase1 仍 0 行**（没有 stage1 任务被 claim）
-- [ ] 读 `easycode_state::claim_stage1_jobs_for_startup` 的 SQL，查 phase1 为什么一个都没选上
+- [x] 读 claim SQL：手工执行能选出 6 条候选，**排除 SQL 条件问题**
+- [ ] 给引擎打日志补丁（start.rs 三个提前返回点 + phase1 候选/认领数），重编译后定位
 
 ---
 ### R7 知识架构（终态，不返工）
