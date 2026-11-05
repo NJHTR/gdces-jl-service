@@ -19,7 +19,7 @@ import pymysql
 这一层是「真值和规则」：状态机、字段校验、权限。
 未来抽成 Java 服务时，把这里的实现换掉即可，接口不变。
 """
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, list_schemas)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, load_schema, list_schemas)
 
 
 # ---------------------------------------------------------------- handle_project_list
@@ -557,12 +557,31 @@ def handle_doc_patch(doc_id, body, user=None):
     if not isinstance(patch, dict) or not patch:
         return 400, {"code": 400, "message": "fields 必填"}
 
-    # 只能改本文书已有的字段，避免乱塞
-    for k, v in patch.items():
-        if k in fields:
-            fields[k] = "" if v is None else str(v)
+    # 允许补 schema 里的字段（不只是已有字段）。
+    #
+    # 原来的写法是「只能改已有字段」，导致：文书创建时只写了「部位/问题描述」，
+    # 监理员在手机上补「受检单位/整改期限/签发人」时，这些键不在 fields 里 →
+    # 被静默丢掉，还报 missing=[] 并把状态改成「待签」。
+    # 等于「说补好了，其实没补」——实测 doc 139 复现。
+    allowed = set(fields.keys())
+    try:
+        schema = load_schema(d["kind"]) or {}
+        # schema 里的必填 + 可选都能补
+        allowed |= set(schema.get("fields") or [])
+        allowed |= set(schema.get("optional") or [])
+    except Exception as exc:
+        sys.stderr.write(f"[doc] 取 schema 失败 {d['kind']}: {exc}\n")
 
-    missing = [k for k, v in fields.items() if not str(v or "").strip()]
+    dropped = []
+    for k, v in patch.items():
+        if k in allowed:
+            fields[k] = "" if v is None else str(v)
+        else:
+            dropped.append(k)
+
+    # 缺项以 schema 为准（不是「当前 fields 里为空的键」）
+    chk = validate_fields(d["kind"], fields)
+    missing = list(chk.get("missing") or []) + list(chk.get("placeholder") or [])
     state = body.get("state") or ("待补" if missing else "待签")
 
     exec_sql("UPDATE doc SET fields=%s, state=%s, updated_at=NOW(3) WHERE id=%s",
@@ -577,6 +596,7 @@ def handle_doc_patch(doc_id, body, user=None):
     audit(d["project_id"], user["id"] if user else 1, "doc.update", f"doc:{doc_id}",
           json.dumps({"fields": list(patch.keys()), "state": state}, ensure_ascii=False))
     return 200, {"code": 0, "data": {"id": doc_id, "state": state, "missing": missing,
+                                       "dropped": dropped,
                                      "fields": fields}}
 
 

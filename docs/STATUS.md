@@ -168,6 +168,81 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 🔴 严重：手机上补缺项，补的字段被静默丢掉（2026-11-06 11:45）
+
+**这是今晚发现的最严重问题 —— 它直接卡住产品的核心动作。**
+
+### 复现
+
+```
+doc 139（监理通知单 · 63#楼临边防护栏杆，state=待补，只有 2 个字段）
+PATCH /api/v1/docs/139  {"fields":{"受检单位":…,"整改期限":…,"签发人":…}}
+
+返回：{"state":"待签", "missing":[], "fields":{只有原来那 2 个}}
+库里：还是 2 个字段
+```
+
+**监理员在手机上把缺的字段填了，系统说"齐了、可以签发"，但那三个字段根本没存进去。**
+
+### 两个 bug 叠在一起
+
+```python
+# 1) 只能改已有字段 —— 新键被静默丢弃
+for k, v in patch.items():
+    if k in fields:          # ← 受检单位/整改期限/签发人 不在 fields 里
+        fields[k] = ...
+
+# 2) 缺项按「当前 fields 里为空的」算，不是按 schema 算
+missing = [k for k, v in fields.items() if not str(v or "").strip()]
+# 于是 missing=[] → state 变"待签"
+```
+
+文书创建时只写了「部位 / 问题描述」，schema 要求的五个字段一个都不在 `fields` 里，
+所以两个 bug 一起把它判成"齐了"。
+
+### 修法
+
+```python
+# 允许补 schema 里的字段（必填 + 可选），不只是已有字段
+schema = load_schema(kind)
+allowed = set(fields) | set(schema["fields"]) | set(schema.get("optional") or [])
+
+# 缺项以 schema 为准
+chk = validate_fields(kind, fields)
+missing = chk["missing"] + chk["placeholder"]
+
+# 被拒绝的键要回报，不能装作存了
+return {..., "dropped": dropped}
+```
+
+### 修完实测
+
+```
+第一次补 3 个字段：
+  state=待补, missing=["事由","整改要求","检查结论"], dropped=[]
+  fields 里三个新字段都在 ✓
+
+第二次补剩下 3 个：
+  state=待签, missing=[], dropped=[]
+  fields 共 8 个字段 ✓
+
+磁盘上的文件也同步了：
+  - **签发人**：张工
+  - **受检单位**：中建八局华南公司
+  - **整改期限**：2026-11-10
+```
+
+### 为什么必须记这一条
+
+```
+这个 bug 不会报错、不会崩、不会留下异常日志。
+它只会让监理员以为填好了，签发时才发现文书是空的。
+—— 和"文书静默不入库"是同一类：数据丢了，界面说成功。
+```
+
+排查方法也值得记：**我用 PATCH 打了一次，然后去看数据库里到底有什么**，
+而不是相信返回值。如果只看返回的 `{"state":"待签"}`,我会以为功能是好的。
+
 ## 我自己的工具一直在骗我：charset 导致中文条件失效（2026-11-06 11:25）
 
 ### 发现链
