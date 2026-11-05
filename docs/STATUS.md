@@ -90,6 +90,50 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R2 第一块：文书字段按 schema 校验（2026-11-05）
+
+**为什么做**：模型会把「待补」当成字段值写进去（`"签发人": "待补"`），
+原来只判空字符串，于是这种文书被标成「待签」，实际没填。
+
+**规则放哪**：`schemas/<文书类型>.json`（`fields` 必填、`optional` 可选、
+`placeholders` 占位词）。**代码里没有 if**，加类型就是加一个 json 文件。
+
+**一份实现两处用**（避免两套规则打架）：
+
+| 用处 | 接口/工具 | 谁调 |
+|---|---|---|
+| agent 出稿前自查 | `POST /api/v1/docs/validate` / `jl-tool validate_doc` | agent 自己 |
+| 落库前把关 | `/docs/register` 内调同一个函数 | BFF |
+
+**实测**：
+
+```
+validate(签发人=待补)      → ok=false  placeholder=["签发人"]
+validate(字段齐全)         → ok=true
+validate(未知类型)         → ok=true   note=没有该类型的 schema
+register(state=待签, 缺 2 项) → 落库 state=待补，返回 missing
+register(齐全)              → state=待签
+```
+
+**顺手修的历史数据**：按新规则重算，**12 份文书**从「待签」改成「待补」
+（它们其实一直缺字段，页面却显示可签）。
+
+**顺手修的两个 bug**：
+
+1. `allowed_tools()` 把 `{"tools":[...]}` 当数组解析，白名单变成了 `{"tools"}`
+2. 提示里的工具清单是**手写**的，加了新工具 agent 永远看不到 → 改成问 `jl-tool list`，
+   并且必须带完整路径（agent 的 shell 里没有 PATH 里的 `jl-tool`）
+
+**agent 自己会用了**（任务 104，没人提示它）：
+
+```
+调用顺序: search_standards ×5 → validate_doc → create_doc_draft
+产物: 监理通知单 | state: 待补
+```
+
+**还没做**：把校验做成 easyCode 的 `PostToolUse` 钩子（现在是 register 内部调），
+等 R3 常驻服务时一起做。
+
 ## 文书详情页接真数据（2026-11-05）
 
 - 有 `doc id` 就查 `GET /api/v1/docs/:id`，没有才回落到原型数据
