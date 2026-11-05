@@ -723,14 +723,12 @@ def _review_pass(task_id, project_id, doc_id, first_text):
     try:
         for ev in run_stream(project_id, prompt):
             lines.append(json.dumps(ev, ensure_ascii=False) + "\n")
+            # 复核轮不再从命令行文本里抠工具名（那属于后端解析模型输出，是技术债）
             it = ev.get("item") or {}
             if (it.get("type") or "") == "command_execution":
-                cmd = (it.get("command") or "").replace("\n", " ")
-                m = re.search(r"jl-tool\s+([a-z_]+)", cmd)
-                if m:
-                    steps.append({"label": describe_tool(m.group(1), {}), "tool": m.group(1),
-                                  "state": "done", "secs": 0})
-                    _set_progress(task_id, steps)
+                steps.append({"label": "复核中", "tool": "review",
+                              "state": "done", "secs": 0})
+                _set_progress(task_id, steps)
     except Exception as exc:
         sys.stderr.write(f"[review] 复核轮失败：{exc}\n")
         return None
