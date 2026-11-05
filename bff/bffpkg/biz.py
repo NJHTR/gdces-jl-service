@@ -19,7 +19,7 @@ import pymysql
 这一层是「真值和规则」：状态机、字段校验、权限。
 未来抽成 Java 服务时，把这里的实现换掉即可，接口不变。
 """
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, list_schemas)
 
 
 # ---------------------------------------------------------------- handle_project_list
@@ -410,6 +410,16 @@ def handle_asr(body, user=None):
     return 200, {"code": 0, "data": {"text": text or "", "note": err or ""}}
 
 # ---------------------------------------------------------------- handle_doc_register
+def handle_doc_validate(body, user=None):
+    """只校验，不落库。agent 出稿前自己先查一遍，别等 register 被打回。"""
+    kind = (body.get("kind") or "").strip()
+    if not kind:
+        return 400, {"code": 400, "message": "kind 必填"}
+    fields = body.get("fields") or {}
+    check = validate_fields(kind, fields)
+    return 200, {"code": 0, "data": dict(check, kind=kind, schemas=list_schemas())}
+
+
 def handle_doc_register(body, user=None):
     """登记文书：只写数据库，不写文件。
 
@@ -431,8 +441,13 @@ def handle_doc_register(body, user=None):
     path = (body.get("path") or "").strip()
     commit = (body.get("commit") or "").strip()
 
-    missing = [k for k, v in fields.items() if not str(v or "").strip()]
+    # 齐不齐由 schema 说了算（占位词「待补」也算缺）
+    check = validate_fields(kind, fields)
+    missing = list(check["missing"]) + list(check["placeholder"])
     state = body.get("state") or ("待补" if missing else "待签")
+    # 模型说"待签"但字段还缺 —— 以 schema 为准，别让不齐的文书冒充可签
+    if missing and state == "待签":
+        state = "待补"
 
     exec_sql(
         "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "
@@ -444,7 +459,9 @@ def handle_doc_register(body, user=None):
     doc_id = rows[0]["id"] if rows else None
 
     audit(pid, (user or {}).get("id") or 1, "doc.create", f"doc:{doc_id}", commit)
-    return 200, {"code": 0, "data": {"docId": doc_id, "state": state, "missing": missing}}
+    return 200, {"code": 0, "data": {
+        "docId": doc_id, "state": state, "missing": missing,
+        "placeholder": check["placeholder"], "unknown": check["unknown"]}}
 
 
 # ---------------------------------------------------------------- handle_doc_get
@@ -469,7 +486,8 @@ def handle_doc_get(doc_id, user=None):
             bases = json.loads(bases)
         except Exception:
             bases = []
-    missing = [k for k, v in (fields or {}).items() if not str(v or "").strip()]
+    check = validate_fields(d["kind"], fields)
+    missing = list(check["missing"]) + list(check["placeholder"])
     return 200, {"code": 0, "data": {
         "id": d["id"], "projectId": d["project_id"], "kind": d["kind"], "obj": d["obj"],
         "state": d["state"], "fields": fields or {}, "missing": missing,
