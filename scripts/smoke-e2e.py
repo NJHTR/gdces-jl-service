@@ -167,6 +167,54 @@ def main():
     check("只改状态可签发", st == 200 and data.get("state") == "已签", "state=%s" % data.get("state"))
     check("库里是已签", (doc_row(doc_id) or {}).get("state") == "已签")
 
+    # 4.5) 带图链路：上传 → parts 带 image → 出稿（这是相机按钮走的路）
+    try:
+        import struct, zlib, tempfile
+        w = h = 64
+        raw = b"".join(b"\x00" + bytes((120, 160, 90)) * w for _ in range(h))
+        def chunk(t, d):
+            c = t + d
+            return struct.pack(">I", len(d)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+        png = (b"\x89PNG\r\n\x1a\n"
+               + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        tmp.write(png); tmp.close()
+        up = subprocess.run(
+            ["curl", "-s", "-m", "60", "-X", "POST", BASE + "/api/v1/upload",
+             "-F", "projectId=" + PROJECT, "-F", "userId=980", "-F", "kind=photo",
+             "-F", "file=@" + tmp.name + ";type=image/png"],
+            capture_output=True, text=True, timeout=90)
+        sha = ""
+        try:
+            sha = (json.loads(up.stdout).get("data") or {}).get("sha256") or ""
+        except Exception:
+            pass
+        check("上传图片拿到 sha", bool(sha), sha[:12])
+        if sha:
+            st, body = call("POST", "/api/v1/chat", {
+                "projectId": PROJECT, "userId": 980,
+                "clientId": "smoke-img-" + uuid.uuid4().hex[:8],
+                "text": "这张照片是 %d#楼南侧外架，出监理通知单" % random.randint(60, 99),
+                "parts": [{"type": "image", "blob": sha}],
+            })
+            tid2 = (body.get("data") or {}).get("taskId")
+            d2, seen2, total2 = wait_done(tid2) if tid2 else ({}, None, 0)
+            art2 = d2.get("artifact") or {}
+            msgs2 = [m for m in (d2.get("messages") or []) if m.get("role") == "assistant"]
+            reply = (msgs2[-1].get("text") or "") if msgs2 else ""
+            # 这里只验「图确实进了模型」：纯色图没有可用的现场信息，
+            # 模型正确拒绝凭它编通知单（实测回复「一片纯绿色，看不出内容」）。
+            # 所以断言的是「有回复、没报错」，不是「一定出稿」。
+            ok2 = bool(reply) and d2.get("status") == "done"
+            check("带图能进模型", ok2,
+                  "看到 %.0fs 完成 %.0fs 回复=%s" % (seen2 or -1, total2, reply[:24].replace("\n", " ")))
+            if art2.get("id"):
+                created.append(art2["id"])
+        os.unlink(tmp.name)
+    except Exception as exc:
+        check("带图能进模型", False, repr(exc)[:80])
+
     # 5) 反向：缺字段不许签
     st, b = call("POST", "/api/v1/docs", {
         "projectId": PROJECT, "kind": "监理通知单",
