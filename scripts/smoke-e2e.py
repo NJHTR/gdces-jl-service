@@ -215,6 +215,40 @@ def main():
     except Exception as exc:
         check("带图能进模型", False, repr(exc)[:80])
 
+    # 4.55) 照片沉淀：批注 → 能按描述搜回来（多模态沉淀的验收点）
+    try:
+        st, b = call("GET", "/api/v1/photos?projectId=" + PROJECT)
+        photos = b.get("data") or []
+        if isinstance(photos, dict):
+            photos = photos.get("items") or []
+        target = next((x for x in photos if x.get("sha256") == sha), None)
+        if target:
+            pid = target.get("id")
+            kw = "smoke批注%d" % random.randint(100, 999)
+            # 描述走 POST /photos/caption（参数是 sha256）；PATCH /photos/<id> 只改 place
+            # 必须带 overwrite=1：有描述时不覆盖（保护人工改过的描述），但仍返回 200。
+            # 第一次没带 → 存的是旧描述 → 后面按新关键词搜不到，白折腾一轮。
+            st, b = call("POST", "/api/v1/photos/caption",
+                         {"projectId": PROJECT, "sha256": sha, "caption": kw, "overwrite": 1})
+            check("照片批注", st == 200, "HTTP %s" % st)
+            # 搜索参数名是 q（不是 query）；中文必须 urlencode，
+            # 否则请求本身失败，而下面会把失败当成「0 条」—— 差点又误判成功能坏了。
+            from urllib.parse import quote
+            st, b = call("GET", "/api/v1/photos/search?projectId=%s&q=%s"
+                         % (PROJECT, quote(kw)))
+            hits = b.get("data") or []
+            if isinstance(hits, dict):
+                hits = hits.get("items") or []
+            ok = st == 200 and any(x.get("id") == pid for x in hits)
+            check("按描述搜回照片", ok,
+                  "HTTP %s 命中 %d 条" % (st, len(hits)))
+            if st != 200:
+                check("搜索接口可用", False, "错误：%s" % str(b)[:80])
+        else:
+            check("照片批注", False, "列表里找不到刚上传的那张")
+    except Exception as exc:
+        check("照片批注", False, repr(exc)[:80])
+
     # 4.6) 记忆 CRUD：小程序「记忆」页在用（新增 → 列表 → 停用 → 删除）
     st, b = call("POST", "/api/v1/memories", {
         "projectId": PROJECT, "scope": "project", "ownerId": PROJECT,
