@@ -92,6 +92,59 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 40 秒目标：达成（2026-11-06 03:55）
+
+### 关键的一步：`jl-tool` 没进 PATH
+
+轨迹里反复出现：
+
+```
+which jl-tool          → 空
+find -name jl-tool     → 找到才继续
+cat scripts/jl-tool    → 它去读源码
+```
+
+因为 `/home/baize/bin` 里没有 `jl-tool`，而引擎给的 PATH 是 `/home/baize/bin:…`。
+**加一个软链接就好了**（登录 shell 的 PATH 也包含这个目录）：
+
+```
+/home/baize/bin/jl-tool -> /home/baize/jl-service/scripts/jl-tool
+```
+
+### 顺带给 MCP 服务补了标准方法
+
+```
+resources/list → {resources: []}
+resources/templates/list → {resourceTemplates: []}
+prompts/list → {prompts: []}
+logging/setLevel → {}
+```
+
+引擎初始化时会问这些；不实现就是日志里的 `list（失败）`。
+（**注意：补了之后 MCP 工具仍然没进模型清单**，这条只是让协议更规范，别当成修好了。）
+
+### 复核员不再重复查
+
+它之前会 `cat` 两次 + `validate_doc` 跑 4 次（每次都要起容器）。
+现在把**缺项和状态直接从库里写进提示**，它只需读一次文件 —— 也顺带变准了：
+
+```
+复核意见（task 207）：
+  1.「必须改」检查结论为空。而事由已断言"存在安全隐患"——
+    结论没落、认定却先下了，文书自相矛盾，签发不成立。
+```
+
+### 实测（连续两单，同一用户）
+
+```
+第1单（35#楼）看到文书 24s / 完成 46s / shell 9
+第2单（36#楼）看到文书 11s / 完成 31s / shell 6
+第3单（37#楼）看到文书 40s / 完成 60s / 主链路 2 次工具调用
+```
+
+**主链路现在只有 2 次工具调用**：`search_standards` + `create_doc_draft`。
+也就是说：只要它不走弯路，40 秒内出稿是稳的。波动来自模型这一轮是不是决定先去翻文件。
+
 ## 时间到底花在哪：不是工具，是往返轮次（2026-11-06 03:40）
 
 ### 先量工具本身
