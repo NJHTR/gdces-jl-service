@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -91,6 +91,22 @@ const TOOLS = [
     },
   },
   {
+    name: "caption_photo",
+    description:
+      "给一张现场照片写一句描述（部位、工序、看到的问题、可见的量测/水印信息）。" +
+      "你刚看过图片时调用，让'看过'变成'记得'：下次检索能凭这句话找回这张图。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        sha256: { type: "string", description: "照片的 sha256（上传接口返回过）" },
+        caption: { type: "string", description: "一句话描述，写清楚部位+工序+问题" },
+        overwrite: { type: "boolean", description: "已有人写过描述时是否覆盖，默认 false" },
+      },
+      required: ["projectId", "caption"],
+    },
+  },
+  {
     name: "get_context",
     description: "一次性拿到项目信息 + 项目记忆 + 工作区路径。会话开始时用，省得连调几个工具。",
     inputSchema: {
@@ -108,6 +124,7 @@ const HANDLERS = {
   create_doc_draft: createDocDraft,
   validate_doc: validateDoc,
   get_context: getContext,
+  caption_photo: captionPhoto,
 };
 
 function send(msg) {

@@ -200,3 +200,24 @@ export async function getContext({ projectId }) {
     wsPath: wsPath(projectId),
   };
 }
+
+/* ---------------- caption_photo ---------------- */
+/**
+ * 给照片写一句描述（看过图之后自己写）。
+ * 描述是派生文本：图片本身仍在 blob 里，检索靠这句话。
+ */
+export async function captionPhoto({ projectId, sha256, caption, overwrite = false }) {
+  if (!caption) throw new Error("缺 caption");
+  if (!projectId && !sha256) throw new Error("projectId 或 sha256 至少给一个");
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}/api/v1/photos/caption`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, sha256, caption, overwrite: !!overwrite }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`写描述失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
+  }
+  return payload.data;
+}

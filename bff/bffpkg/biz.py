@@ -137,6 +137,7 @@ def append_manifest(project_id, entry):
         manifest = {"projectId": project_id, "photos": []}
 
     manifest.setdefault("photos", []).append(entry)
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)   # 新项目第一张照片会缺 photos/ 目录
     with open(abs_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=2)
 
@@ -162,6 +163,7 @@ def handle_upload(project_id, params, data):
         return 413, {"code": 413, "message": "超过 20MB"}
 
     sha, blob_path, size = store_blob(data)
+    # params 里已经合并了 query + 表单字段（见 api.py）
     place = q1(params, "place")
     weather = q1(params, "weather")
     shot_at = q1(params, "shotAt")
@@ -195,7 +197,7 @@ def handle_photo_list(params):
     if not project_id:
         return 400, {"code": 400, "message": "projectId 必填"}
     limit = min(int(q1(params, "limit", 20)), 100)
-    rows = q("SELECT id, sha256, blob_path, place, weather, shot_at, src, git_commit "
+    rows = q("SELECT id, sha256, blob_path, place, weather, shot_at, src, git_commit, caption "
              "FROM photo WHERE project_id=%s ORDER BY id DESC LIMIT %s", (project_id, limit))
     for r in rows:
         r["url"] = f"/api/v1/blobs/{r['sha256']}"
@@ -216,26 +218,45 @@ def handle_blob(sha):
 
 
 # ---------------------------------------------------------------- parse_multipart
-def parse_multipart(body, content_type):
-    """从 multipart/form-data 里抠出文件字节。wx.uploadFile 用的是这种。"""
+def parse_multipart_full(body, content_type):
+    """解析 multipart/form-data，返回 (文件字节, 字段字典)
+
+    wx.uploadFile 把 projectId 之类放在 formData 里（不是 query），
+    以前只抠文件、丢掉字段，导致上传永远进默认项目。这里把字段也带出来。
+    """
     import re as _re
     m = _re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type or "")
     if not m:
-        return b""
+        return b"", {}
     boundary = (m.group(1) or m.group(2)).strip()
     sep = b"--" + boundary.encode()
-    parts = body.split(sep)
-    for part in parts:
-        if b'name="file"' not in part and b"filename=" not in part:
-            continue
+    data_file, fields = b"", {}
+    for part in body.split(sep):
         idx = part.find(b"\r\n\r\n")
         if idx < 0:
             continue
-        data = part[idx + 4:]
-        if data.endswith(b"\r\n"):
-            data = data[:-2]
-        return data
-    return b""
+        head = part[:idx].decode("utf-8", "replace")
+        value = part[idx + 4:]
+        if value.endswith(b"\r\n"):
+            value = value[:-2]
+        name_m = _re.search(r'name="([^"]*)"', head)
+        if not name_m:
+            continue
+        name = name_m.group(1)
+        if "filename=" in head:
+            if name == "file" or b"filename=" in head.encode():
+                data_file = value
+        else:
+            try:
+                fields[name] = value.decode("utf-8")
+            except Exception:
+                fields[name] = ""
+    return data_file, fields
+
+
+def parse_multipart(body, content_type):
+    """从 multipart/form-data 里抠出文件字节。wx.uploadFile 用的是这种。"""
+    return parse_multipart_full(body, content_type)[0]
 
 
 # ---------------------------------------------------------------- default_project_id
@@ -685,6 +706,37 @@ def handle_photo_patch(photo_id, body, user=None):
         return 400, {"code": 400, "message": "place 必填"}
     exec_sql("UPDATE photo SET place=%s WHERE id=%s", (place, photo_id))
     return 200, {"code": 0, "data": {"id": photo_id, "place": place}}
+
+
+# ---------------------------------------------------------------- handle_photo_caption
+def handle_photo_caption(body, user=None):
+    """给照片补一句描述（agent 看完图写的那句话）。
+
+    不覆盖已有描述除非显式传 overwrite=1 —— 描述是人能改的，别被后来的一轮冲掉。
+    """
+    pid = (body.get("projectId") or "").strip()
+    sha = (body.get("sha256") or "").strip()
+    caption = (body.get("caption") or "").strip()
+    if not caption:
+        return 400, {"code": 400, "message": "caption 必填"}
+    if pid:
+        deny = guard_project(pid, user)
+        if deny:
+            return deny
+        rows = q("SELECT id, caption FROM photo WHERE project_id=%s AND sha256=%s "
+                 "ORDER BY id DESC LIMIT 1", (pid, sha))
+    elif sha:
+        rows = q("SELECT id, caption FROM photo WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
+    else:
+        return 400, {"code": 400, "message": "projectId 或 sha256 必填"}
+    if not rows:
+        return 404, {"code": 404, "message": "没找到这张照片"}
+    row = rows[0]
+    if (row.get("caption") or "").strip() and not body.get("overwrite"):
+        return 200, {"code": 0, "data": {"id": row["id"], "caption": row["caption"],
+                                         "skipped": True}}
+    exec_sql("UPDATE photo SET caption=%s, caption_at=NOW(3) WHERE id=%s", (caption[:500], row["id"]))
+    return 200, {"code": 0, "data": {"id": row["id"], "caption": caption[:500]}}
 
 
 # ---------------------------------------------------------------- handle_stats
