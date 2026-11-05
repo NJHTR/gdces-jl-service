@@ -1111,7 +1111,9 @@ def transcribe_audio(blob_sha, language="zh"):
     if not src:
         return None, "找不到音频"
 
-    wav = "/tmp/jl-asr.wav"
+    # 按次隔离：以前是全局共用的 /tmp/jl-asr.wav，
+    # 两个人同时发语音会互相覆盖，其中一个人拿到别人的转写。
+    wav = "/tmp/jl-asr-%s.wav" % uuid.uuid4().hex[:10]
     try:
         import imageio_ffmpeg
         ff = imageio_ffmpeg.get_ffmpeg_exe()

@@ -821,7 +821,8 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
     ws = WS_ROOT + "/" + project_id
     # 复核线程用一个空目录当 cwd：项目 AGENTS.md 里写着多 agent 的用法，
     # 复核员读了会跑去试 spawn_agent，而不是审文书（实测过）。
-    clean_cwd = "/tmp/jl-review"
+    # 按任务隔离：以前所有复核共用一个 /tmp/jl-review，并发时会互相踩
+    clean_cwd = "/tmp/jl-review-%s" % task_id
     try:
         os.makedirs(clean_cwd, exist_ok=True)
     except Exception:
