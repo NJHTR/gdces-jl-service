@@ -1,0 +1,44 @@
+diff --git a/easycode-rs/core/src/client.rs b/easycode-rs/core/src/client.rs
+index 6dd9040f..93dbe929 100644
+--- a/easycode-rs/core/src/client.rs
++++ b/easycode-rs/core/src/client.rs
+@@ -1013,13 +1013,19 @@ impl ModelClient {
+         if !is_openai {
+             for item in &mut input {
+                 item.clear_internal_chat_message_metadata_passthrough();
+-                if !matches!(
+-                    item,
+-                    ResponseItem::Reasoning { .. }
+-                        | ResponseItem::Compaction { .. }
+-                        | ResponseItem::ContextCompaction { .. }
+-                ) {
+-                    item.clear_encrypted_content();
++                // 第三方 Responses 实现（如阿里云百炼）不认识 encrypted_content，
++                // 收到会直接 400。这里对非 OpenAI 一律清掉，包括 Reasoning 项。
++                item.clear_encrypted_content();
++                // agent 消息（多 agent 交接）里的加密内容块也要去掉：
++                // 服务端只认 input_text / output_text，否则报
++                // "Invalid content type: encrypted_content"
++                if let ResponseItem::AgentMessage { content, .. } = item {
++                    content.retain(|part| {
++                        matches!(
++                            part,
++                            easycode_protocol::models::AgentMessageInputContent::InputText { .. }
++                        )
++                    });
+                 }
+                 if let ResponseItem::FunctionCall {
+                     encrypted_function_args,
+@@ -1037,7 +1043,11 @@ impl ModelClient {
+         .then_some(StreamOptions {
+             reasoning_summary_delivery: easycode_api::ReasoningSummaryDelivery::SequentialCutoff,
+         });
+-        let mut include = vec!["reasoning.encrypted_content".to_string()];
++        let mut include = if is_openai {
++            vec!["reasoning.encrypted_content".to_string()]
++        } else {
++            Vec::new()
++        };
+         if self.state.output_token_replay_enabled && is_openai {
+             include.push("output.encrypted_content".to_string());
+         }
