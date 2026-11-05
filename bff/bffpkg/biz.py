@@ -393,6 +393,46 @@ def audit(project_id, actor_id, action, target, detail=""):
         sys.stderr.write(f"[audit] 写失败 {action}: {e}\n")
 
 
+
+
+# ---------------------------------------------------------------- handle_doc_register
+def handle_doc_register(body, user=None):
+    """登记文书：只写数据库，不写文件。
+
+    分工：工作区里的文件和 git 提交由 Agent 侧的工具负责（它懂仓库和钩子），
+    数据库这一行由 biz 负责 —— 这样 doc 表只有一个写者。
+    """
+    pid = (body.get("projectId") or "").strip()
+    kind = (body.get("kind") or "").strip()
+    if not pid or not kind:
+        return 400, {"code": 400, "message": "projectId 和 kind 必填"}
+
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+
+    obj = (body.get("obj") or "").strip()
+    fields = body.get("fields") or {}
+    bases = body.get("bases") or []
+    path = (body.get("path") or "").strip()
+    commit = (body.get("commit") or "").strip()
+
+    missing = [k for k, v in fields.items() if not str(v or "").strip()]
+    state = body.get("state") or ("待补" if missing else "待签")
+
+    exec_sql(
+        "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        (pid, kind, obj or None, state, json.dumps(fields, ensure_ascii=False),
+         json.dumps(bases, ensure_ascii=False), path or None, commit or None))
+
+    rows = q("SELECT id FROM doc WHERE project_id=%s ORDER BY id DESC LIMIT 1", (pid,))
+    doc_id = rows[0]["id"] if rows else None
+
+    audit(pid, (user or {}).get("id") or 1, "doc.create", f"doc:{doc_id}", commit)
+    return 200, {"code": 0, "data": {"docId": doc_id, "state": state, "missing": missing}}
+
+
 # ---------------------------------------------------------------- handle_doc_get
 def handle_doc_get(doc_id, user=None):
     rows = q("SELECT id, project_id, kind, obj, state, fields, bases, path, git_commit, "
