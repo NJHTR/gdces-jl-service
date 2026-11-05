@@ -92,6 +92,45 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R7 第四步：多模态沉淀（2026-11-06 凌晨）
+
+### 做了什么
+
+```
+photo 表     加 caption / caption_at
+接口         POST /api/v1/photos/caption（有人写过就不覆盖，除非 overwrite）
+工具         caption_photo（agent 看完图自己写一句）
+列表         /api/v1/photos 带 caption
+```
+
+### 实测（三步都验了）
+
+```
+1) 上传 test-sandbox 的图 → photo 19，project_id=test-sandbox（不再进默认项目）
+2) 手动写描述 → {"id":19,"caption":"测试绿色色块…"}
+   再写一次 → {"skipped":true}（不覆盖）
+3) agent 自己看图 → 20 秒内写下
+   「纯红色（砖红色）色块图片，无文字、无水印、无可辨识场景或构件」
+   相册接口返回该 caption
+```
+
+### 顺手修了两个真 bug
+
+**① 上传的照片永远进第一个项目**
+
+小程序 `wx.uploadFile` 把 `projectId` 放在 **formData** 里，
+后端只从 query string 读 → 读不到就 `default_project_id()`。
+**结果：不管用户在哪个项目，图片全进最早创建的那个** ——
+这正是「沙盛四路的照片跑进云谷项目」的根源之一。
+
+修法：multipart 解析同时返回表单字段，解析顺序 query → 表单 → 默认。
+
+**② 新项目的第一张照片必然 500**
+
+`append_manifest` 直接写 `photos/manifest.json`，目录不存在就 FileNotFoundError。
+已先建目录。
+
+## 提交
 ## R7 第三步：冷启动知识包（2026-11-06 凌晨）
 
 ### 先说发现的事实：规范库几乎是空的
