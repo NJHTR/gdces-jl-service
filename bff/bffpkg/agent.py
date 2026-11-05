@@ -19,7 +19,7 @@ import pymysql
 留 Python：它跟子进程、文件、git 打交道。
 """
 from .appserver import run_stream
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
 
@@ -224,11 +224,8 @@ def build_context(project_id, user_id, query=None):
         "4. create_doc_draft 会把文件写进项目工作区并 git 提交。"
     )
     parts.append(
-        "【回复格式】最后一段话必须严格是下面三行（没有内容写「无」）：\n"
-        "结论：一句话说做了什么、结论是什么\n"
-        "依据：引用的规范号 + 条号，多条用、隔开；没有就写无\n"
-        "待补：还缺哪些信息，用、隔开；没有就写无\n"
-        "不要写文件路径、不要写提交号、不要用 Markdown、不要复述你查了哪些工具。"
+        "【说话方式】像一个监理工程师在跟同事说话：短、具体、说人话。"
+        "该说问题说问题，该说缺什么说缺什么，不用套模板，也不用复述你查了哪些工具。"
     )
     parts.append(f"【当前】项目 {project_id} · 用户 {user_id}")
     return "\n\n".join(parts)
@@ -635,6 +632,29 @@ def _parse_cli_jsonl(stdout):
                 timeline.append({"kind": "note", "icon": "think", "text": txt[:400],
                                  "output": txt[:2000]})
 
+        # ---- 子 agent 的活动（多 agent 时才有）----
+        elif kind == "sub_agent_activity":
+            stage = it.get("kind") or ""
+            model = it.get("model") or ""
+            if stage == "started":
+                label = "派子 agent" + ("（%s）" % model if model else "")
+            elif stage == "interacted":
+                label = "子 agent 有反馈"
+            else:
+                label = "子 agent " + (stage or "活动")
+            timeline.append({"kind": "note", "icon": "think", "text": label,
+                             "output": json.dumps(it, ensure_ascii=False)[:600]})
+
+        # ---- 子 agent 协作工具（spawn / wait / send_message …）----
+        elif kind == "collab_tool_call":
+            tool = it.get("tool") or ""
+            names = {"spawn": "派子 agent", "wait": "等子 agent 回报",
+                     "send_message": "给子 agent 发消息", "interrupt": "打断子 agent",
+                     "close": "收掉子 agent", "list": "看有哪些子 agent"}
+            timeline.append({"kind": "note", "icon": "think",
+                             "text": names.get(tool, "子 agent 协作：" + (tool or "")),
+                             "output": json.dumps(it, ensure_ascii=False)[:600]})
+
         # ---- 命令执行 ----
         elif kind == "command_execution":
             cid = it.get("id") or ""
@@ -707,18 +727,24 @@ def _set_progress(task_id, steps):
 # ---------------------------------------------------------------- _run_cli_turn
 # ---------------------------------------------------------------- _review_pass
 REVIEW_PROMPT = (
-    "上一轮你刚出了文书（doc id={doc_id}）。现在做复核，不要重复出稿：\n"
-    "1. 先调 validate_doc 看字段齐不齐；\n"
-    "2. 打开工作区里最新的文书文件读一遍，逐条检查：结论有没有事实依据、"
-    "有没有自相矛盾、有没有编造规范条号；\n"
-    "3. 该改就用 create_doc_draft 出新版（不要手改旧文件）；不该改就明确说「无需修改」。\n"
-    "最后仍然按三行格式回复：结论 / 依据 / 待补。"
+    "刚出完文书（doc id={doc_id}），现在做复核。\n"
+    "复核要用子 agent：调 spawn_agent（这是引擎自带的工具，不是 jl-tool 命令行），"
+    "agent_type 填 reviewer，把文书路径、你的关键判断、用户的原始要求都告诉它。\n"
+    "它给意见后：有「必须改」的用 create_doc_draft 出新版；没有就说无需修改。\n"
+    "重要问题原样列出来，别改写成你自己的话。\n"
+    "如果 spawn_agent 真的调不通，就明说调不通，然后自己按同样清单审一遍 —— "
+    "不要把没试过的说成不可用。"
 )
 
 
 def _review_pass(task_id, project_id, doc_id, first_text):
     """出稿后的自检一轮。返回 (文本, 时间线, 新 doc_id) ；失败返回 None"""
     prompt = REVIEW_PROMPT.format(doc_id=doc_id)
+    # 子 agent 可以用别的模型：让便宜/快的模型去挑毛病，省主模型的额度
+    review_model = (os.environ.get("REVIEW_MODEL") or "").strip()
+    if review_model:
+        prompt += ("\n（派子 agent 时把 model 参数填 " + review_model +
+                   "，reasoning_effort 用默认即可）")
     lines, steps = [], []
     try:
         for ev in run_stream(project_id, prompt):
@@ -757,12 +783,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         except FileNotFoundError:
             pass
 
-        hint = (
-            "\n\n[输出要求] 最后一句话请严格写成三行，不要写别的东西：\n"
-            "结论：一句话说做了什么、结论是什么\n"
-            "依据：规范号 + 条号；没有就写无\n"
-            "待补：还缺哪些字段，用、隔开；没有就写无"
-        )
+        # 不再要求固定格式：模型用自己的话说，结构由数据和工具给
+        hint = ""
         # 两种后端共用后面的解析：事件来源不同，事件形状一样
         proc = None
         if ENGINE_MODE == "appserver":
@@ -919,7 +941,7 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                         (project_id, user_id, f"rv-{task_id}-{int(time.time())}",
                          clean_reply(rtext),
                          json.dumps(rtrace, ensure_ascii=False) if rtrace else None,
-                         "复核", 0, task_id))
+                         "复核（子 agent）", 0, task_id))
                     sys.stderr.write(f"[review] task {task_id} 复核完成 doc={rdoc}\n")
                     # 复核可能出了新版，任务指向最新的那份
                     doc_row = {"id": rdoc} if rdoc else doc_row

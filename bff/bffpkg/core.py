@@ -777,20 +777,8 @@ def run_tool(name, args):
 
 
 # ---------------------------------------------------------------- ANSWER_KEYS
-ANSWER_KEYS = {
-    "结论": "conclusion",
-    "依据": "basis",
-    "待补": "gaps",
-    "缺项": "gaps",
-    "下一步": "next",
-}
-
 
 # ---------------------------------------------------------------- ANSWER_RE
-ANSWER_RE = re.compile(
-    r"^[\s*#\-【\[]*(结论|依据|待补|缺项|下一步)[】\]]*\s*[：:]\s*(.*)$"
-)
-
 
 # ---------------------------------------------------------------- REF_RE
 REF_RE = re.compile(
@@ -881,7 +869,12 @@ def _split_num(s):
 
 # ---------------------------------------------------------------- build_answer
 def build_answer(doc, cites, text):
-    """只产出"行内标注"所需的数据：富文本片段 + 待补字段名。不做表格。"""
+    """结构一律从数据来，不从模型的话里抠。
+
+    gaps  —— 按 schema 校验文书字段（validate_fields）
+    cites —— 工具输出（search_standards 的结果）里带的条号
+    text  —— 模型自己的话，原样保留，只做基础清洗
+    """
     text = clean_reply(text)
 
     missing = []
@@ -892,44 +885,14 @@ def build_answer(doc, cites, text):
                 fields = json.loads(fields)
             except Exception:
                 fields = {}
-        missing = [k for k, v in fields.items() if not str(v or "").strip()]
+        check = validate_fields(doc.get("kind") or "", fields)
+        missing = list(check["missing"]) + list(check["placeholder"])
 
     return {
-        "rich": rich_reply(text, missing),
+        "rich": rich_reply(text, missing if missing else None),
         "gaps": missing,
         "text": text,
     }
-
-
-# ---------------------------------------------------------------- parse_answer
-def parse_answer(text):
-    """把'结论：…\n依据：…\n待补：…'拆成字段。拆不出来就返回 None。"""
-    if not text:
-        return None
-    out = {}
-    loose = []
-    for raw in text.splitlines():
-        line = raw.strip().strip("*").strip()
-        if not line:
-            continue
-        m = ANSWER_RE.match(line)
-        if m:
-            key = ANSWER_KEYS[m.group(1)]
-            val = m.group(2).strip()
-            if val:
-                out[key] = (out.get(key, "") + " " + val).strip() if key in out else val
-            else:
-                out.setdefault(key, "")
-        else:
-            loose.append(line)
-
-    if not out.get("conclusion") and not out.get("basis"):
-        # 模型没按格式来：退化成启发式拆分，保证界面永远有结构
-        return enrich_answer(_split_by_heuristic(text))
-
-    if loose:
-        out.setdefault("rest", " ".join(loose))
-    return enrich_answer(out)
 
 
 # ---------------------------------------------------------------- BOLD_RE
@@ -1000,57 +963,8 @@ def split_gaps(text):
     return items[:6]
 
 
-# ---------------------------------------------------------------- enrich_answer
-def enrich_answer(ans):
-    """给结构化回答补上富文本分段和 chips。"""
-    if not ans:
-        return None
-    for key in ("conclusion", "gaps", "rest"):
-        if ans.get(key):
-            ans[key + "Rich"] = rich_segments(ans[key])
-    if ans.get("basis"):
-        # 依据里全是规范号，拆数字反而难读
-        ans["basisRich"] = [{"s": "t", "v": ans["basis"]}]
-    items = split_gaps(ans.get("gaps"))
-    if items:
-        ans["gapItems"] = items
-    return ans
-
-
 # ---------------------------------------------------------------- STD_RE
 STD_RE = re.compile(r"((?:GB|JGJ|CJJ|DB|JG)\s?[0-9T]+\s?[-–—]\s?[0-9]{2,4})(?:\s*第?\s*([0-9.]+)\s*条)?")
-
-
-# ---------------------------------------------------------------- _split_by_heuristic
-def _split_by_heuristic(text):
-    """不要格式也能拆：结论取第一句，依据抠标准号，待补取含'缺/待补/未提供'的句子。"""
-    text = (text or "").strip()
-    if not text:
-        return None
-    sents = [x.strip() for x in re.split(r"(?<=[。！？；\n])", text) if x.strip()]
-    if not sents:
-        return None
-
-    out = {"conclusion": sents[0][:200]}
-
-    codes = []
-    for m in STD_RE.finditer(text):
-        code = m.group(1).replace(" ", "")
-        clause = m.group(2)
-        item = code + (" 第" + clause + "条" if clause else "")
-        if item not in codes:
-            codes.append(item)
-    if codes:
-        out["basis"] = "、".join(codes[:3])
-
-    gaps = [s for s in sents[1:] if re.search(r"待补|缺|未提供|不详|没有给|留待", s)]
-    if gaps:
-        out["gaps"] = " ".join(gaps[:2])[:160]
-
-    rest = [s for s in sents[1:] if s not in gaps]
-    if rest:
-        out["rest"] = "".join(rest)[:600]
-    return out
 
 
 # ---------------------------------------------------------------- clean_reply
