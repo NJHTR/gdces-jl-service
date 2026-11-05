@@ -92,6 +92,37 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R7 第一步：每用户 EASYCODE_HOME（2026-11-05 深夜）
+
+**做了什么**：BFF 给每个用户准备一个引擎家目录，起 app-server 时传 `EASYCODE_HOME`。
+
+```
+data/homes/<userId>/
+  ├── config.toml        从主配置复制，并在 [features] 里加 memories = true
+  ├── memories/          引擎自动维护（raw_memories.md / rollout_summaries/）
+  ├── sessions/          该用户的会话
+  └── skills/            该用户私有技能
+```
+
+**实测**：
+
+```
+用户 201 → data/homes/201/memories/{raw_memories.md, rollout_summaries/, extensions/}
+用户 202 → data/homes/202/memories/{...}（各自独立）
+进程环境：EASYCODE_HOME=/home/baize/jl-service/data/homes/201
+config: [features] 里 memories = true（feature.memories=true 已确认）
+```
+
+**踩的坑（重要）**：第一次把 `memories = true` 追加到配置文件**末尾**，
+结果它成了最后一个表（`[agent_roles.reviewer]`）的键，引擎根本没启用记忆。
+→ 必须插在 `[features]` 表**里面**。这和之前 `[features]` 必须放在顶层键之后
+是同一类坑：**TOML 的表边界靠位置决定，不靠缩进**。
+
+**还没验证的**：记忆**内容**。引擎的记忆管线在会话启动时跑，
+只处理最多 2 条历史 rollout；我们这两轮内容太轻（只回"好"），
+`raw_memories.md` 仍是 "No raw memories yet"。
+需要一次真实出稿会话，再重启一次触发提取，才能确认内容能落下来。
+
 ## 线路统一：彻底去掉旧中转（2026-11-05 深夜）
 
 **问题**：换到百炼之后，`llm()`（学习、记忆抽取、旧的 tool-loop 用它）
