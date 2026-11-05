@@ -230,7 +230,9 @@ def main():
             # 第一次没带 → 存的是旧描述 → 后面按新关键词搜不到，白折腾一轮。
             st, b = call("POST", "/api/v1/photos/caption",
                          {"projectId": PROJECT, "sha256": sha, "caption": kw, "overwrite": 1})
-            check("照片批注", st == 200, "HTTP %s" % st)
+            saved = ((b.get("data") or {}).get("skipped") is not True)
+            check("照片批注", st == 200 and saved,
+                  "HTTP %s skipped=%s" % (st, (b.get("data") or {}).get("skipped")))
             # 搜索参数名是 q（不是 query）；中文必须 urlencode，
             # 否则请求本身失败，而下面会把失败当成「0 条」—— 差点又误判成功能坏了。
             from urllib.parse import quote
