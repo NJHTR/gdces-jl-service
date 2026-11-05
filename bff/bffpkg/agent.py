@@ -830,13 +830,30 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
     # 直接把文件路径给复核员。
     # 之前让它"去 docs 下找最新那份"，它只看了 docs/ 根目录，
     # 而文件在 docs/2026-11-05/ 里 —— 于是它得出"文书实质不存在"的错误结论。
-    doc_path = ""
+    doc_path, doc_fields, doc_state = "", {}, ""
     try:
-        rows = q("SELECT path FROM doc WHERE id=%s", (doc_id,))
-        if rows and rows[0].get("path"):
-            doc_path = ws + "/" + rows[0]["path"]
+        rows = q("SELECT path, fields, state FROM doc WHERE id=%s", (doc_id,))
+        if rows:
+            row = rows[0]
+            if row.get("path"):
+                doc_path = ws + "/" + row["path"]
+            f = row.get("fields")
+            if isinstance(f, str):
+                try:
+                    f = json.loads(f)
+                except Exception:
+                    f = {}
+            doc_fields = f or {}
+            doc_state = row.get("state") or ""
     except Exception:
         pass
+
+    # 缺项和依据直接从库里给，别让复核员自己去查/试 —— 它之前重复跑了 4 次 validate_doc
+    try:
+        _chk = validate_fields((doc_fields.get("kind") or ""), doc_fields) if isinstance(doc_fields, dict) else {}
+    except Exception:
+        _chk = {}
+    missing = (_chk or {}).get("missing") or []
     prompt = (
         "你是独立复核会话。给你一份已经写完的监理文书，请审它。\n"
         "不要派子 agent，不要重写文书，也不要改文件 —— 只列问题。\n\n"
@@ -845,10 +862,11 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
         "工作区：" + ws + "\n"
         "用户的原始要求：" + ((user_text or "").strip() or "（用户只发了图片/语音，没写文字）")[:300] + "\n"
         "这一轮用户发的图片：" + (("共 %d 张，见附件" % len(images)) if images else "无") + "\n\n"
-        "怎么审（最多用 2 次工具，别反复搜）：\n"
+        "已知（不用再查）：缺项 " + ("、".join(missing[:8]) if missing else "无") + "；"
+        "状态 " + (doc_state or "未知") + "\n"
+        "怎么审（只用 1 次工具）：\n"
         "1. 读上面这个「文件」路径（它一定存在；不要凭目录列表猜测）；\n"
-        "2. 需要时跑一次 /home/baize/jl-service/scripts/jl-tool validate_doc 看字段；\n"
-        "3. 不再检索规范 —— 依据是否成立，直接按文书里写的内容判断。\n"
+        "2. 不要跑 validate_doc、也不要检索规范 —— 缺项已给你，依据按文书内容判断。\n"
         "审的重点：结论有没有事实依据、有没有自相矛盾、条号是否与内容对得上。\n"
         "输出格式：直接写审查意见本身，逐条列问题，每条标「必须改 / 建议改 / 可忽略」；"
         "没有问题就写「无需修改」。\n"
