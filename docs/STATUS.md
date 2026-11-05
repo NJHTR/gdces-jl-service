@@ -92,6 +92,55 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R4 第一块：多 agent 打通（2026-11-05）
+
+**结果**：`spawn_agent` 能用了。子 agent 真的跑完任务并把结果交回给父 agent。
+
+```
+父：派一个 explorer 子 agent，让它回答一句话
+子：跑了完整的工作区探索，返回了一大段项目概况
+父：子 agent 已回复……核心信息是：子 agent 在线，能正常接收任务并返回结果
+encrypted_content 报错次数：0
+```
+
+**怎么解开的**：不是换线路，是在能编译的环境里打补丁。
+
+关键发现：**报错的不是推理项，是 agent 消息里的加密内容块**。
+
+```
+错误原文：Invalid content type: encrypted_content.
+          Supported types for assistant role are: 'input_text', 'output_text'.
+```
+
+`clear_encrypted_content()` 对 `AgentMessage` 这个变体是**跳过**的
+（`protocol/src/models.rs` 里的 match 分支），所以多 agent 交接时
+那块 `encrypted_content` 会一路带到请求里。
+
+**补丁**（`patches/0001-non-openai-drop-encrypted-content.patch`）：
+
+1. 非 OpenAI 一律清掉加密内容（原来 Reasoning 项被豁免）
+2. 不再请求 `reasoning.encrypted_content`
+3. **额外**：`AgentMessage` 的 content 只保留 `InputText`
+
+**编译方法**（服务器上没有 C 编译器，但有构建镜像）：
+
+```bash
+cd /home/baize/jl-service/repos/easycode
+docker run --rm -v $PWD:/src -w /src/easycode-rs \
+  -e CARGO_HOME=/src/.cargo-home \
+  -e RUSTY_V8_ARCHIVE=/src/v8lib.a \
+  -e RUSTY_V8_SRC_BINDING_PATH=/src/v8binding.rs \
+  jl-easycode-build:local cargo build --release -p easycode-cli --bin easycode
+# 再 strip 一下：1412MB → 283MB
+docker run --rm -v $PWD:/src jl-easycode-build:local strip /src/easycode-rs/target/release/easycode
+```
+
+编译耗时约 11~13 分钟（首次全量）。镜像里 rustc 1.95 + gcc 12 都有。
+
+**注意**：换二进制前必须先停 BFF 和 app-server，否则 `cp` 报 `文本文件忙`。
+重启后要确认 8081 端口没被旧进程占着（会报 `Address already in use`，
+而那时代码其实还是旧的）。
+
 ## 复核轮（2026-11-05 已上线）
 
 **做了什么**：出稿之后，在同一个会话里再跑一轮，让 agent 自己复核 ——

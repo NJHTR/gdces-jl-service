@@ -143,7 +143,7 @@ chat 协议下所有工具调用都落在 `functions` 命名空间；
 第三方 Responses 实现（阿里云百炼）不支持，子 agent 起不来。
 把 `model_reasoning_summary` 改成 `none` 也没绕过。
 
-**结论**：多 agent 的代码路径是通的，**卡在模型服务兼容性上**。
+**结论（已推翻，见下）**：当时以为是模型服务兼容性；实际是引擎没清 `AgentMessage` 里的加密内容块。
 要跑通需要"完整实现 Responses（含 encrypted_content 透传）"的服务，
 比如官方 OpenAI 或同类中转 —— 我们现在的中转额度为 0。
 
@@ -316,6 +316,23 @@ MCP（`mcp_servers.jl`） | 配置了但路由不通 | 🔴 我们用 `jl-tool` 
    —— 决定断线续跑怎么做，以及是否值得常驻。
 
 验证方法：每项都用最小用例，把 `--json` 事件流里的证据贴进 `STATUS.md`。
+
+
+### 1.8 已验证可用（2026-11-05，打了补丁之后）🟢
+
+打补丁后实测：
+
+```
+父 agent 派一个 explorer 子 agent → 子 agent 跑完 → 父 agent 收到结果
+encrypted_content 报错次数：0
+```
+
+**补丁要点**：`AgentMessage` 的 content 里可能带 `encrypted_content` 块，
+`clear_encrypted_content()` 对这个变体是跳过的，所以非 OpenAI 服务端会 400。
+补丁对非 OpenAI 只保留 `InputText`。
+
+补丁文件：`patches/0001-non-openai-drop-encrypted-content.patch`
+编译方法见 `STATUS.md` 的「R4 第一块」。
 
 ### 1.6 第二轮实测：换模型也没用（2026-11-05）
 
