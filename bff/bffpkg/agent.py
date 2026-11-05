@@ -795,7 +795,11 @@ def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text
         sys.stderr.write("[review] 异步复核失败 task %s：%s\n" % (task_id, exc))
     finally:
         try:
-            exec_sql("UPDATE task SET status='done', finished_at=NOW(3) WHERE id=%s", (task_id,))
+            # doc_id 必须在这里写：走复核分支时主路径已经 return 了，
+            # 那边那条 UPDATE 根本不会执行 → task.doc_id 永远 NULL
+            # → /api/v1/tasks/<id> 的 artifact 永远为空（客户端拿不到这一单的文书）。
+            exec_sql("UPDATE task SET status='done', doc_id=%s, finished_at=NOW(3) WHERE id=%s",
+                     (doc_id, task_id))
         except Exception:
             traceback.print_exc()
         try:
