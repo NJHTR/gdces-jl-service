@@ -215,6 +215,23 @@ def main():
     except Exception as exc:
         check("带图能进模型", False, repr(exc)[:80])
 
+    # 4.6) 记忆 CRUD：小程序「记忆」页在用（新增 → 列表 → 停用 → 删除）
+    st, b = call("POST", "/api/v1/memories", {
+        "projectId": PROJECT, "scope": "project", "ownerId": PROJECT,
+        "text": "smoke 测试用记忆（自动删除）",
+    })
+    mid = (b.get("data") or {}).get("id")
+    check("建记忆", st in (200, 201) and bool(mid), "id=%s" % mid)
+    if mid:
+        st, b = call("GET", "/api/v1/memories?projectId=%s&ownerId=%s" % (PROJECT, PROJECT))
+        items = (b.get("data") or {}).get("list") if isinstance(b.get("data"), dict) else b.get("data")
+        found = any(str(x.get("id")) == str(mid) for x in (items or []))
+        check("记忆出现在列表里", found, "共 %d 条" % len(items or []))
+        st, b = call("PATCH", "/api/v1/memories/%s" % mid, {"status": 0})
+        check("停用记忆", st == 200, "HTTP %s" % st)
+        st, b = call("DELETE", "/api/v1/memories/%s" % mid)
+        check("删除记忆", st in (200, 204), "HTTP %s" % st)
+
     # 5) 反向：缺字段不许签
     st, b = call("POST", "/api/v1/docs", {
         "projectId": PROJECT, "kind": "监理通知单",
