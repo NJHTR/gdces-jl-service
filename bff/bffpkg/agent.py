@@ -231,11 +231,21 @@ def build_context(project_id, user_id, query=None):
     except Exception:
         pass
 
+    # 规范库有多大：这是事实，而且是每轮都变的事实，不能写死在提示词里。
+    # 它决定了「搜一次没有就是没有」，省掉反复换关键词的空搜（实测能省 10~30 秒）。
+    try:
+        n_std = q("SELECT COUNT(*) AS n FROM standard")[0]["n"]
+        parts.append("【规范库】现有 %s 条条文（搜一次没有，就是没有；别换关键词反复搜）" % n_std)
+    except Exception:
+        pass
+
     # ---- 以下三行是「指针」，不是行为规则 ----
     # 工具清单不写死：跑 `jl-tool list` 永远是最新的（以前写死过，加工具忘了改）。
     parts.append(
         "【交付】出文书必须用 `jl-tool create_doc_draft` —— 它写文件、提交、入库。\n"
         "手写 md 不会出现在系统里，用户看不到（实测过）。工具报错要重试或明说，不许改成手写。\n"
+        "**缺的字段留空就行**（validate_doc 会标出来，人可以在手机上补），"
+        "不要为了凑齐而追问 —— 监理员在工地上没空回答五连问，先出稿。\n"
         "工具清单跑 `jl-tool list`；用法、出稿流程、说话风格见 "
         "`data/knowledge/skills/`，需要时再读。"
     )
@@ -774,11 +784,11 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
         "工作区：" + ws + "\n"
         "用户的原始要求：" + ((user_text or "").strip() or "（用户只发了图片/语音，没写文字）")[:300] + "\n"
         "这一轮用户发的图片：" + (("共 %d 张，见附件" % len(images)) if images else "无") + "\n\n"
-        "怎么审：\n"
-        "1. 用 /home/baize/jl-service/scripts/jl-tool validate_doc 查字段齐不齐"
-        "（kind 和 fields 从文书里取）；\n"
-        "2. 用绝对路径读 " + ws + "/docs 下最新那份文书；\n"
-        "3. 逐条核对：结论有没有事实依据、有没有自相矛盾、引用的条号是否真的检索到。\n"
+        "怎么审（最多用 2 次工具，别反复搜）：\n"
+        "1. 读 " + ws + "/docs 下最新那份文书（一次读命令）；\n"
+        "2. 需要时跑一次 /home/baize/jl-service/scripts/jl-tool validate_doc 看字段；\n"
+        "3. 不再检索规范 —— 依据是否成立，直接按文书里写的内容判断。\n"
+        "审的重点：结论有没有事实依据、有没有自相矛盾、条号是否与内容对得上。\n"
         "输出格式：直接写审查意见本身，逐条列问题，每条标「必须改 / 建议改 / 可忽略」；"
         "没有问题就写「无需修改」。\n"
         "不要写 FINAL_ANSWER / Sender / Payload 这类信封，也不要描述你是怎么审的。"
@@ -979,6 +989,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
 
         # 出了文书先复核；复核结果并进同一条消息，不单独占气泡
         review_text = ""
+        turn_ms = int((time.time() - started) * 1000)
+        review_t0 = time.time()
         try:
             if (ENGINE_MODE == "appserver" and doc_row
                     and (os.environ.get("REVIEW_PASS") or "1") != "0"):
@@ -995,6 +1007,11 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     sys.stderr.write("[review] task %s 复核完成 doc=%s\n" % (task_id, rdoc))
         except Exception as exc:
             sys.stderr.write("[review] 复核轮异常：%s\n" % exc)
+
+        # 阶段耗时：出稿（turn）vs 复核（review）vs 总计 —— 用来判断 40 秒目标差在哪
+        review_ms = int((time.time() - review_t0) * 1000)
+        sys.stderr.write("[perf] task %s turn=%dms review=%dms total=%dms cmds=%d\n"
+                         % (task_id, turn_ms, review_ms, turn_ms + review_ms, len(trace)))
 
         answer = build_answer(doc_row, cites, final_text)
         if review_text:
