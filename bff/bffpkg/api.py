@@ -263,6 +263,11 @@ def main():
     threading.Thread(target=sweeper, daemon=True).start()
     start_jobs()
     try:
+        from .agent import refresh_all_agents
+        refresh_all_agents()
+    except Exception as _e:
+        print('[agents] 启动刷新失败:', _e, flush=True)
+    try:
         sync_standards()
     except Exception:
         traceback.print_exc()

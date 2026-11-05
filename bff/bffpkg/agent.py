@@ -1160,6 +1160,32 @@ def render_agents_md(project_id, user_id):
     return ctx
 
 
+def refresh_all_agents(user_id=1):
+    """把所有项目的 AGENTS.md 重写一遍。
+
+    为什么要这个：AGENTS.md 只在「这个项目跑过任务」时才重写，
+    于是改了模板之后，久没用的项目还挂着旧版（yun-gu-3qi 一直是 2778 字节的老版本）。
+    """
+    done = []
+    try:
+        rows = q("SELECT id FROM project ORDER BY id")
+    except Exception as e:
+        print("[agents] 取项目失败: %r" % (e,), flush=True)
+        return done
+    for row in rows:
+        pid = row.get("id") or row.get("project_id")
+        if not pid:
+            continue
+        try:
+            render_agents_md(pid, user_id)
+            done.append(pid)
+        except Exception as e:
+            print("[agents] %s 重写失败: %r" % (pid, e), flush=True)
+    if done:
+        print("[agents] 已重写 %d 个项目: %s" % (len(done), ",".join(done)), flush=True)
+    return done
+
+
 def _unregistered_docs(project_id, started_at):
     """本轮新增但没入库的文书文件（按文件名对账，不看模型输出）"""
     ws = f"{WS_ROOT}/{project_id}"
