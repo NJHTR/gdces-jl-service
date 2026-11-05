@@ -193,3 +193,31 @@ env_key = "DASHSCOPE_API_KEY"
 
 **什么情况推翻**：如果要离线部署（工地没网），这些云能力全部不可用，
 那时才需要考虑本机 whisper + 本地 VLM。
+
+---
+
+## D12 · wire_api 必须是 responses，不能用 chat
+
+**背景**：为了换线路把 `wire_api` 从 `responses` 改成了 `chat`（百炼兼容模式）。
+结果多 agent 工具全部 `unsupported call`，MCP 工具也调不通。
+
+**决定**：**任何有命名空间的工具，都要求 `wire_api = "responses"`。**
+
+**证据**：
+
+```
+chat 协议：    tool_name="spawn_agent" tool_namespace="functions"   → unsupported call
+responses 协议：tool_name="spawn_agent" tool_namespace="collaboration" → 派发成功
+```
+
+chat 协议把工具调用统一落到 `DEFAULT_FUNCTION_NAMESPACE = "functions"`，
+而多 agent 注册在 `collaboration`、MCP 注册在各自的 server 命名空间，
+注册表按「命名空间 + 名字」精确匹配 → 查不到。
+`functions` 是保留命名空间，改 `tool_namespace` 也进不去。
+
+**代价**：chat 协议的模型（很多国产模型只提供 chat 兼容模式）只能用到
+默认命名空间的内置工具（`exec_command`、`apply_patch`、`view_image` 等），
+**用不了多 agent 和 MCP**。
+
+**什么情况推翻**：如果 easyCode 后续在 chat 适配层做了「扁平化再还原」的映射，
+这个限制就没了。到时候要重新测一遍，别照抄这条结论。
