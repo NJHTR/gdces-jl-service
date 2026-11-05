@@ -92,6 +92,62 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 时间到底花在哪：不是工具，是往返轮次（2026-11-06 03:40）
+
+### 先量工具本身
+
+```
+单次 jl-tool 调用（含 docker run）  0.47s
+一次出稿 14~20 次工具调用          ≈ 7~10s
+```
+
+**所以工具不是瓶颈。** 真正的成本是**每一次调用都要模型重新思考一轮**：
+14~20 轮 × 2~3 秒 = 30~50 秒。
+
+### 更贵的是「找路」
+
+task 202 的前 8 次调用全是找路：
+
+```
+ls data/knowledge/skills/
+cat jl-tool.md / output-style.md
+python -c 'import jl_tool...'      ← 它以为有 python 模块
+find -name '*.py' | head
+which jl-tool; find -name 'jl-tool'
+cat scripts/jl-tool                ← 它去读工具源码
+```
+
+原因是我在技能文档里写了「工具已经直接提供给你，直接调用」——
+**但 MCP 工具在常驻会话里实际没生效**，它照着文档找不到工具，就去翻文件系统。
+
+### 改成真话
+
+技能文档改成：**`jl-tool <名字> '<JSON>'`，命令在 PATH 里；不要去找实现**
+（并注明：等 MCP 生效后这段就该删）。
+
+### 效果
+
+```
+task 202（改之前）：52s 看到文书、shell 20 次、list 失败 1 次
+task 203（改之后）：46s 看到文书、shell 14 次、工具调用 6 次（search_standards×2, get_context×2,
+                   search_records×1, create_doc_draft×1）
+```
+
+**46 秒，离 40 秒还差一点。** 剩下的差额全在轮次上：14 次 shell 里还有读文件、查目录。
+
+### 结论：真正的解法是让 MCP 工具生效
+
+MCP 生效后：工具直接进模型可见的清单，不需要「找路」，也不需要 shell 包一层 ——
+预估能省 8~10 轮 ≈ 20 秒，40 秒目标对带图也能达成。
+
+### 下一轮的两条路（都已确认可行）
+
+1. **继续修 MCP**：现在只知道「MCP 管理器在初始化、`required=true` 也不报错」，
+   但工具没进清单。下一步要读 `core/src/session/mcp_runtime.rs` 的 refresh 逻辑，
+   看工具是怎么合并进工具表的（文件:行号）。
+2. **退路**：把 8 个工具做成原生 shell 别名（`jl-draft`/`jl-search` 等），
+   省掉一层 JSON 和 docker（0.47s → 0.05s），但轮次省不了。
+
 ## 带图慢的真正原因：MCP 工具没生效（2026-11-06 03:25）
 
 ### 证据
