@@ -139,12 +139,21 @@ export async function createDocDraft({ projectId, kind, obj, fields, bases = [],
   const commit = gitCommit(projectId, message, [relPath]);
   const state = missing.length ? "待补" : "待签";
 
-  await q(
-    `INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [projectId, kind, obj || null, state, JSON.stringify(fields || {}), JSON.stringify(bases), relPath, commit]
-  );
-  const row = await one(`SELECT id FROM doc WHERE git_commit = ? ORDER BY id DESC LIMIT 1`, [commit]);
+  // 数据库这一行交给 biz 服务登记，工具自己只写文件和提交 —— doc 表只有一个写者
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}/api/v1/docs/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      projectId, kind, obj: obj || "", state,
+      fields: fields || {}, bases, path: relPath, commit,
+    }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`登记文书失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
+  }
+  const row = { id: payload.data.docId };
 
   return { docId: row?.id || null, path: relPath, commit, missing, state, bytes: Buffer.byteLength(md) };
 }
