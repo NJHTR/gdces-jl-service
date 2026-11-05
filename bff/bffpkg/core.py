@@ -80,8 +80,7 @@ ENGINE_ENV = dict(
 
 
 # ---------------------------------------------------------------- stmt_57
-if ENV.get("JL_LLM_KEY"):
-    ENGINE_ENV["JL_LLM_KEY"] = ENV["JL_LLM_KEY"]
+# 旧中转的 key 不再注入（线路已统一到百炼，注入它只会让引擎能误连旧线路）
 
 # 备选线路（阿里云百炼）：env_key 里只写变量名，值在这里注入
 for _k in ("DASHSCOPE_API_KEY", "HUAGONG_VLM_TOKEN"):
@@ -615,11 +614,14 @@ def similar(a, b):
 
 
 # ---------------------------------------------------------------- LLM_URL
-LLM_URL = ENV.get("LLM_BASE", "https://llmapi.xfcxb.com/v1").rstrip("/") + "/responses"
+# 唯一线路：阿里云百炼。旧中转（xfcxb）已停用、额度为 0，代码里不再引用
+LLM_URL = (ENV.get("LLM_BASE")
+           or ENV.get("DASHSCOPE_BASE_URL")
+           or "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1").rstrip("/") + "/responses"
 
 
 # ---------------------------------------------------------------- LLM_MODEL
-LLM_MODEL = ENV.get("LLM_MODEL", "gpt-5.6-sol")
+LLM_MODEL = ENV.get("LLM_MODEL") or ENV.get("LLM_FALLBACK_MODEL") or "qwen3.7-plus"
 
 
 # ---------------------------------------------------------------- JL_TOOL_BIN
@@ -699,7 +701,7 @@ def llm(messages, max_tokens=1500, timeout=180):
     req = urllib.request.Request(
         LLM_URL, data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json",
-                 "Authorization": "Bearer " + ENV.get("JL_LLM_KEY", "")},
+                 "Authorization": "Bearer " + (ENV.get("DASHSCOPE_API_KEY") or "")},
         method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
