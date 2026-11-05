@@ -92,6 +92,65 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 用户体验修整（2026-11-05 晚）
+
+### 1. 回复不再套模板
+
+用户反馈回复生硬（每条都「结论/依据/待补」）。根因是**两头硬编码**：
+提示词逼模型写三行，后端再用正则把三行拆成字段。
+
+改法：
+
+- 提示词删掉格式要求，换成「像一个监理工程师在跟同事说话」
+- `build_answer` 的缺项改由 schema 算（`validate_fields`），引用由工具输出算
+- 删掉 `parse_answer` / `enrich_answer` / `_split_by_heuristic` / `ANSWER_RE` / `ANSWER_KEYS`
+
+实测回复变成了：
+
+```
+通知单已出，状态「待签」。要点：依据 JGJ 130-2011 第6.6.2条…签发人 陈志明
+需要调整内容或补充其他信息可以说。
+```
+
+### 2. 输入框乱码（电脑端）
+
+**根因**：`<textarea value="{{draft}}">` 配 `bindinput` 每次 `setData` 回写，
+这是受控输入。电脑端输入法合成、回车、粘贴时异步回写会冲掉光标位置，
+字符重复或错位，看上去就是乱码。搜索框 `value="{{query}}"` 同一个毛病。
+
+**改法**：value 只由程序设置（`draftSeed` / `querySeed`），
+打字过程正文放 `this._draft`（非响应式），界面只关心 `hasDraft`；
+草稿写 storage 改成 400ms 防抖（原来每敲一下写一次，会卡输入）。
+
+**同类隐患一并处理**：剪贴板粘贴、引用插入、发送后清空都统一走 seed，
+不会再出现“程序改一半、用户改一半”导致的光标错位。
+
+### 3. 下拉刷新串项目
+
+**根因**：`onRefresh()` 请求 `/api/v1/bootstrap` **没带 projectId**，
+后端就用默认项目 —— 刷新完看到的是别的项目的数据。
+
+改法：和 `loadAll` 一样带上 `this._projectId()`。
+
+### 4. 子 agent 想换模型，被引擎白名单挡住
+
+实测：给 `spawn_agent` 传 `model=qwen3.8-flash`，引擎回：
+
+```
+引擎不支持 qwen3.8-flash，可用模型只有 gpt-6.1-sol / gpt-6-astra / gpt-6-sol /
+gpt-6-luna / gpt-5.6-sol
+```
+
+**结论**：子 agent 的 `model` 参数只认引擎内置的模型目录（OpenAI 那套），
+我们这条百炼线路不在里面。所以 `REVIEW_MODEL` 暂时不用，
+子 agent 与主 agent 用同一个模型。
+
+### 5. 子 agent 活动进时间线
+
+`subAgentActivity` 和 `collabAgentToolCall` 现在会翻成时间线条目：
+「派子 agent（模型）」/「等子 agent 回报」/「给子 agent 发消息」。
+父 agent 的中间插话本来就在时间线里，现在能看出它到底在跟谁协作。
+
 ## R4 第一块：多 agent 打通（2026-11-05）
 
 **结果**：`spawn_agent` 能用了。子 agent 真的跑完任务并把结果交回给父 agent。
