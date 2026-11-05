@@ -16,6 +16,7 @@
   B. Python：函数体里调用的名字，是否在「模块级可见」的集合里
   C. JS：this._xxx(...) 的每个 xxx 是否有定义
   D. 硬编码体检（只能降不能升，基线记在 docs/STATUS.md）
+  F. 静默失败（except 后只有 pass 的地方）只能降不能升
   E. 各项目 AGENTS.md 的体量（判据：≤1200 字且不含工具清单/说话方式）
 
 用法：
@@ -205,6 +206,40 @@ def check_agents():
     return bad
 
 
+
+# ---------------------------------------------------------------- F: 静默失败
+def check_silent_except():
+    """数「except 后面只有 pass」的地方。
+
+    不是每一处都错（清理文件、杀进程时可以不管），
+    但这个数只能降不能升 —— 涨了就说明有人又在藏失败。
+    """
+    # 13 处已逐个看过，都是可以不管的：
+    #   FileNotFoundError ×4  删临时文件/清理
+    #   杀进程/终止进程 ×3    p.kill() / proc.terminate() / thread/close
+    #   调试转储 ×2           写 /tmp 日志
+    #   其余 ×4               命中计数、进度更新、列 schema、读消息兜底
+    # 涨了就要解释：新加的 except+pass 是不是在藏失败。
+    base = 13
+    n = 0
+    spots = []
+    for dirpath, _dirs, files in os.walk(os.path.join(ROOT, "bff", "bffpkg")):
+        for fn in sorted(files):
+            if not fn.endswith(".py"):
+                continue
+            p = os.path.join(dirpath, fn)
+            lines = io.open(p, encoding="utf-8", errors="replace").read().splitlines()
+            for i, line in enumerate(lines):
+                if re.match(r"\s*except[^:]*:\s*$", line):
+                    nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+                    if nxt == "pass":
+                        n += 1
+                        spots.append("%s:%d" % (os.path.relpath(p, ROOT), i + 1))
+    if n > base:
+        add("静默失败：%d 处 except+pass > 基线 %d（%s）" % (n, base, ", ".join(spots)))
+    say("  [静默失败] %d 处 except+pass（基线 %d）" % (n, base))
+    return n
+
 def main():
     say("preflight —— 提交前自检")
     total = 0
@@ -216,6 +251,7 @@ def main():
     else:
         say("  [JS] 跳过（找不到小程序目录）")
     check_hardcode()
+    check_silent_except()
     total += check_agents()
 
     print("")
