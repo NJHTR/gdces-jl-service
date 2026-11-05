@@ -917,7 +917,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
     """
     ws = f"{WS_ROOT}/{project_id}"
     os.makedirs(f"{ws}/.agent", exist_ok=True)
-    out_file = f"{ws}/.agent/last.md"
+    # 按任务隔离：以前是项目级共享的 last.md，同一项目两个人在跑时会互相覆盖
+    out_file = f"{ws}/.agent/last-{task_id}.md"
     started = time.time()
     try:
         render_agents_md(project_id, user_id)
@@ -1251,7 +1252,8 @@ def _parse_jsonl(stdout):
 def run_cli_turn(task_id, project_id, user_id, text):
     """一个任务 = 一次 easycode exec 子进程（不走 app-server，避开 code-mode）"""
     ws = f"{WS_ROOT}/{project_id}"
-    out_file = f"{ws}/.agent/last.md"
+    # 同样按任务隔离（同项目并发时不互相覆盖）
+    out_file = f"{ws}/.agent/last-{task_id}.md"
     started = time.time()
     try:
         render_agents_md(project_id, user_id)
