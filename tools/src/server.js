@@ -168,7 +168,7 @@ async function handle(msg) {
     case "initialize":
       return ok(id, {
         protocolVersion: PROTOCOL,
-        capabilities: { tools: {} },
+        capabilities: { tools: {}, resources: {}, prompts: {}, logging: {} },
         serverInfo: SERVER,
       });
 
@@ -177,6 +177,20 @@ async function handle(msg) {
 
     case "tools/list":
       return ok(id, { tools: TOOLS });
+
+    // MCP 标准里这几项是可选的，但引擎初始化时会问一遍。
+    // 不实现的话，日志里就是 `list（失败）`，而且工具可能整个不注册 —— 实测过。
+    case "resources/list":
+      return ok(id, { resources: [] });
+
+    case "resources/templates/list":
+      return ok(id, { resourceTemplates: [] });
+
+    case "prompts/list":
+      return ok(id, { prompts: [] });
+
+    case "logging/setLevel":
+      return ok(id, {});
 
     case "tools/call": {
       const name = params?.name;
