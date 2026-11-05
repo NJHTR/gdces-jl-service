@@ -92,6 +92,41 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 验证：修完之后 render-memory 真的活了（2026-11-06 06:05）
+
+core.py 那四处补导入之后，沿着这条路继续验，又发现一层：
+
+```
+POST /api/v1/projects/test-sandbox/render-memory
+修复前：500（NameError 被吞，实际是 render_project_memory 没导入）
+补导入后：500 [Errno 2] No such file …/memories/project.md   ← 目录不存在
+补 makedirs 后：200
+```
+
+**现在的结果**：
+
+```json
+{"code":0,"data":{"path":"memories/project.md","count":5,
+ "commit":"e75ee8d…","changed":true}}
+```
+
+```markdown
+# 项目记忆 · 测试沙箱（AI 自测用）
+- 整改回复必须附整改前后对比照片  <!-- learned · 用过 82 次 -->
+- 监理通知单允许先出草稿，受检单位、整改期限、签发人等字段可后续补充  <!-- learned · 用过 28 次 -->
+```
+
+**这条链路以前完全是死的**（记忆→文件→git 提交），没有任何人发现，
+因为异常被两层 try/except 吞掉了。
+
+### 这轮学到的
+
+```
+「静默失败」不是一个 bug，是一类 bug：
+  没导入 → except 吞 → 上层再 try → 最后只剩一个 500 或什么都不发生
+一层层剥：修好导入 → 露出目录不存在 → 再修 → 才好
+```
+
 ## 加了 preflight 自检，它立刻抓出 4 处旧 bug（2026-11-06 05:45）
 
 连续两轮埋了同一类雷（调用了不存在的东西），于是把它们做成可重复的检查：
