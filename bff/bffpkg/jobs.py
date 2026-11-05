@@ -153,6 +153,7 @@ def cleanup_temp(payload):
                 removed["dirs"] += 1
 
     for pattern in ("/tmp/jl-asr-*.wav",
+                    "/tmp/jl-appserver-*.log",          # 每用户一个，会随用户数累积
                     "/home/baize/jl-service/data/workspaces/*/.agent/last-*.md"):
         for path in glob.glob(pattern):
             with contextlib.suppress(OSError):
@@ -160,8 +161,17 @@ def cleanup_temp(payload):
                     _os.remove(path)
                     removed["files"] += 1
 
-    sys.stderr.write("[job] 清理临时产物：目录 %d 个、文件 %d 个\n"
-                     % (removed["dirs"], removed["files"]))
+    # 主日志加体积上限：超过 50MB 就留一份旧的，别让它无限长
+    log = "/home/baize/jl-service/runtime/bff.log"
+    try:
+        if _os.path.isfile(log) and _os.path.getsize(log) > 50 * 1024 * 1024:
+            _os.replace(log, log + ".1")
+            removed["rotated"] = 1
+    except OSError as exc:
+        print("[job] 日志轮转失败: %r" % (exc,), flush=True)
+
+    sys.stderr.write("[job] 清理临时产物：目录 %d 个、文件 %d 个、轮转 %d\n"
+                     % (removed["dirs"], removed["files"], removed.get("rotated", 0)))
     return removed
 
 
