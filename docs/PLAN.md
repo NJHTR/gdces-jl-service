@@ -114,6 +114,16 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 
 ---
 
+### R9 40 秒目标
+
+- [x] 加阶段计时（[perf] turn/review/total/cmds）
+- [x] 复核提示限定 2 次工具 → 复核 90s → 24~31s
+- [x] 注入『规范库 N 条』事实 → 出稿空搜减少
+- [x] 补回『缺项留空、不要追问』（回归修复）
+- [ ] 复核改异步：出稿先返回，复核后补（用户感知 ≈14s）
+- [ ] 规范库有内容后重测（依据检索会变慢，需重新度量）
+
+---
 ### R8 让记忆真的产出
 
 现状：管线跑，整理 agent 失败（`failed_agent`），`stage1_outputs` 为 0。
