@@ -567,3 +567,39 @@ doc 表没有记录（实测 3 份孤儿文件）。
 写之前让模型判断「这条是不是新的」，而不是算字符串相似度；每轮多一次小调用（1~3 秒）。
 
 **还债条件**：D28 被解决时，删掉 `similar()` 在 memory 写入路径上的调用。
+
+
+## D29 · 开鉴权前必须补的 13 个写接口权限校验（阻塞项）
+
+**怎么发现的**：`scripts/audit-auth.py` 静态比对「路由 → 处理函数 → 是否调用 guard_project」。
+
+**现状**：`member_of()` / `guard_project()` 存在且被 20 处调用，
+但下列**写接口没有项目级校验**（`AUTH_REQUIRED=0` 时全部放行，所以现在看不出问题）：
+
+```
+POST   /api/v1/docs                      handle_doc_create       建文书
+POST   /api/v1/docs/validate             handle_doc_validate     校验文书
+POST   /api/v1/memories                  handle_memory_create    写记忆
+PATCH  /api/v1/memories/(\d+)            handle_memory_patch     改记忆
+DELETE /api/v1/memories/(\d+)            handle_memory_delete    删记忆
+POST   /api/v1/projects/([\w-]+)/render-memory  handle_render_memory
+POST   /api/v1/tasks/(\d+)/retry         handle_task_retry       重试任务
+POST   /api/v1/project                   handle_project_save     存项目
+DELETE /api/v1/project                   handle_project_save     删项目
+POST   /api/v1/asr                       handle_asr              语音转写
+POST   /api/v1/standard                  handle_standard         写规范
+POST   /api/v1/projects                  handle_project_create   建项目（可放行：创建者即成员）
+POST   /api/v1/auth/logout               handle_logout           （可放行：只影响自己）
+```
+
+**为什么没现在改**：
+1. 这是安全策略变更，且 `AUTH_REQUIRED` 一开会影响小程序（需要先接微信登录）；
+2. 有些接口要区分「项目成员」和「平台管理员」，这是产品规则，得你定。
+
+**开鉴权的前置条件**：上面 13 个里除「建项目 / 退出登录」两个可放行外，
+其余 11 个必须加 `guard_project(project_id, user)`，并补一条回归用例
+（A 项目的人不能改 B 项目的文书）。
+
+**顺带记**：审这个的第一版脚本用「全局扫 handler 名再和路由 zip」对齐，
+结果只匹配到 1 条就宣称「全部做了校验」——**假阴性**。
+重写成「从路由行往后找处理函数」才拿到真数据。教训：审计脚本自己也要验证。
