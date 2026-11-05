@@ -1,0 +1,14 @@
+﻿# 大文件不入库
+repos/easycode/vendor/
+repos/easycode/.target/
+repos/easycode/.cargo-home/
+repos/easycode/v8lib.a
+repos/easycode/v8binding.rs
+data/
+runtime/
+tools/node_modules/
+*.log
+*.bak
+.env
+__pycache__/
+*.pyc
