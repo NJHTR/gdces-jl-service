@@ -92,6 +92,57 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R7 第二步：AGENTS.md 瘦身 + 找到一个真 bug（2026-11-06 凌晨）
+
+### AGENTS.md 瘦身：2778 → 607 字节
+
+只留四类：项目名、工程概况（一行）、参建单位（一行）、项目规矩、交付契约 + 指针。
+工具清单和说话风格搬到 `data/knowledge/skills/`（`jl-tool.md` / `output-style.md`）。
+
+**踩的坑**：把「必须用 create_doc_draft」整段删掉后，agent 改用 shell 手写 md 并声称完成，
+doc 表没有这行 —— 用户在系统里根本看不到这份文书。
+所以契约那一行必须留（`手写 md 不会出现在系统里`），它不是工具手册。
+
+### 顺手挖出一个真的线上 bug：文书根本没入库
+
+**现象**：任务 153/154 里 `create_doc_draft` / `validate_doc` 返回 `fetch failed`，
+agent 连续失败 5 次后手写文件，回复却说「已生成并提交」。
+
+**根因**：两处，缺一不可
+
+```
+1) BFF 只监听 127.0.0.1:8081（api.py 硬编码）
+2) MCP 工具容器跑在 jl-net（172.19.0.0/16）桥接网络里
+→ 容器里访问 host.docker.internal 也到不了只绑回环的 BFF
+对比：exec 路径的 jl-tool 用 --network host，所以能通 —— 这就是为什么时好时坏
+```
+
+**修法**：
+
+```
+api.py     绑定改成 BIND_HOST（默认 0.0.0.0）
+mcp-jl.sh  加 --add-host host.docker.internal:host-gateway
+           加 -e BFF_URL=http://host.docker.internal:8081
+```
+
+**验证**：
+
+```
+ss -ltnp → 0.0.0.0:8081
+任务 157：1 条助手消息、answer.review 2374 字、文书已入库、无 warning
+doc 82/83 出现在 doc 表（test-sandbox）
+```
+
+### 新增：出稿对账（防止静默丢文书）
+
+本轮工作区新增的 `docs/**/*.md`，如果 doc 表里没有对应 path，就在时间线记一条，
+并写进 `answer.warning`。实测抓到了 3 份手写文件。
+
+### 还发现一处重复复核
+
+`_run_cli_turn` 里同时存在「合并版复核」和「老版单独插一条消息」两段代码，
+导致每轮复核两次、多一个气泡。已删掉老段（1116 字符）。
+
 ## Loop 归属理清 + 服务侧调度器（2026-11-06 凌晨）
 
 **问题**：开发用的 loop 和服务要的 loop 混在一起，搞错地方不会报错，

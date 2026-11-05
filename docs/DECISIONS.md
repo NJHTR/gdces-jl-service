@@ -516,3 +516,36 @@ data/homes/<user>/  →  memories/ sessions/ skills/ config.toml
 
 **什么情况推翻**：如果去掉行为提示后，任务质量明显下降，
 就说明有些行为约束确实是必要的 —— 但要改成 skill，而不是塞回 AGENTS.md。
+
+---
+
+## D26 · BFF 绑 0.0.0.0，工具容器统一用 host-gateway 访问
+
+**背景**：MCP 工具容器在 jl-net 桥接网络，BFF 只绑 127.0.0.1，
+于是容器里的 `create_doc_draft` 永远 `fetch failed` —— 文书文件写了、库没进，
+agent 还会手写文件并声称完成。这个 bug 藏了很久，因为 exec 路径用 host 网络能通。
+
+**决定**：BFF 监听 0.0.0.0（可用 `BIND_HOST` 收回）；MCP 容器用
+`--add-host host.docker.internal:host-gateway` + `BFF_URL=http://host.docker.internal:8081`。
+
+**代价**：8081 在局域网可达。服务器无公网入口，公网访问走反向代理；
+以后加鉴权时要把这个口子一起收。
+
+**什么情况推翻**：如果 BFF 要做多机部署，就不该用 host-gateway，
+应该让 BFF 也进 jl-net、用容器名互相访问。
+
+---
+
+## D27 · 契约行保留在 AGENTS.md，只搬走工具手册
+
+**背景**：瘦身时把「必须用 create_doc_draft」也删了，结果 agent 改用 shell 手写文件，
+doc 表没有记录（实测 3 份孤儿文件）。
+
+**决定**：AGENTS.md 保留一行**领域契约**（出稿必须走工具、手写不算），
+但工具清单、参数、说话风格全部移进 skills。
+判据不是「是不是行为」，而是「**删了它会不会绕开工具的副作用**」。
+
+**代价**：这一行会随工具名变化而失效（改名时要改）。
+
+**什么情况推翻**：有了 PostToolUse 钩子能强制拦截「写了 md 但没入库」时，
+这行就可以删 —— 让机制兜底，而不是靠提醒。
