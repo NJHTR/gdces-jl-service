@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""jl-tool —— 把 MCP 工具包成命令行，供 agent 用 exec_command 直接调。
+
+    jl-tool list
+    jl-tool search_standards '{"query":"连墙件 间距"}'
+    jl-tool create_doc_draft '{"projectId":"yun-gu-3qi","kind":"监理通知单","obj":"4#楼东侧外架"}'
+
+为什么用临时文件喂请求，而不是 stdin：
+    引擎把命令放在 code-mode 沙箱里跑，stdin 的 EOF 传不进容器，
+    容器里的 node 会一直等输入 —— 表现为任务卡几分钟甚至挂死。
+    改成"写文件 → 挂进容器 → 重定向"，就完全不需要 stdin。
+
+为什么要有 jl-tool：
+    引擎的 MCP 工具路由在这套配置下调不通，但它的 shell 工具（exec_command）
+    是好的。把工具包成命令，agent 照样能用，而且 trace 里能看到具体执行了
+    什么命令——可追溯性反而更强。
+"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+ROOT = "/home/baize/jl-service"
+TIMEOUT = 60  # 单次工具调用的硬上限，超了就报错，绝不拖着整轮任务
+
+
+def env_password():
+    with open(f"{ROOT}/.env", encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("MYSQL_PASSWORD="):
+                return line.split("=", 1)[1].strip()
+    return ""
+
+
+def call(req):
+    init = {"jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {"protocolVersion": "2024-11-05", "capabilities": {},
+                       "clientInfo": {"name": "jl-tool", "version": "1"}}}
+    payload = json.dumps(init) + "\n" + json.dumps(req, ensure_ascii=False) + "\n"
+
+    fd, path = tempfile.mkstemp(prefix="jltool-", suffix=".jsonl")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+        os.chmod(path, 0o644)
+
+        cmd = [
+            "docker", "run", "--rm",
+            "--network", "jl-net",
+            "-e", f"MYSQL_PASSWORD={env_password()}",
+            "-v", f"{ROOT}/data/workspaces:/ws",
+            "-v", f"{ROOT}/data/blobs:/blobs",
+            "-v", f"{path}:/tmp/req.jsonl:ro",
+            "--entrypoint", "sh",
+            "jl-tools:local",
+            "-c", "node /app/src/server.js < /tmp/req.jsonl",
+        ]
+        p = subprocess.run(cmd, stdin=subprocess.DEVNULL,
+                           capture_output=True, timeout=TIMEOUT)
+        return (p.stdout.decode("utf-8", "replace"),
+                p.stderr.decode("utf-8", "replace"))
+    except subprocess.TimeoutExpired:
+        return "", f"工具超时（{TIMEOUT} 秒）"
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("用法: jl-tool <工具名|list> [JSON 参数]", file=sys.stderr)
+        return 2
+
+    tool = sys.argv[1]
+    if tool == "list":
+        req = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    else:
+        raw = sys.argv[2] if len(sys.argv) > 2 else "{}"
+        try:
+            args = json.loads(raw)
+        except json.JSONDecodeError as e:
+            print(f"参数不是合法 JSON: {raw}  ({e})", file=sys.stderr)
+            return 2
+        req = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+               "params": {"name": tool, "arguments": args}}
+
+    out, err = call(req)
+
+    # 只输出 tools/call 或 tools/list 那一条结果，别把 initialize 也吐出来
+    picked = None
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("id") == 2:
+            picked = obj
+            break
+
+    if picked is None:
+        print(f"工具没有返回结果。stderr:\n{err[:500]}", file=sys.stderr)
+        return 1
+
+    if "error" in picked:
+        print(json.dumps(picked["error"], ensure_ascii=False), file=sys.stderr)
+        return 1
+
+    result = picked.get("result", {})
+    content = result.get("content") or []
+    if content and isinstance(content, list):
+        texts = [c.get("text", "") for c in content if isinstance(c, dict)]
+        print("\n".join(texts))
+    else:
+        print(json.dumps(result, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
