@@ -3,7 +3,7 @@
 > 这是**唯一**的进度事实来源。开工先看它，收工更新它。
 > 更新规则：只写事实（有实测输出），不写"应该""大概"。
 
-**最后更新**：2026-11-05 13:40（+08:00）
+**最后更新**：2026-11-05 14:20（+08:00）
 
 ---
 
@@ -58,6 +58,32 @@ setsid nohup java -jar service-java/target/jl-biz-0.1.0.jar > /tmp/jl-biz.log 2>
 3. **分包 + 契约**（`b195163` / `e34b7a9`）2900 行单文件拆成四层，30 条路径标了所有权
 
 ---
+
+## 重大环境变化（2026-11-05）
+
+**xfcxb 中转额度耗尽**：`403 用户额度不足，剩余额度 $0.000000`。
+所有 AI 任务停摆，直到充值或换线路。
+
+**已找到并验证备选线路**——复用 `rokid_glass` 项目的阿里云百炼凭据
+（**不改对方的配置**，只把凭据复制到我们的 `.env`）：
+
+| 能力 | 模型 | 实测结果 |
+|---|---|---|
+LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考文本） |
+看图 | `qwen3.8-flash` | 200，能正确描述图片颜色 |
+语音识别 | `qwen-audio-3.0-asr-flash` | 200，`"欢迎使用阿里云。"` 识别正确 |
+隐患识别 | 华工 `hazard_vlm_detection` | 200，返回结构化风险判定 |
+
+已写入 `/home/baize/jl-service/.env`：`DASHSCOPE_*` / `ASR_*` / `HUAGONG_*`。
+**未做的事**：还没把引擎切到百炼（`wire_api = "chat"`），等确认。
+
+几个踩到的坑（记下来省得重踩）：
+- 百炼 ASR 对**静音**返回 `400` 且响应体是空的 `{}` —— 那不是鉴权失败，是"没听懂"
+- ASR 必须用原生接口 `/api/v1/services/aigc/multimodal-generation/generation`，
+  且 payload 是 `input.messages[].content[].input_audio.data`（data URI），
+  不是 OpenAI 的 `/audio/transcriptions`（这个端点 404）
+- ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
+- 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
 ## 已知问题（按严重程度）
 
