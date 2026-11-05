@@ -92,6 +92,51 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 收工归档（2026-11-05 晚）
+
+### 今天做完的（按时间）
+
+1. 引擎线路从中转切到百炼（qwen3.7-plus），带回 reasoning
+2. 多模态打通：图片走 `exec -i`、语音走 `/api/v1/asr`、任意组合
+3. 前端接 parts、文书页接真数据
+4. schema 校验（`validate_doc`）+ 12 份错标状态的文书修正
+5. 常驻 app-server（`ENGINE_MODE=appserver`），简单一轮 2.6 秒（原 8~14 秒）
+6. 多 agent 打通（补丁 0001：清掉 AgentMessage 里的 encrypted_content）
+7. 回复去掉「结论/依据/待补」模板，改由数据出结构
+8. 输入框乱码修复（受控输入 + 每次 setData 回写会导致光标错位）
+9. 附件区重做（flex-wrap 网格，替掉会塌的 scroll-view）
+10. 语音附件带上 tempFilePath（原来写死空串，永远传不上去）
+11. 子 agent 可换模型（补丁 0002 加 `qwen3.8-flash` + 开 `expose_spawn_agent_model_overrides`）
+
+### 今晚最后卡住的一件事（未解决，明天第一件）
+
+**复核会话的内容跑偏**。做法已经改成「开一条独立会话、用 reviewer 角色、
+指定 `REVIEW_MODEL=qwen3.8-flash`」，日志有 `[review] task 133 复核完成`，
+但输出内容是「spawn_agent 调不通…」这类元讨论，不是对文书的实际审查意见。
+
+已排除的：
+
+- 部署版本确实含新提示（`grep 你是独立复核会话 bff/bffpkg/agent.py` = 1）
+- 复核确实走了独立会话（日志有 review 完成记录，主线程消息只有两条）
+
+**还没查的**：独立线程会加载项目的 AGENTS.md，里面写着多 agent 的用法，
+reviewer 可能被它带偏（去试 spawn_agent 而不是读文书）。
+下一步要么给独立线程换 cwd（只读挂载），要么在 thread/start 里传更干净的 baseInstructions。
+
+### 附件上传另一个未确认点
+
+用户报「有 N 个附件没传上去」，但服务端日志里 `/api/v1/upload` **全是 200**。
+已改客户端：`res.data` 可能是对象而不是字符串（直接 `JSON.parse` 会抛错被吞），
+现在两种形态都接，并在拿不到 sha 时打印 statusCode + body。
+**是否修好要等用户重试后看控制台**，我没有真机验证能力。
+
+### 今天的数字
+
+```
+文书 77 | 消息 249 | 任务 133 | 记忆 14 | 审计 43 | 工作区提交 113
+硬编码体检 11（基线 11，全天从 12 降到 11 后未再上涨）
+```
+
 ## 附件区重做 + 三个前端 bug（2026-11-05 晚）
 
 ### 1. 附件条重做

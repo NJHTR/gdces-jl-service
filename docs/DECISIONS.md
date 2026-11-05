@@ -366,3 +366,31 @@ Responses 的线路，或者自己编带补丁的引擎。学校的中转不能�
 **什么情况推翻**：如果将来要按模型精确控制能力（比如真的关掉 verbosity），
 就得先把 `ModelInfo` 的校验规则读透、加一个能验证目录有效性的自检脚本，
 再动这些字段。
+
+---
+
+## D19 · 复核改用「独立会话」，不再让主 agent 自己 spawn
+
+**背景**：D16 定的是「同会话第二轮自审」，当时的理由是 spawn_agent 不通。
+后来多 agent 打通了，但实测主 agent 调 `spawn_agent` 仍会间歇性返回
+`unsupported call`（引擎内部路由问题，不是模型没试）。
+
+**决定**：复核由 BFF 开**一条独立线程**来做：
+
+```python
+thread/start { cwd, model: REVIEW_MODEL, developerInstructions: 复核员角色 }
+turn/start  { 让它读文书 + validate_doc }
+thread/close
+```
+
+好处：模型可选（`qwen3.8-flash` 便宜）、上下文干净、跑完就关，
+不依赖那个时好时坏的工具。
+
+**代价 / 未解决**：
+
+- 独立线程仍会加载项目 AGENTS.md，reviewer 会被里面的多 agent 说明带偏，
+  实测输出变成「spawn_agent 调不通」的元讨论，而不是审查意见（未解决）
+- 多一条线程要关，关失败会泄漏；已用 finally + try 兜住
+
+**什么情况推翻**：如果给独立线程做一个只读的干净 cwd（不含 AGENTS.md），
+或 `thread/start` 支持完全替换 baseInstructions，就该改成那种更彻底的做法。
