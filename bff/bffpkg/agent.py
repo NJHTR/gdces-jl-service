@@ -18,7 +18,7 @@ import pymysql
 
 留 Python：它跟子进程、文件、git 打交道。
 """
-from .appserver import run_stream
+from .appserver import run_isolated, run_stream
 from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
@@ -722,6 +722,68 @@ def _set_progress(task_id, steps):
                  (json.dumps(steps, ensure_ascii=False), task_id))
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------- _run_cli_turn
+# ---------------------------------------------------------------- _review_pass
+REVIEW_PROMPT = (
+    "刚出完文书（doc id={doc_id}），现在做复核。\n"
+    "复核要用子 agent：调 spawn_agent（这是引擎自带的工具，不是 jl-tool 命令行），"
+    "agent_type 填 reviewer，把文书路径、你的关键判断、用户的原始要求都告诉它。\n"
+    "它给意见后：有「必须改」的用 create_doc_draft 出新版；没有就说无需修改。\n"
+    "重要问题原样列出来，别改写成你自己的话。\n"
+    "如果 spawn_agent 真的调不通，就明说调不通，然后自己按同样清单审一遍 —— "
+    "不要把没试过的说成不可用。"
+)
+
+
+def _review_pass(task_id, project_id, doc_id, first_text):
+    """复核：开一条独立会话，用复核员角色 + 独立模型审这份文书。
+
+    为什么不再让主 agent 自己 spawn_agent：
+      实测那个工具时不时返回 unsupported call（引擎内部路由问题），
+      复核就变成了"自己审自己"，形同虚设。
+      独立会话是确定能用的：新开一条线程、指定模型和角色、跑完就关。
+    """
+    model = (os.environ.get("REVIEW_MODEL") or "").strip() or None
+    prompt = (
+        "你是独立复核会话，**不要派子 agent**，也不要重写文书，直接审这一份。\n"
+        "请复核这份监理文书（doc id=" + str(doc_id) + "）。\n"
+        "工作区：/home/baize/jl-service/data/workspaces/" + project_id + "\n"
+        "用户的原始要求：" + (first_text or "")[:400] + "\n\n"
+        "怎么审：\n"
+        "1. 先用 /home/baize/jl-service/scripts/jl-tool validate_doc 查字段齐不齐；\n"
+        "2. 打开工作区里最新的这份文书读一遍；\n"
+        "3. 逐条核对：结论有没有事实依据、有没有自相矛盾、引用的条号是否真的检索到。\n"
+        "输出：逐条列问题，每条标「必须改 / 建议改 / 可忽略」；没有问题就说无需修改。"
+    )
+    steps = []
+    try:
+        text, events = run_isolated(
+            project_id, prompt,
+            model=model,
+            developer_instructions=(
+                "你是监理文书复核员，只挑毛病，不重写文书，也不改文件。"
+                "说话要短、要具体，指出哪一句站不住、缺什么。"
+            ),
+        )
+    except Exception as exc:
+        sys.stderr.write(f"[review] 复核会话失败：{exc}\n")
+        return None
+
+    if not text:
+        return None
+
+    trace = [{"kind": "note", "icon": "think",
+              "text": "复核会话（模型 %s）" % (model or "默认"), "output": ""}]
+    for ev in events:
+        it = (ev.get("params") or {}).get("item") or {}
+        if it.get("type") == "commandExecution":
+            trace.append({"kind": "shell", "icon": "run",
+                          "text": ((it.get("command") or "")[:60]).replace("\n", " "),
+                          "output": (it.get("aggregatedOutput") or "")[:600],
+                          "state": "done", "secs": 0})
+    return text, trace, doc_id
 
 
 # ---------------------------------------------------------------- _run_cli_turn

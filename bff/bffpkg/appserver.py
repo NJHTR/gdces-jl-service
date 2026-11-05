@@ -39,6 +39,10 @@ _ITEM_MAP = {
     "error": "error",
     "functionCall": "function_call",
     "functionCallOutput": "function_call_output",
+    # 多 agent 的活动：子 agent 启动/交互，以及协作工具调用
+    "subAgentActivity": "sub_agent_activity",
+    "collabAgentToolCall": "collab_tool_call",
+    "mcpToolCall": "mcp_tool_call",
 }
 
 
@@ -134,6 +138,54 @@ class _Client:
                 raise AppServerError("引擎进程退出了")
             time.sleep(0.02)
         raise AppServerError("等 %s 超时" % method)
+
+    def open_thread(self, model=None, developer_instructions=None):
+        """开一条独立线程，不占用主线程。
+
+        复核用它：换一个模型、换一份角色说明，互不干扰。
+        比让主 agent 自己调 spawn_agent 可靠 —— 那个工具偶尔会报 unsupported。
+        """
+        params = {
+            "cwd": self.ws,
+            "approvalPolicy": "never",
+            "sandbox": "danger-full-access",
+        }
+        if model:
+            params["model"] = model
+        if developer_instructions:
+            params["developerInstructions"] = developer_instructions
+        res = self.call("thread/start", params, timeout=120)
+        return res.get("threadId") or (res.get("thread") or {}).get("id")
+
+    def run_on_thread(self, thread_id, prompt, timeout=600):
+        """在指定线程上跑一轮，返回 (文本, 事件列表)"""
+        start = len(self.notifications)
+        self.call("turn/start", {"threadId": thread_id,
+                              "input": [{"type": "text", "text": prompt}]}, timeout=120)
+        text_parts, events = [], []
+        t0 = time.time()
+        cursor = start
+        while time.time() - t0 < timeout:
+            ready = self.notifications[cursor:]
+            cursor = len(self.notifications)
+            for msg in ready:
+                events.append(msg)
+                if msg.get("method") == "item/agentMessage/delta":
+                    piece = (msg.get("params") or {}).get("delta") or ""
+                    if piece:
+                        text_parts.append(piece)
+                    continue
+                it = (msg.get("params") or {}).get("item") or {}
+                if msg.get("method") == "item/completed" and it.get("type") == "agentMessage":
+                    t = (it.get("text") or "").strip()
+                    if t:
+                        text_parts.append(t)
+                if msg.get("method") == "turn/completed":
+                    return "".join(text_parts).strip(), events
+            if not self.alive():
+                raise AppServerError("引擎进程中途退出")
+            time.sleep(0.05)
+        raise AppServerError("复核超过 %d 秒还没结束" % timeout)
 
     def ensure_thread(self, model=None):
         if self.thread_id:
@@ -248,3 +300,19 @@ def run_stream(project_id, prompt, images=None, timeout=600):
             raise AppServerError("引擎进程中途退出")
         time.sleep(0.05)
     raise AppServerError("这一轮超过 %d 秒还没结束" % timeout)
+
+
+def run_isolated(project_id, prompt, model=None, developer_instructions=None, timeout=600):
+    """开一条独立线程跑一轮，跑完就关。
+
+    给复核用：独立模型、独立角色、独立上下文，不污染主对话。
+    """
+    c = _client(project_id)
+    thread_id = c.open_thread(model=model, developer_instructions=developer_instructions)
+    try:
+        return c.run_on_thread(thread_id, prompt, timeout=timeout)
+    finally:
+        try:
+            c.call("thread/close", {"threadId": thread_id}, timeout=30)
+        except Exception:
+            pass
