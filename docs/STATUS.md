@@ -92,6 +92,37 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 服务侧定时任务验证通过（2026-11-06 06:45）
+
+`pending_docs_digest`（每天 18:00，统计待补文书）—— 之前从没手动验过。
+
+```
+GET  /api/v1/jobs                 → 1 个任务，last_status=ok，next 18:00
+POST /api/v1/jobs/pending_docs_digest/run
+     → {"projects": 3, "pending": 112}
+
+audit_log 里每个项目一条：
+  90  yun-gu-3qi   job.pending_docs  {"pending": 70}
+  89  test-sandbox job.pending_docs  {"pending": 40}
+  88  baiyun-a2    job.pending_docs  {"pending": 2}
+```
+
+**这条 loop 是纯统计 + 留痕**：不改状态、不发通知、不替人做决定。
+
+### 又一次查错了东西（同一个毛病第 3 次）
+
+```
+我第一次查「审计表最新一条」用了 audit，结果空 → 差点又下结论说「没写审计」
+实际表名是 audit_log
+
+同类的：
+  待补数量查成 0（shell 把引号吃了）→ 实际 112
+  猜测带图慢的原因三次，全错
+```
+
+**共同点：结果不合预期时，我先怀疑系统，而不是先怀疑自己的查询。**
+以后规定：任何一个「没有/为 0/为空」的结论，必须先换一种方式复核一次再说。
+
 ## 静默失败大扫除（2026-11-06 06:20）
 
 全仓 `except Exception` 有 **79 处**，其中「except 后面只有 pass」**13 处**。
