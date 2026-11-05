@@ -50,9 +50,50 @@ class AppServerError(Exception):
     pass
 
 
+HOMES_ROOT = os.environ.get("JL_HOMES_ROOT", "/home/baize/jl-service/data/homes")
+_MAIN_CONFIG = "/home/baize/.easycode/config.toml"
+
+
+def ensure_home(user_id):
+    """给每个用户准备一个 EASYCODE_HOME。
+
+    引擎的记忆根是 $EASYCODE_HOME/memories（memories/read/src/lib.rs:13），
+    所以「一个用户一个家目录」= 记忆、会话、技能天然隔离，
+    不用自己写一套隔离逻辑（也就不会写错）。
+    """
+    home = os.path.join(HOMES_ROOT, str(user_id))
+    cfg = os.path.join(home, "config.toml")
+    try:
+        os.makedirs(home, exist_ok=True)
+        if not os.path.exists(cfg):
+            base = ""
+            try:
+                with open(_MAIN_CONFIG, encoding="utf-8") as f:
+                    base = f.read()
+            except Exception:
+                base = ""
+            # 注意：必须插在 [features] 表**里面**。
+            # 追加到文件末尾的话，会变成最后一个表的键（之前就踩了：
+            # memories 落进 [agent_roles.reviewer]，引擎根本没启用记忆）。
+            lines = base.splitlines()
+            if "[features]" in lines:
+                at = lines.index("[features]")
+                if not any(l.strip().startswith("memories") for l in lines[at:]):
+                    lines.insert(at + 1, "memories = true")
+                base = "\n".join(lines) + "\n"
+            else:
+                base = base.rstrip() + "\n\n[features]\nmemories = true\n"
+            with open(cfg, "w", encoding="utf-8") as f:
+                f.write(base)
+    except Exception as exc:
+        sys.stderr.write("[home] 准备 %s 失败：%s\n" % (home, exc))
+    return home
+
+
 class _Client:
-    def __init__(self, project_id):
+    def __init__(self, project_id, user_id=1):
         self.project_id = project_id
+        self.user_id = user_id
         self.ws = os.path.join(WS_ROOT, project_id)
         self.proc = None
         self.thread_id = None
@@ -73,6 +114,8 @@ class _Client:
             env = dict(os.environ)
         env["HOME"] = env.get("HOME", "/home/baize")
         env["PATH"] = "/home/baize/bin:/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+        # 每个用户一个家目录：记忆/会话/技能自动隔离
+        env["EASYCODE_HOME"] = ensure_home(self.user_id)
         self.proc = subprocess.Popen(
             [ENGINE, "app-server"],
             cwd=self.ws,
@@ -232,7 +275,7 @@ def _client(project_id, user_id=1):
         if c is None or not c.alive():
             if c is not None:
                 c.close()
-            c = _Client(project_id)
+            c = _Client(project_id, user_id)
             c._spawn()
             _CLIENTS[key] = c
         return c
