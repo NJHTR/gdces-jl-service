@@ -85,3 +85,12 @@ R8 引擎记忆 全通（抽取 → 整理 → 注入，端到端验过）
 ├── repos/easycode/      引擎源码 + 构建产物
 └── docs/                本目录
 ```
+
+## 查事实的工具
+
+```
+python3 scripts/whatison.py          # 路由 + 表列 + 路径权限
+python3 scripts/preflight.py         # 提交前自检（引用/静默/硬编码）
+```
+
+**别猜路由名、列名、路径 —— 先跑这两个。**

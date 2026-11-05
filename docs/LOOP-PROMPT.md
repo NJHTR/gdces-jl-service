@@ -66,6 +66,7 @@ R9 先看轨迹，再下结论
    **轨迹里写着真话，结论里没有。**
 
 ========================== 第 0 步：读文档（读不完不许动手）==========================
+0. python3 scripts/whatison.py     真实路由 / 表列 / 路径权限（别猜）
 1. docs/GOAL.md                   北极星：为什么做、什么算成功、不做什么
 2. docs/ARCHITECTURE-KNOWLEDGE.md 知识/记忆怎么分层隔离（四层 scope）
 3. docs/ARCHITECTURE.md           当前系统怎么拼的
