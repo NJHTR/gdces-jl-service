@@ -153,9 +153,42 @@ export async function createDocDraft({ projectId, kind, obj, fields, bases = [],
   if (!resp.ok || payload.code !== 0) {
     throw new Error(`登记文书失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
   }
-  const row = { id: payload.data.docId };
+  // 状态和缺项以服务端为准：schema 在服务端，工具自己算出来的会和它对不上
+  const saved = payload.data || {};
 
-  return { docId: row?.id || null, path: relPath, commit, missing, state, bytes: Buffer.byteLength(md) };
+  return {
+    docId: saved.docId || null,
+    path: relPath,
+    commit,
+    state: saved.state || state,
+    missing: saved.missing || missing,
+    placeholder: saved.placeholder || [],
+    unknown: saved.unknown || [],
+    bytes: Buffer.byteLength(md),
+  };
+}
+
+/* ---------------- 校验文书字段 ---------------- */
+/**
+ * 出稿前先自查：按文书类型的 schema 看字段齐不齐。
+ *
+ * 为什么要有这一步：模型会把「待补」当成字段值写进去，写进库里就成了
+ * 「已填」，到现场才发现没写。schema 在服务端 schemas/<类型>.json，
+ * 工具这边不复制规则 —— 只问、不判。
+ */
+export async function validateDoc({ kind, fields }) {
+  if (!kind) throw new Error("缺 kind");
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}/api/v1/docs/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, fields: fields || {} }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`校验失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
+  }
+  return payload.data;
 }
 
 /* ---------------- 上下文（给引擎注入用，也做成工具） ---------------- */

@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, getContext } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -78,6 +78,19 @@ const TOOLS = [
     },
   },
   {
+    name: "validate_doc",
+    description:
+      "出稿前自查：按文书类型的 schema 检查字段齐不齐。占位词（待补/待定/未知…）会被当成缺。返回 {ok, missing, placeholder, unknown}。缺就继续打听/补齐，别硬写。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", description: "文书类型，如 监理通知单 / 监理检查记录" },
+        fields: { type: "object", description: "当前字段键值" },
+      },
+      required: ["kind"],
+    },
+  },
+  {
     name: "get_context",
     description: "一次性拿到项目信息 + 项目记忆 + 工作区路径。会话开始时用，省得连调几个工具。",
     inputSchema: {
@@ -93,6 +106,7 @@ const HANDLERS = {
   search_records: searchRecords,
   search_standards: searchStandards,
   create_doc_draft: createDocDraft,
+  validate_doc: validateDoc,
   get_context: getContext,
 };
 
