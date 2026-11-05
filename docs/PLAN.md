@@ -65,7 +65,57 @@
 - [ ] 多张照片：只受物理上限约束，不设业务上限
 - [ ] 前端：任意组合输入、多图预览
 
+
+## 路线（为什么是这个顺序）
+
+> 原则：**每一步都朝最终形态走，不做"先糊一版再推翻"。**
+> 判断标准：这一步产出的东西，在最终版本里还需要吗？需要才做。
+
+### R0 · 先验证地基（1 天）
+
+**动手写任何东西之前，先回答三个问题**（见 `EASYCODE-CAPABILITIES.md` 第七节）：
+
+- [ ] `spawn_agent` 真能派子 agent 吗（不通 → 多 agent 路线作废，退回单 agent）
+- [ ] 子 agent 能收到图片/音频吗（决定多模态给谁）
+- [ ] app-server 的 `thread/resume` 跨重启有效吗（决定断线续跑怎么做）
+
+**为什么排第一**：这三个答案会改变后面所有设计。先问路，再修路。
+
+### R1 · 多模态 parts（2 天）
+
+消息模型从 `text + photos` 改成 `parts` 数组 —— **这就是最终形态，不是过渡**。
+接百炼 ASR 转写、图片落工作区、前端任意组合输入。
+
+### R2 · 把"后端 if"换成"工具 + 钩子"（3 天）
+
+- 文书模板与 schema 放进项目工作区
+- `validate_doc` 工具 = 提交钩子用的同一份 schema
+- 删掉 `clean_reply` / `parse_answer` / `_cites_from_output` 这些替模型做判断的代码
+
+**为什么在 R3 之前**：先把规则搬到数据和钩子里，agent 换运行方式时才不会丢东西。
+
+### R3 · 常驻 agent server（3 天）
+
+`thread/start` + `turn/start` + 事件流 SSE。首次响应从 8 秒降到 1~2 秒。
+**只换执行方式，不改契约**。
+
+### R4 · 多 agent 拓扑（4 天）
+
+Orchestrator + Field/Reg/Draft/Review/Verify，`agent_max_depth=2`、`threads=6`。
+文件交接、预算与强制收敛。
+
+### R5 · 业务域收尾（3 天）
+
+project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
+
+### R6 · 上线前（3 天）
+
+`AUTH_REQUIRED=1` 全流程回归、Redis、对象存储、监控、压测。
+
+---
+
 ## 当前优先级
+
 
 1. **多模态接入**（M8，能力已验证，趁热接）
 2. 文书页接真数据（`GET /docs/:id` 已就绪，前端还在用假数据）
