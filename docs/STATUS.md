@@ -90,6 +90,18 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R0 地基验证（2026-11-05 完成）
+
+| 问题 | 结论 |
+|---|---|
+| 1. `spawn_agent` 能用吗 | **协议决定**：chat 下不可用；responses 下能派发、子线程真被创建，但子 agent turn 因 `encrypted_content` 不兼容失败（详见能力文档 1.5） |
+| 2. 子 agent 能收图/音频吗 | **未测**（被第 1 条卡住） |
+| 3. `thread/resume` 跨重启 | **未测** |
+
+**结论**：多 agent 的代码路径没问题，**卡在模型服务兼容性**。
+需要能完整实现 Responses（含 encrypted_content 透传）的线路；
+现在的中转额度为 0，百炼不兼容这一项。
+
 ## 已知问题（按严重程度）
 
 | # | 问题 | 影响 | 想怎么解 |
