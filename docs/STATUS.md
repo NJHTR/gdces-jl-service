@@ -168,6 +168,49 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 自愈是假的：重启会回到旧代码（2026-11-06 09:10）
+
+查 cron 时发现一个**比串单更隐蔽**的问题。
+
+### 原本的 healthcheck
+
+```bash
+pkill -f 'runtime/server.py'      # 但我们跑的是 runtime/entry.py
+nohup python3 runtime/server.py &  # ← 旧版单体文件（120KB）
+# 而且一个环境变量都没带
+```
+
+**后果**：BFF 挂掉 → healthcheck「重启成功」→ 实际跑的是旧代码，
+且 ENGINE_MODE/REVIEW_MODEL 全丢 → 退化成 CLI 模式、没有复核。
+**日志显示恢复，用户看到的是降级。**
+
+### 修法：唯一启动入口
+
+```
+scripts/start-bff.sh   环境变量集中在这（appserver / qwen3.7-plus / 复核 qwen3.8-flash）
+                       已在跑就跳过；旧进程两种入口都杀
+healthcheck.sh         只调用 start-bff.sh，不再自己拼命令
+crontab @reboot        也改成调 start-bff.sh
+```
+
+### 验证（真的杀掉再拉起）
+
+```
+1) 服务在跑 → start-bff.sh："已在运行，跳过"
+2) pkill -9 entry.py → healthz 无响应（符合预期）
+3) healthcheck.sh → 退出码 0
+   进程： python3 runtime/entry.py          ← 正确入口
+   日志： 启动 entry.py（appserver / 引擎 qwen3.7-plus / 复核 qwen3.8-flash）
+4) 重启后跑一单：48s 看到文书 / 65s 完成 / 复核 1308 字 / done
+```
+
+### 为什么这类问题最危险
+
+```
+它只在「已经出过故障」的时候生效 —— 而出故障时没人看得见细节。
+健康检查说恢复了，监控是绿的，实际是旧代码在跑。
+```
+
 ## 隔离的代价：临时产物会堆积，加了清理 loop（2026-11-06 08:30）
 
 上一轮把临时文件都改成按任务隔离（防串单），代价是**没人清就会一直堆**。
