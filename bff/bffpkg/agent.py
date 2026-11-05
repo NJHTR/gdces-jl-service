@@ -827,15 +827,26 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
     except Exception:
         clean_cwd = None
 
+    # 直接把文件路径给复核员。
+    # 之前让它"去 docs 下找最新那份"，它只看了 docs/ 根目录，
+    # 而文件在 docs/2026-11-05/ 里 —— 于是它得出"文书实质不存在"的错误结论。
+    doc_path = ""
+    try:
+        rows = q("SELECT path FROM doc WHERE id=%s", (doc_id,))
+        if rows and rows[0].get("path"):
+            doc_path = ws + "/" + rows[0]["path"]
+    except Exception:
+        pass
     prompt = (
         "你是独立复核会话。给你一份已经写完的监理文书，请审它。\n"
         "不要派子 agent，不要重写文书，也不要改文件 —— 只列问题。\n\n"
         "文书：doc id=" + str(doc_id) + "\n"
+        "文件：" + (doc_path or (ws + "/docs（下面按日期分子目录，用 find 找最新那份）")) + "\n"
         "工作区：" + ws + "\n"
         "用户的原始要求：" + ((user_text or "").strip() or "（用户只发了图片/语音，没写文字）")[:300] + "\n"
         "这一轮用户发的图片：" + (("共 %d 张，见附件" % len(images)) if images else "无") + "\n\n"
         "怎么审（最多用 2 次工具，别反复搜）：\n"
-        "1. 读 " + ws + "/docs 下最新那份文书（一次读命令）；\n"
+        "1. 读上面这个「文件」路径（它一定存在；不要凭目录列表猜测）；\n"
         "2. 需要时跑一次 /home/baize/jl-service/scripts/jl-tool validate_doc 看字段；\n"
         "3. 不再检索规范 —— 依据是否成立，直接按文书里写的内容判断。\n"
         "审的重点：结论有没有事实依据、有没有自相矛盾、条号是否与内容对得上。\n"
