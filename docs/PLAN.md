@@ -138,7 +138,8 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 - [x] `AGENTS.md` 瘦身到只留项目事实（607 字节，不含工具清单）
 - [x] `data/knowledge/` 冷启动知识包（规范/模板/技能），只读、git 版本化
       链路已通（文件→导入→检索），**内容待监理技术负责人核对后填入**
-- [x] 多模态沉淀：图片/语音入库时由 agent 写描述（caption_photo），原文件留 blob
+- [x] 多模态沉淀：图片由 agent 写描述（caption_photo）；语音转写自动写进 caption
+      **两种都能用 search_photos 按关键词查回来**
 
 **验收**：见 ARCHITECTURE-KNOWLEDGE 第八节（6 条，都能用命令验）。
 

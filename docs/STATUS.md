@@ -92,6 +92,29 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 语音沉淀（2026-11-06 01:45）
+
+和照片同一套机制：**说的和拍的都留一句话，能查回来**。
+
+```
+POST /api/v1/asr {blob}  →  转写
+                            → 若这条 blob 已有 photo 行且没描述
+                            → caption = "语音：<转写文本>"，saved=true
+检索                      →  search_photos 直接按关键词找到
+```
+
+**实测**（把一段真实语音复制到 test-sandbox 测，不动真实项目）：
+
+```
+转写: {"text":"哈喽哈喽哈喽。","saved":true}
+库:   id=22 test-sandbox  caption="语音：哈喽哈喽哈喽。"
+检索: search_photos q=语音 → 命中 1 条（id=22, src=voice）
+```
+
+**为什么写进 caption 而不是新建表**：
+语音和照片在库里本来就是同一张表（`photo`，靠 `src` 区分），
+描述字段已经能被 `search_photos` 检索 —— 再用一套表就是重复造。
+
 ## 记忆打通了（2026-11-06 01:45）—— R8 完成
 
 ### 完整链路（全部实测）
