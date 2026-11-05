@@ -771,6 +771,12 @@ def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text
     让复核挡在前面，等于让人干等一件"加分项"。
     """
     try:
+        # 先确认这条消息真的属于本单 —— 实测出现过复核内容被写进别一单的情况
+        owner = q("SELECT task_id FROM message WHERE id=%s", (message_id,))
+        if not owner or str(owner[0]["task_id"]) != str(task_id):
+            print("[review] 消息归属不符，跳过回写：message=%s 属于 task=%s，本单=%s"
+                  % (message_id, (owner[0]["task_id"] if owner else "?"), task_id), flush=True)
+            return
         got = _review_pass(task_id, project_id, doc_id, final_text,
                            images=images, user_text=text, user_id=user_id)
         if got:
@@ -1097,7 +1103,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                                    final_text, message_id, answer, trace, ms, trace_sum,
                                    cites, started),
                              daemon=True).start()
-            sys.stderr.write("[review] task %s 复核已转后台\n" % task_id)
+            sys.stderr.write("[review] task %s 复核已转后台（message=%s doc=%s）\n"
+                             % (task_id, message_id, doc_row["id"]))
             return
         exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, finished_at=NOW(3) WHERE id=%s",
                  (thread_id, new_doc[0]["id"] if new_doc else None, task_id))
