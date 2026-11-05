@@ -768,3 +768,50 @@ bootstrap / docs / tasks / stats / audit / members  全部 200
 2 | Redis | 起第二个 BFF 实例 | 每用户锁失效，两人同时改工作区 |
 3 | 队列 | 任务量超单机 | 只能同步排队，重启丢任务 |
 4 | Kafka | 要做实时看板/多下游 | 只能轮询数据库 |
+
+
+---
+
+## 推送不通的真相与解法（2026-11-06 08:50 实测）
+
+### 现象
+
+```
+git push → fatal: unable to access ...: OpenSSL SSL_connect: SSL_ERROR_SYSCALL
+```
+
+### 排查（不要停在「网络坏了」）
+
+```
+TCP 443 连通      → True
+TCP 22  连通      → True
+HTTPS 握手        → 失败（OpenSSL 与 schannel 都失败：failed to receive handshake）
+SSH 握手          → 成功（GitHub 回 Permission denied (publickey)，说明连上了，只是没授权）
+```
+
+**结论：不是断网，是 HTTPS 的 TLS 握手被中途重置；SSH 通道是好的。**
+
+### 解法（一次性）
+
+1. 本机公钥（把整行贴到 GitHub → Settings → SSH and GPG keys → New SSH key）：
+
+```
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCcKiGu1icjlwvoRoDZPRfjy7IAyMo+I2dxUW1mc3qWssI85qDQaRHkDGgEiU/yTvIeXQE5kZbF81LqYEtI333wXoc219qRGOfRWyDobwAnFG77k5h4qZvquHiKz1PNO6MhMsh34VdahfYf46UXv7GCVcpGitzpyuBXmAGdQqXQm9KgsrA2bE2vootFG5j5EE9MNiPGiX3hBoHwTCZtOPGXwAM17M9xqZYCfNT/O1i4I0WLCUX3cp7u7vg9M/SeZNL0ZUH/Mbgsw/m724Jjh6SrDQ5692iwZS14KrkMCDClsDWVWd4YrF7F7KMnFBwMxvy5PlrQVat7ar+qILd9dGxV csm@DESKTOP-7DT3AT7
+```
+
+指纹：`SHA256:S3CdKRsYZpG83+z0A/v4oUVIukyyiRTc12jTzzQE8E0`
+
+2. 已经配好 SSH 远端（没动 origin）：
+
+```bash
+cd /c/Users/NJHTR/IdeaProjects/jl-service
+git push ssh main            # 后端
+
+cd /c/Users/NJHTR/WeChatProjects/jl
+git push ssh main            # 小程序
+```
+
+### 为什么不用换 origin
+
+origin 走 HTTPS，在别的网络环境（比如公司网）可能是通的。
+保留它，SSH 作为备用通道 —— 两条都能用，不互相影响。
