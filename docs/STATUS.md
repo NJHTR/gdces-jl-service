@@ -92,6 +92,63 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 记忆打通了（2026-11-06 01:45）—— R8 完成
+
+### 完整链路（全部实测）
+
+```
+会话闲置 ≥1 小时            → phase1 claim 到 1 个候选
+phase1 抽取                 → stage1_outputs 出现真实内容（rollout_summary + raw_memory）
+整理（6 小时冷却期）         → memory_consolidate_global done
+产出                         → MEMORY.md + memory_summary.md 有内容
+新会话提问                   → 它真的答得出来（见下）
+```
+
+### 关键：整理出来的东西长什么样
+
+```markdown
+# Task Group: test-sandbox project (photo search, rectification output rules)
+
+scope: photo search via `search_photos` …
+applies_to: cwd=/home/baize/jl-service/data/workspaces/test-sandbox;
+            reuse_rule=safe to reuse for any future task in this project …
+
+## User preferences
+- when issuing a rule for this project, the user said:
+  "这个项目的整改回复必须附前后对比照片" -> 以后默认带上，不用再提醒
+- …"结论要写具体数字，不要写'基本符合'" -> …
+
+## Reusable knowledge
+- `search_photos` 接受 projectId / q，返回 id, sha256, caption …
+  例：q="绿色" 返回 id=19, caption="测试绿色色块…"
+
+## Failures and how to do differently
+```
+
+**格式完全符合设计**：Task Group + `scope:` + `applies_to: cwd=`（项目边界）+ 用户原话 + 可复用知识 + 失败记录。
+
+### 验收（三条都能复现）
+
+```
+1) 问「整改回复有什么要求」→ 答「必须附前后对比照片；结论要写具体数字，不要写基本符合」 9 秒
+2) 问「search_photos 返回什么字段、你查绿色时拿到了什么」
+   → 答出 id=19、sha256=66e504…4d954 —— 这个 sha 只存在于引擎记忆里
+      （MySQL 的 memory 表没有，AGENTS.md 也没有）
+```
+
+**第 2 条是决定性证据：它真的在读引擎的记忆文件。**
+
+### 两个时间常数（产品必须知道）
+
+```
+min_rollout_idle_hours   ≥ 1 小时（引擎 clamp 在 [1,48]，写 0 无效）
+整理冷却                  6 小时（PHASE2_SUCCESS_COOLDOWN_SECONDS = 6*60*60）
+```
+
+**含义：记忆是「隔一会儿才长出来」的，不是即时的。**
+今天下午说的话，最快一小时后进候选池，整理要等到冷却期结束。
+产品文案不能说「我刚说完它就记住了」。
+
 ## 记忆为什么是空的：找到根因了（2026-11-06 01:35）
 
 ### 根因：引擎把 `min_rollout_idle_hours` 钳死在 [1, 48]

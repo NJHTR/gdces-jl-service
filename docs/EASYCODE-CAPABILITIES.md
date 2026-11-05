@@ -389,3 +389,18 @@ rust-toolchain 要 1.95.0 | 镜像上没有该版本（stable 是 1.99.1） |
 
 **结论**：多 agent 目前被"编译环境 + 服务端兼容性"双重卡住。
 单 agent 走 responses 协议是通的，且能拿到 reasoning。
+
+### 记忆管线（memories）
+
+**置信度：🟢 已跑通（2026-11-06，端到端实测）**
+
+```
+开关        ~/.easycode/config.toml 或每用户家目录 [features] memories = true
+记忆根      $EASYCODE_HOME/memories（所以每用户一个家目录 = 天然隔离）
+phase1      会话闲置 ≥1h 才抽取（config/src/types.rs:431 clamp(1,48)）
+phase2      整理全局任务，成功后有 6h 冷却（state/src/runtime/memories.rs:26）
+产出        MEMORY.md（Task Group + scope + applies_to: cwd=） / memory_summary.md
+注入        use_memories=true 时 summary 进提示词
+排障        JL_APPSERVER_LOG=1 看 /tmp/jl-appserver-<user>.log
+            补丁 0004 在 start.rs / phase1.rs 打了关键日志
+```

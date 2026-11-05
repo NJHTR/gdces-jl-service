@@ -124,7 +124,10 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 - [x] 读 claim SQL：手工执行能选出 6 条候选，**排除 SQL 条件问题**
 - [x] 给引擎打日志补丁（补丁 0004），重编译后定位 → **根因是 idle_hours 被 clamp 到 ≥1 小时**
 - [x] 验证 phase1：回拨线程时间后 claim 1 个、抽取成功、stage1_outputs 有内容
-- [ ] 查 phase2：整理任务一直 pending（selected_for_phase2=0），MEMORY.md 仍为空
+- [x] 查 phase2：根因是 6 小时成功冷却（PHASE2_SUCCESS_COOLDOWN_SECONDS），绕过冷却后整理成功
+- [x] 验收：新会话能答出只存在于引擎记忆里的细节（photo id=19 / sha256）
+
+**R8 完成。** 记忆链路：闲置 ≥1h → 抽取 → 6h 冷却后整理 → MEMORY.md/summary 生效。
 
 ---
 ### R7 知识架构（终态，不返工）
