@@ -391,6 +391,41 @@ paths:
         '200': { description: 成功 }
 
   # ---------------------------------------------------------------- 对话
+  /api/v1/asr:
+    post:
+      tags: [agent]
+      x-owner: agent
+      summary: 语音转文字
+      description: |
+        把已上传的音频转成文字。前端流程：先 /upload 拿 sha，再调这里换文字。
+        内部走阿里云百炼 qwen-audio-3.0-asr-flash；静音音频返回空文本而不是错误。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [blob]
+              properties:
+                blob:
+                  type: string
+                  description: 上传后拿到的 sha256
+      responses:
+        '200':
+          description: 转写结果（text 可能为空字符串，表示没识别到语音）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: integer }
+                  data:
+                    type: object
+                    properties:
+                      text: { type: string }
+                      note: { type: string, description: 没识别到时的说明 }
+        '400': { description: 缺 blob }
+        '503': { description: 识别服务不可用 }
   /api/v1/chat:
     post:
       tags: [对话]
