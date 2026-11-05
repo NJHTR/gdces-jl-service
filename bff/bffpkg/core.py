@@ -656,11 +656,40 @@ def allowed_tools():
     if ALLOWED_TOOLS is None:
         try:
             p = subprocess.run([JL_TOOL_BIN, "list"], capture_output=True, text=True, timeout=60)
-            ALLOWED_TOOLS = set(json.loads(p.stdout.strip() or "[]"))
+            data = json.loads(p.stdout.strip() or "{}")
+            # jl-tool list 返回 {"tools": [...]}，也兼容直接给数组
+            items = data.get("tools") if isinstance(data, dict) else data
+            ALLOWED_TOOLS = {t.get("name") for t in (items or []) if t.get("name")}
         except Exception:
             ALLOWED_TOOLS = {"get_project", "search_records", "search_standards",
                              "create_doc_draft", "get_context"}
     return ALLOWED_TOOLS
+
+
+# ---------------------------------------------------------------- tool_manual
+def tool_manual():
+    """把工具的清单和一句话说明列出来。
+
+    为什么从工具那儿取：手写的话，加了新工具（比如 validate_doc）没人记得改这里，
+    agent 就永远不知道有这个东西。
+    """
+    try:
+        p = subprocess.run([JL_TOOL_BIN, "list"], capture_output=True, text=True, timeout=60)
+        data = json.loads(p.stdout.strip() or "{}")
+        items = data.get("tools") if isinstance(data, dict) else data
+    except Exception:
+        return ""
+    lines = []
+    for t in items or []:
+        name = t.get("name") or ""
+        if not name:
+            continue
+        desc = (t.get("description") or "").strip()
+        # 说明太长就取第一句，够 agent 判断该不该用
+        short = desc.split("。")[0][:60]
+        # 必须带完整路径：agent 的 shell 里没有 PATH 里的 jl-tool
+        lines.append("  %s %s  # %s" % (JL_TOOL_BIN, name, short))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------- llm
@@ -1204,3 +1233,72 @@ def transcribe_audio(blob_sha, language="zh"):
         if isinstance(out, dict):
             text = (out.get("text") or "").strip()
     return text, None
+
+# ================================================================ 文书 schema
+# 规则来自 schemas/<类型>.json，不写死在代码里。
+# 为什么要它：模型会把"待补"当字段值写进去（"签发人": "待补"），
+# 只判空字符串的话，这种文书会被标成"待签"，其实没填。
+
+SCHEMA_DIR = ROOT + "/schemas"
+
+
+def load_schema(kind):
+    """读某个文书类型的 schema；没有就返回 None（不阻挡，只提示）。"""
+    if not kind:
+        return None
+    path = SCHEMA_DIR + "/" + str(kind).strip() + ".json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def list_schemas():
+    out = []
+    try:
+        for name in sorted(os.listdir(SCHEMA_DIR)):
+            if name.endswith(".json"):
+                out.append(name[:-5])
+    except Exception:
+        pass
+    return out
+
+
+def validate_fields(kind, fields):
+    """按 schema 查字段是否齐全。
+
+    返回 {ok, missing, placeholder, unknown, note}
+      missing     —— 必填但没给
+      placeholder —— 给了占位词（待补/待定…），等于没给
+      unknown     —— schema 里没定义的字段（只提示，不算错）
+    """
+    fields = fields or {}
+    schema = load_schema(kind)
+    if not schema:
+        return {"ok": True, "missing": [], "placeholder": [], "unknown": [],
+                "note": "没有「%s」的 schema，按不齐处理但不算错" % kind}
+
+    required = schema.get("fields") or []
+    optional = schema.get("optional") or []
+    holders = set(schema.get("placeholders") or [])
+
+    missing, placeholder = [], []
+    for key in required:
+        raw = fields.get(key)
+        text = str(raw if raw is not None else "").strip()
+        if not text:
+            missing.append(key)
+        elif text in holders:
+            placeholder.append(key)
+
+    known = set(required) | set(optional)
+    unknown = [k for k in fields.keys() if k not in known]
+
+    return {
+        "ok": not missing and not placeholder,
+        "missing": missing,
+        "placeholder": placeholder,
+        "unknown": unknown,
+        "note": "",
+    }
