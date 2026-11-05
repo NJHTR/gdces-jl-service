@@ -80,6 +80,11 @@ def ensure_home(user_id):
                 at = lines.index("[features]")
                 if not any(l.strip().startswith("memories") for l in lines[at:]):
                     lines.insert(at + 1, "memories = true")
+                # 关键：不加这两行的话，MCP 工具会被"推迟"而模型看不见，
+                # 于是它改用 shell 调 jl-tool CLI —— 每次调用都要起一个容器（2~4 秒）。
+                # 实测：一次出稿 13~17 次 shell 调用，时间全耗在这。
+                if not any(l.strip().startswith("tool_search_always_defer_mcp_tools") for l in lines):
+                    lines.insert(at + 1, "tool_search_always_defer_mcp_tools = false")
                 base = "\n".join(lines) + "\n"
             else:
                 base = base.rstrip() + "\n\n[features]\nmemories = true\n"
