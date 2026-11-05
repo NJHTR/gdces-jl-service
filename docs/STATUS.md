@@ -92,6 +92,35 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 线路统一：彻底去掉旧中转（2026-11-05 深夜）
+
+**问题**：换到百炼之后，`llm()`（学习、记忆抽取、旧的 tool-loop 用它）
+还指着 `llmapi.xfcxb.com`，那条额度是 0 —— 于是学习一直在报 403，功能等于死的。
+
+**改动**（四处，全部指向百炼）：
+
+| 位置 | 改成 |
+|---|---|
+| `bff/bffpkg/core.py` 的 `LLM_URL` | `DASHSCOPE_BASE_URL` + `/responses` |
+| `LLM_MODEL` | `qwen3.7-plus`（可用 `LLM_MODEL` / `LLM_FALLBACK_MODEL` 覆盖） |
+| 鉴权 | `DASHSCOPE_API_KEY` |
+| `ENGINE_ENV` 注入 | 不再注入 `JL_LLM_KEY` |
+
+另外：`~/.easycode/config.toml` 删掉 `[model_providers.xfcxb]` 整段；
+`.env` 删掉 `JL_LLM_KEY`；旧的单文件版 `runtime/server.py` 同步切过去。
+
+**验证**：
+
+```
+LLM_URL: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/responses
+LLM_MODEL: qwen3.7-plus
+llm('只回复两个字：可用') → '可用'
+
+学习回路：说「整改回复必须附对比照片」→ 写入 memory（id 17）
+         再说同一条 → 命中去重，hits 1→2（不重复记）
+全仓再搜 xfcxb / JL_LLM_KEY：只剩 core.py 里一句历史注释
+```
+
 ## 记忆边界修整（2026-11-05 深夜）
 
 用户问：模型是不是没记忆 / 记忆混乱？
