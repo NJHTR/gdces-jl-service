@@ -92,6 +92,8 @@ def render_project_memory(project_id):
 
     rel = "memories/project.md"
     abs_path = f"{WS_ROOT}/{project_id}/{rel}"
+    # 目录可能不存在（项目从没渲染过记忆）—— 之前这里直接抛错，被上层吞成 500
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
     with open(abs_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
