@@ -114,6 +114,13 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 
 ---
 
+### R10 带图场景的 40 秒 + 防手写
+
+- [ ] 带图出稿 105s → 压缩到 40s 以内（先量：图片 token 占比、命令次数）
+- [ ] 用 PostToolUse 钩子拦住「绕过 create_doc_draft 手写 docs 下的 md」
+- [ ] 钩子生效后，把契约里那句提醒删掉（D27 的推翻条件）
+
+---
 ### R9 40 秒目标
 
 - [x] 加阶段计时（[perf] turn/review/total/cmds）
