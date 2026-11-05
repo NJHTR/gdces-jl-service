@@ -117,12 +117,35 @@ enabled = true
 > 🟡 **已知坑**：`[features]` 表必须写在**所有顶层键之后**。
 > 我第一次插在文件开头，把 `model_provider` 等键吞进了 features 表，引擎直接不工作。
 
-### 1.5 运行时状态 🔴
+### 1.5 运行时实测（2026-11-05，R0）🟡
 
-**`spawn_agent` 还没在真机上跑通**。
+三种配置各跑了一次，结论是**协议决定成败**：
 
-上次尝试时中转额度归零（403），只验证到"配置能加载、工具出现在清单里"。
-**这一项是整个多 agent 路线的地基，必须先补上实测。**
+| 配置 | 模型发来的调用 | 结果 |
+|---|---|---|
+| `wire_api = "chat"` | `tool_name="spawn_agent" tool_namespace="functions"` | ❌ `unsupported call: spawn_agent` |
+| `wire_api = "chat"` + `tool_namespace="collab"` | 仍然是 `functions` | ❌ 同样失败 |
+| `wire_api = "responses"` | `tool_name="spawn_agent" tool_namespace="collaboration"` | ✅ 派发成功，子线程被创建 |
+
+**根因 1（chat 协议）**：`DEFAULT_FUNCTION_NAMESPACE = "functions"`，
+chat 协议下所有工具调用都落在 `functions` 命名空间；
+而多 agent 工具注册在 `collaboration`（`DEFAULT_MULTI_AGENT_V2_TOOL_NAMESPACE`），
+注册表按"命名空间 + 名字"精确匹配 → 查不到 → `unsupported call`。
+`functions` 是保留命名空间，`tool_namespace` 改不进去
+（见 `validate_multi_agent_v2_tool_namespace`，`protocol/src/tool_name.rs:7`）。
+
+**根因 2（responses 协议）**：工具派发通了，子线程也真的启动了
+（日志里出现 `op="inter_agent_communication"` 和新的 `thread_id`，
+父 agent 收到来自 `/root/list_docs` 的 `FINAL_ANSWER` 消息），
+但子 agent 的 turn 报错，父 agent 转述为 **`encrypted_content` 类型不兼容**。
+
+即：easyCode 的多 agent 交接需要转发**加密推理内容**，
+第三方 Responses 实现（阿里云百炼）不支持，子 agent 起不来。
+把 `model_reasoning_summary` 改成 `none` 也没绕过。
+
+**结论**：多 agent 的代码路径是通的，**卡在模型服务兼容性上**。
+要跑通需要"完整实现 Responses（含 encrypted_content 透传）"的服务，
+比如官方 OpenAI 或同类中转 —— 我们现在的中转额度为 0。
 
 ---
 
