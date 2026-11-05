@@ -94,3 +94,31 @@ DEFAULTS = [
 5. 把服务器时间往前调 / 把 `next_run_at` 改成过去 → 20 秒内自动跑（证明 worker 真的在轮询）
 
 **没有第 3、4 条的"跑过了"不算数。**
+
+
+---
+
+## 服务器上的五条定时任务（2026-11-06 定稿）
+
+| 频率 | 脚本 | 干什么 | 影响 |
+|---|---|---|---|
+每 5 分钟 | healthcheck.sh | BFF 挂了自动拉起（走 start-bff.sh） | 自愈 |
+每天 03:20 | backup.sh | db / 工作区 / 影像 / 记忆 / 知识 五个包 | 可还原 |
+每天 04:00 | service_job: cleanup_temp | 清临时产物 + bff.log 轮转 | 防堆积 |
+每天 09:00 | devloop.sh | preflight + 结构快照 + 数据不变量（只读） | 发现退化 |
+每周日 09:30 | smoke-e2e.py | 端到端 13 项断言（出稿→补→生成→签发） | 验证链路 |
+开机 | docker up + start-bff + healthcheck | 重启后自动恢复 | 可用性 |
+每天 18:00 | service_job: pending_docs_digest | 统计待补并留痕 | 业务提醒 |
+
+### 为什么 smoke 是每周而不是每天
+
+它要真跑一轮（约 60 秒、一份文书量）。**百炼 key 与 rokid_glass 共用配额**，
+每天跑是白烧配额。每周一次足够发现「链路退化」。
+
+### 分界：哪些属于服务、哪些属于开发
+
+```
+服务要的（用户受影响）  → 服务器：healthcheck / backup / cleanup / digest
+开发要的（质量检查）    → 服务器：devloop / smoke-e2e
+                          （放服务器而不是开发机 —— 事实在服务器上）
+```
