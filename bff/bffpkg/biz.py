@@ -239,10 +239,14 @@ def parse_multipart_full(body, content_type):
         value = part[idx + 4:]
         if value.endswith(b"\r\n"):
             value = value[:-2]
-        name_m = _re.search(r'name="([^"]*)"', head)
-        if not name_m:
+        name = ""
+        for chunk in head.split(";"):
+            chunk = chunk.strip()
+            if chunk.startswith("name=\""):
+                name = chunk[6:].rstrip("\"")
+                break
+        if not name:
             continue
-        name = name_m.group(1)
         if "filename=" in head:
             if name == "file" or b"filename=" in head.encode():
                 data_file = value
