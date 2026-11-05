@@ -42,6 +42,12 @@ def routes():
         if m:
             print("  %-6s %s" % (method, m.group(1)))
             continue
+        # 元组写法：if path in ("/a", "/b")
+        m = re.search(r'path\s+in\s+\(([^)]*)\)', line)
+        if m:
+            for one in re.findall(r'"([^"]+)"', m.group(1)):
+                print("  %-6s %s" % (method, one))
+            continue
         m = re.search(r're\.match\(r"\^([^"]+)\$"', line)
         if m:
             print("  %-6s %s   （正则，见 api.py:%d）" % (method, m.group(1), i))

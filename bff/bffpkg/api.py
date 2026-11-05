@@ -142,6 +142,12 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
             if path == "/api/v1/project":
                 return self._send(*handle_project_save(body))
+            # PUT 当 PATCH 用：微信小程序的 wx.request 不支持 PATCH 方法，
+            # 小程序端补字段/改状态只能走 PUT。
+            m = re.match(r"^/api/v1/docs/(\d+)$", path)
+            if m:
+                usr = resolve_token(bearer(self.headers))
+                return self._send(*handle_doc_patch(int(m.group(1)), body, usr))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
