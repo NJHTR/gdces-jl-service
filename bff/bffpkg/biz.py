@@ -743,6 +743,48 @@ def handle_photo_caption(body, user=None):
     return 200, {"code": 0, "data": {"id": row["id"], "caption": caption[:500]}}
 
 
+# ---------------------------------------------------------------- handle_photo_search
+def handle_photo_search(params, user=None):
+    """按描述/部位/日期查现场影像（caption 是 agent 看完图写的，最有用）"""
+    pid = q1(params, "projectId")
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+    kw = (q1(params, "q") or "").strip()
+    place = (q1(params, "place") or "").strip()
+    date_from = (q1(params, "dateFrom") or "").strip()
+    date_to = (q1(params, "dateTo") or "").strip()
+    limit = min(int(q1(params, "limit") or 20), 100)
+
+    sql = ("SELECT id, sha256, place, weather, shot_at, src, caption, created_at "
+           "FROM photo WHERE project_id=%s")
+    argv = [pid]
+    if kw:
+        like = "%" + kw + "%"
+        sql += " AND (caption LIKE %s OR place LIKE %s)"
+        argv += [like, like]
+    if place:
+        sql += " AND place LIKE %s"
+        argv.append("%" + place + "%")
+    if date_from:
+        sql += " AND created_at >= %s"
+        argv.append(date_from + " 00:00:00")
+    if date_to:
+        sql += " AND created_at <= %s"
+        argv.append(date_to + " 23:59:59")
+    sql += " ORDER BY created_at DESC LIMIT %s"
+    argv.append(limit)
+
+    rows = q(sql, tuple(argv))
+    for r in rows:
+        r["url"] = "/api/v1/blobs/" + r["sha256"]
+        r["shot_at"] = str(r["shot_at"]) if r.get("shot_at") else None
+        r["created_at"] = str(r["created_at"]) if r.get("created_at") else None
+    return 200, {"code": 0, "data": rows, "total": len(rows)}
+
+
 # ---------------------------------------------------------------- handle_stats
 def handle_stats(params, user=None):
     pid = q1(params, "projectId")

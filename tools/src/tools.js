@@ -221,3 +221,25 @@ export async function captionPhoto({ projectId, sha256, caption, overwrite = fal
   }
   return payload.data;
 }
+
+/* ---------------- search_photos ---------------- */
+/**
+ * 按描述/部位/日期查现场影像。
+ * caption 是看过图之后写的一句话，所以这里能回答"这个部位以前查过什么"。
+ */
+export async function searchPhotos({ projectId, q, place, dateFrom, dateTo, limit = 20 }) {
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const u = new URL(`${bff}/api/v1/photos/search`);
+  u.searchParams.set("projectId", projectId);
+  if (q) u.searchParams.set("q", q);
+  if (place) u.searchParams.set("place", place);
+  if (dateFrom) u.searchParams.set("dateFrom", dateFrom);
+  if (dateTo) u.searchParams.set("dateTo", dateTo);
+  u.searchParams.set("limit", String(limit));
+  const resp = await fetch(u);
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`查影像失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
+  }
+  return { total: payload.total, items: payload.data || [] };
+}

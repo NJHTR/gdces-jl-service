@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto, searchPhotos } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -91,6 +91,24 @@ const TOOLS = [
     },
   },
   {
+    name: "search_photos",
+    description:
+      "按描述/部位/日期查现场影像。描述是看过图后写的一句话，" +
+      "用来回答「这个部位以前查过什么」。返回 id、时间、部位、描述和原图地址。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        q: { type: "string", description: "关键词，匹配描述和部位" },
+        place: { type: "string", description: "部位，如 4#楼东侧外架" },
+        dateFrom: { type: "string", description: "起始日期 YYYY-MM-DD" },
+        dateTo: { type: "string", description: "结束日期 YYYY-MM-DD" },
+        limit: { type: "number", description: "最多返回条数，默认 20" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
     name: "caption_photo",
     description:
       "给一张现场照片写一句描述（部位、工序、看到的问题、可见的量测/水印信息）。" +
@@ -125,6 +143,7 @@ const HANDLERS = {
   validate_doc: validateDoc,
   get_context: getContext,
   caption_photo: captionPhoto,
+  search_photos: searchPhotos,
 };
 
 function send(msg) {
