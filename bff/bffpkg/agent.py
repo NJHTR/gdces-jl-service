@@ -798,18 +798,10 @@ def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text
             print("[learn] 学习失败 project=%s user=%s: %r" % (project_id, user_id, e), flush=True)
 
 
-# ---------------------------------------------------------------- _run_cli_turn
 # ---------------------------------------------------------------- _review_pass
-REVIEW_PROMPT = (
-    "刚出完文书（doc id={doc_id}），现在做复核。\n"
-    "复核要用子 agent：调 spawn_agent（这是引擎自带的工具，不是 jl-tool 命令行），"
-    "agent_type 填 reviewer，把文书路径、你的关键判断、用户的原始要求都告诉它。\n"
-    "它给意见后：有「必须改」的用 create_doc_draft 出新版；没有就说无需修改。\n"
-    "重要问题原样列出来，别改写成你自己的话。\n"
-    "如果 spawn_agent 真的调不通，就明说调不通，然后自己按同样清单审一遍 —— "
-    "不要把没试过的说成不可用。"
-)
-
+# 注：这里曾有一个 REVIEW_PROMPT 常量，让 agent 调 spawn_agent 找子 agent 复核。
+# 现在已经改成 BFF 自己开独立会话（_review_pass 里内联提示），那段成了死代码，
+# 而且里面还写着「agent_type 填 reviewer」这种与现状矛盾的话 —— 删掉，免得以后被带偏。
 
 def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text="", user_id=1):
     """复核：开一条独立会话，用复核员角色 + 独立模型审这份文书。
