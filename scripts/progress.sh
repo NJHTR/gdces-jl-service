@@ -20,6 +20,17 @@ java_code=$(curl -s -m 4 -o /dev/null -w '%{http_code}' "http://127.0.0.1:8082/a
 line "Java 8082" "$([ "$java_code" = "200" ] && echo "ok" || echo "（$java_code）")"
 line "MySQL 容器" "$(docker ps --filter name=jl-mysql --format '{{.Status}}' 2>/dev/null || echo '—')"
 line "引擎二进制" "$([ -x repos/easycode/.target/release/easycode ] && echo '存在' || echo '缺失')"
+if [ -f "$HOME/.easycode/config.toml" ]; then
+  prov=$(grep -m1 '^model_provider' "$HOME/.easycode/config.toml" | cut -d'"' -f2)
+  mod=$(grep -m1 '^model = ' "$HOME/.easycode/config.toml" | cut -d'"' -f2)
+  line "引擎线路" "${prov:-?} / ${mod:-?}"
+fi
+
+head2 "能力（外部服务）"
+line "语音识别" "$(grep -q '^ASR_MODEL=' .env 2>/dev/null && echo "已配置 $(grep -m1 '^ASR_MODEL=' .env | cut -d= -f2)" || echo '未配置')"
+line "看图" "qwen3.8-flash（百炼）"
+line "隐患识别" "$(grep -q '^HUAGONG_VLM_TOKEN=' .env 2>/dev/null && echo '华工 hazard_vlm_detection 已配置' || echo '未配置')"
+line "LLM 备用" "$(grep -q '^DASHSCOPE_API_KEY=' .env 2>/dev/null && echo "百炼 $(grep -m1 '^LLM_FALLBACK_MODEL=' .env | cut -d= -f2)" || echo '未配置')"
 
 head2 "数据"
 PW=$(grep '^MYSQL_PASSWORD=' .env 2>/dev/null | cut -d= -f2)
