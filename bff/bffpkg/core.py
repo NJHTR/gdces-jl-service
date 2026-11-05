@@ -327,6 +327,9 @@ def _rerender_if_project(scope, owner):
     if scope != "project":
         return None
     try:
+        # biz 依赖 core，core 不能顶层导入 biz（循环）—— 调用时导入
+        from .biz import render_project_memory
+
         return render_project_memory(owner)
     except Exception:
         traceback.print_exc()
@@ -388,6 +391,8 @@ def on_notification(msg):
     text, trace = "", []
     try:
         # includeTurns 必须为 true，否则 items 是 notLoaded，拿不到内容
+        from .agent import engine
+
         r = engine().call("thread/read", {"threadId": thread_id, "includeTurns": True}, 60)
         thread = (r or {}).get("result", {}).get("thread", {}) or {}
         items = list(thread.get("items") or [])
@@ -566,6 +571,8 @@ def get_or_create_thread(project_id, user_id, kind="chronic"):
     ws = f"{WS_ROOT}/{project_id}"
     # sandbox 必须放开：工具要调 docker 访问数据库和工作区，
     # 默认沙箱会拦住，表现为 exec_command 失败但 turn 仍显示 done。
+    from .agent import engine
+
     r = engine().call("thread/start", {
         "cwd": ws,
         "sandbox": "danger-full-access",
@@ -1036,6 +1043,8 @@ _USER_LOCKS_GUARD = threading.Lock()
 # ---------------------------------------------------------------- handle_render_memory
 def handle_render_memory(project_id):
     try:
+        from .biz import render_project_memory
+
         return 200, {"code": 0, "data": render_project_memory(project_id)}
     except Exception as e:
         return 500, {"code": 500, "message": str(e)}
