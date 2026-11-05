@@ -116,12 +116,16 @@ class _Client:
         env["PATH"] = "/home/baize/bin:/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
         # 每个用户一个家目录：记忆/会话/技能自动隔离
         env["EASYCODE_HOME"] = ensure_home(self.user_id)
+        # 排障用：JL_ENGINE_LOG 可以打开引擎侧模块日志（比如 memories=debug）
+        if os.environ.get("JL_ENGINE_LOG"):
+            env["RUST_LOG"] = os.environ["JL_ENGINE_LOG"]
         self.proc = subprocess.Popen(
             [ENGINE, "app-server"],
             cwd=self.ws,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=(open(os.path.join("/tmp", "jl-appserver-%s.log" % self.user_id), "ab")
+                    if os.environ.get("JL_APPSERVER_LOG") == "1" else subprocess.DEVNULL),
             text=True,
             bufsize=1,
             env=env,
