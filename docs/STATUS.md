@@ -120,6 +120,10 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 需要能完整实现 Responses（含 encrypted_content 透传）的线路；
 现在的中转额度为 0，百炼不兼容这一项。
 
+
+**硬编码体检基线**（2026-11-05）：`grep -rn "re\.search\|re\.match" bff/bffpkg/`
+过滤掉 urlparse/api 路由后的计数 = **12**。这个数字只能降，不能升。
+
 ## 已知问题（按严重程度）
 
 | # | 问题 | 影响 | 想怎么解 |
