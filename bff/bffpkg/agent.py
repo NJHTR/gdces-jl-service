@@ -249,8 +249,8 @@ def build_context(project_id, user_id, query=None):
         "手写 md 不会出现在系统里，用户看不到（实测过）。工具报错要重试或明说，不许改成手写。\n"
         "**缺的字段留空就行**（validate_doc 会标出来，人可以在手机上补），"
         "不要为了凑齐而追问 —— 监理员在工地上没空回答五连问，先出稿。\n"
-        "工具清单跑 `jl-tool list`；用法、出稿流程、说话风格见 "
-        "`data/knowledge/skills/`，需要时再读。"
+        "工具直接可用（不需要先列清单或进 shell 查）；"
+        "出稿流程和说话风格见 `data/knowledge/skills/`，需要时再读。"
     )
     parts.append(f"【当前】项目 {project_id} · 用户 {user_id}")
     return "\n\n".join(parts)
