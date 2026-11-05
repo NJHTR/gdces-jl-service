@@ -1,3 +1,4 @@
+import base64
 import sys
 sys.path.insert(0, "/home/baize/.local/lib/python3.14/site-packages")
 
@@ -1094,4 +1095,112 @@ def handle_render_memory(project_id):
     except Exception as e:
         return 500, {"code": 500, "message": str(e)}
 
+# ================================================================ 多模态
+# 图片落盘 & 语音转写。放在文件末尾，避免打断原有顺序。
 
+IMG_MAGIC = ((b"\x89PNG", ".png"), (b"\xff\xd8\xff", ".jpg"),
+             (b"GIF8", ".gif"), (b"RIFF", ".webp"), (b"BM", ".bmp"))
+
+
+def _blob_file(sha):
+    """blob 的磁盘路径：data/blobs/<sha 前两位>/<sha>"""
+    if not sha:
+        return None
+    sha = str(sha).split(":")[-1].strip()
+    if len(sha) < 4:
+        return None
+    p2 = BLOB_ROOT + "/" + sha[:2] + "/" + sha
+    return p2 if os.path.exists(p2) else None
+
+
+def materialize_images(parts, limit=20):
+    """把 parts 里的图片落到临时目录，返回真实文件路径。
+
+    引擎的 `exec -i` 要真实路径，而 blob 是纯 sha256 无名无扩展名，
+    有的解码器会认不出，所以按文件头补扩展名再落一份。
+    """
+    out = []
+    tmp = "/tmp/jl-img"
+    try:
+        os.makedirs(tmp, exist_ok=True)
+    except Exception:
+        return out
+    for part in parts or []:
+        if len(out) >= limit:
+            break
+        if part.get("type") != "image":
+            continue
+        src = _blob_file(part.get("blob") or part.get("sha"))
+        if not src:
+            continue
+        try:
+            with open(src, "rb") as f:
+                head = f.read(16)
+            ext = ".bin"
+            for magic, e in IMG_MAGIC:
+                if head.startswith(magic):
+                    ext = e
+                    break
+            dst = tmp + "/" + os.path.basename(src)[:16] + ext
+            if not os.path.exists(dst):
+                with open(src, "rb") as a, open(dst, "wb") as b:
+                    b.write(a.read())
+            out.append(dst)
+        except Exception as exc:
+            sys.stderr.write("[img] 落盘失败 %s: %s\n" % (src, exc))
+    return out
+
+
+def transcribe_audio(blob_sha, language="zh"):
+    """任意音频 → 16k 单声道 wav → 百炼 ASR。返回 (文本, 提示)。"""
+    src = _blob_file(blob_sha)
+    if not src:
+        return None, "找不到音频"
+
+    wav = "/tmp/jl-asr.wav"
+    try:
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        subprocess.run([ff, "-y", "-i", src, "-ar", "16000", "-ac", "1", wav],
+                       capture_output=True, timeout=120)
+        if not os.path.exists(wav):
+            return None, "音频转换失败"
+    except Exception as exc:
+        return None, "转换异常：%s" % exc
+
+    key = ENV.get("ASR_API_KEY") or ENV.get("DASHSCOPE_API_KEY")
+    host = (ENV.get("ASR_HOST") or "").rstrip("/")
+    model = ENV.get("ASR_MODEL") or "qwen-audio-3.0-asr-flash"
+    if not key or not host:
+        return None, "没配置 ASR"
+
+    b64 = base64.b64encode(open(wav, "rb").read()).decode()
+    payload = {
+        "model": model,
+        "input": {"messages": [{"role": "user", "content": [
+            {"type": "input_audio",
+             "input_audio": {"data": "data:audio/wav;base64," + b64}}]}]},
+        "parameters": {"format": "wav", "sample_rate": "16000"},
+    }
+    url = host + "/api/v1/services/aigc/multimodal-generation/generation"
+    req = urllib.request.Request(
+        url, data=json.dumps(payload).encode(),
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            body = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        # 百炼对静音/过短音频返回 400 且体为空 {}，那不是故障
+        if e.code == 400:
+            return "", "没识别到语音内容"
+        return None, "ASR HTTP %s" % e.code
+    except Exception as exc:
+        return None, "ASR 异常：%s" % exc
+
+    text = (body.get("text") or "").strip()
+    if not text:
+        out = body.get("output") or {}
+        if isinstance(out, dict):
+            text = (out.get("text") or "").strip()
+    return text, None
