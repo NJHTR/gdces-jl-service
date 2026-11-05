@@ -690,7 +690,9 @@ def _parse_cli_jsonl(stdout):
             it["state"] = "done"
             it["secs"] = round(time.time() - it.pop("_t0", time.time()), 1)
 
-    return thread_id, "\n".join(texts).strip(), timeline, cites
+    # 最终回复只取最后一条：前面那些是过程里的插话，拼起来会变成流水账
+    final = texts[-1] if texts else ""
+    return thread_id, final, timeline, cites
 
 
 # ---------------------------------------------------------------- _set_progress
