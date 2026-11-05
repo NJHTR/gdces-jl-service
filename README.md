@@ -10,8 +10,12 @@
 | `docs/PLAN.md` | 要做什么、做到哪一步 | 每完成一项就改 `[ ]` → `[x]` |
 | `docs/STATUS.md` | **现在**做到哪、跑着什么、有什么坑 | 每次开工和收工各更新一次 |
 | `docs/DECISIONS.md` | 当时为什么这么选、代价是什么 | 做了重要选择就追加一条 |
+| `docs/EASYCODE-CAPABILITIES.md` | easyCode 有哪些能力（带置信度 🟢🟡🔴） | 验证了一条能力就改置信度 |
+| `docs/LOOP-PROMPT.md` | 每轮怎么跑（含各种分支） | 流程有变化就改 |
 
 ### 开工第一件事
+
+**读 `docs/LOOP-PROMPT.md` 并按它跑一轮。** 一句话版本：
 
 ```bash
 bash scripts/progress.sh
