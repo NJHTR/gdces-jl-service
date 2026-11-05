@@ -232,8 +232,9 @@ CREATE TABLE agent_event (
 `read_file(path)` / `write_file(path, content)` / `list_dir(path)` | 工作区文件（沙箱限制在项目目录内） | 按角色 |
 `search_records(query)` | 历史记录检索 | Field / Reg / Draft |
 `search_standards(query)` | 规范检索，**返回 code+clause+原文** | Reg / Review |
-`transcribe(blob)` | 语音转文字 | Field |
-`describe_image(blob, question)` / `crop_image(blob, box)` | 看图 | Field |
+`transcribe(blob)` | 语音转文字 → **百炼 `qwen-audio-3.0-asr-flash`**（已验证） | Field |
+`view_image(path, detail)` | 看图 → **easyCode 原生**（`detail: high/original`） | Field |
+`detect_hazard(blob)` | 工地隐患识别 → **华工 `hazard_vlm_detection`**（已验证，结构化风险） | Field |
 `validate_doc(path)` | 按 schema 校验文书：必填、枚举、依据是否存在 | Review / Verify |
 `commit(paths, message)` | git 提交（钩子在这里生效：没有依据行就拒） | Draft（经 Verify 后） |
 `spawn_agent(role, task, inputs, budget)` / `wait(agent_id)` | 派生子 agent | Orchestrator |
@@ -276,8 +277,8 @@ Review 不通过 | Orchestrator | 带意见回 Draft，最多 3 轮 |
 
 - [ ] `message.parts` schema + 迁移
 - [ ] 上传接口返回 blob 元信息（尺寸、时长、EXIF）
-- [ ] ASR 工具（先接一个，`transcribe`）
-- [ ] 视觉工具（`describe_image`）
+- [ ] ASR 工具（**百炼 `qwen-audio-3.0-asr-flash` 已验证**，只差接进 BFF）
+- [ ] 视觉：通用看图用 `qwen3.8-flash`，隐患用华工 `hazard_vlm_detection`（都已验证）
 - [ ] 前端：任意组合输入、多图
 
 ### P2 · 常驻 Agent 运行时（3 天）
@@ -340,7 +341,8 @@ Review 不通过 | Orchestrator | 带意见回 Draft，最多 3 轮 |
 1. **语音在哪转写**
    - 入口预转写（快、简单，但后端多一步"流程"）
    - 作为工具由 Field 调（自由，但多一次往返）
-   - 我的建议：**入口预转写 + 保留 `transcribe` 工具**（预转写只是加速，不剥夺 agent 复核的能力）
+   - 已定：**入口预转写 + 保留 `transcribe` 工具**（预转写只是加速，不剥夺 agent 复核的能力）
+- 实现：百炼 ASR，只吃 16k 单声道 wav（容器里有 ffmpeg 可转）
 
 2. **常驻运行时用哪个**
    - easyCode 的 app-server（现成，但 Rust 侧要改配置）
