@@ -1,4 +1,4 @@
-﻿# 大文件不入库
+# 大文件不入库
 repos/easycode/vendor/
 repos/easycode/.target/
 repos/easycode/.cargo-home/
@@ -12,3 +12,5 @@ tools/node_modules/
 .env
 __pycache__/
 *.pyc
+
+service-java/target/
