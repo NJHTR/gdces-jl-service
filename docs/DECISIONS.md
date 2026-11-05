@@ -342,3 +342,27 @@ Responses 的线路，或者自己编带补丁的引擎。学校的中转不能�
 **什么情况推翻**：如果将来用上完整实现 Responses 的官方线路，
 就该丢掉补丁回到原生版本；或者上游把 `AgentMessage` 的加密清理补上，
 我们自己这条补丁就可以删掉。
+
+---
+
+## D18 · 改 engine 的模型目录：最小改动，别顺手“优化”
+
+**背景**：要让子 agent 用百炼的模型，得把模型加进 `models-manager/models.json`
+（`include_str!` 编进二进制）。
+
+**踩的坑**：第一次加了 5 个模型，并顺手把 websockets / responses_lite / verbosity
+这些能力位按“非 OpenAI 应该关掉”的想法置空 —— 结果**整个模型目录变空**，
+`model/list` 返回 0 条，连原有的 gpt-* 全没了。子 agent 一个模型都选不了。
+
+**决定**：克隆一条现成的条目，**只改身份字段**：
+`slug` / `display_name` / `description` / `context_window` / `max_context_window`。
+其它能力位一律不动。
+
+**代价**：
+
+- 新条目会继承模板模型的能力位（比如 code_mode_only），和百炼真实能力不完全一致
+- 每加一个模型都要重新编译（11~13 分钟）
+
+**什么情况推翻**：如果将来要按模型精确控制能力（比如真的关掉 verbosity），
+就得先把 `ModelInfo` 的校验规则读透、加一个能验证目录有效性的自检脚本，
+再动这些字段。

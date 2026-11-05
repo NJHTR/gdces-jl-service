@@ -92,6 +92,65 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 附件区重做 + 三个前端 bug（2026-11-05 晚）
+
+### 1. 附件条重做
+
+用户描述：「并排向下、冲出屏幕」。根因是 `scroll-view scroll-x` 在 Skyline 里
+不给高度会塌，子项还会竖着排。
+
+改成 flex-wrap 网格：
+
+```
+112rpx 方块 · 20rpx 圆角 · 12rpx 间距 · 最多 9 张 + 一个虚线添加位
+两行封顶（max-height 264rpx），超出裁掉，绝不顶出输入框
+每张右上角圆形 ✕（半透明黑底 + 白边 2rpx）
+语音块同样大小：波形 + 时长
+```
+
+### 2. 只发语音/只发图片报「没有可发送的内容」
+
+两个原因叠加：
+
+- 录音回调没取 `onStop` 的 `tempFilePath`，附件里 `src` 写死空串 → 语音永远传不上去
+- 图片上传失败也静默，最后 parts 为空，报一句笼统的「没有可发送的内容」
+
+改：录音取真实路径（拿不到就明确提示）；上传失败时说明「有 N 个附件没传上去」。
+
+### 3. 发送失败时附件被清空
+
+原来 `onSend` 一进来就 `attach: []`，失败后用户得重新选。
+改成**任务号拿到以后**才清。
+
+### 4. 左上角项目胶囊偶尔空白
+
+`onShow` 里用 `{name, sub}` **替换**了 project，把 `id` 弄丢了；
+`name` 为空时胶囊就变白块。改成合并 + 兜底（name → code → id → 未命名项目），
+`loadAll` 也统一走 `_mergeProject()`。
+
+### 5. 子 agent 能换模型了（源码级改）
+
+两件事缺一不可：
+
+1. `models-manager/models.json` 里要有这个模型 —— 它是 `include_str!` 编进二进制的。
+   现在加了 `qwen3.8-flash` 一条（只给复核用；主模型继续走 fallback，不动它）。
+2. 打开 `[features.multi_agent_v2] expose_spawn_agent_model_overrides = true`，
+   否则 spawn 工具根本不暴露 `model` 参数。
+
+实测：
+
+```
+事件: sub_agent_activity started | model: qwen3.8-flash
+父：派一个 reviewer 子 agent，model 设为 qwen3.8-flash → 已派出，等它回复 → wait completed
+```
+
+**踩过的坑**：第一次往 models.json 里加了 5 个模型、还把一批字段置空，
+结果整个模型目录变成空表（`model/list` 返回 0 条），连原有的 gpt-* 都没了。
+原因是我改的那些能力位让条目校验不过。**正确做法是最小改动**：
+克隆一条现成的，只改 slug / display_name / description / context_window。
+
+BFF 现在的启动参数带 `REVIEW_MODEL=qwen3.8-flash`，复核子 agent 用便宜模型。
+
 ## 用户体验修整（2026-11-05 晚）
 
 ### 1. 回复不再套模板
