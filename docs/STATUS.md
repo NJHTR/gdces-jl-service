@@ -168,6 +168,66 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 状态机：缺字段的文书能被标成「已签」（2026-11-06 11:55）
+
+PATCH 修好后，顺手把整条状态机跑了一遍。
+
+### 发现两处不一致
+
+**① 新建时挡、PATCH 时放**
+
+```python
+# 新建（handle_doc_create）
+if missing and state == "待签":
+    state = "待补"        # ← 缺字段不许充待签
+
+# PATCH（handle_doc_patch）
+state = body.get("state") or (...)   # ← 客户端说已签就是已签，不检查
+```
+
+于是缺 6 项的文书可以直接被标成「已签」。
+
+**② 不能只改状态**
+
+```python
+if not isinstance(patch, dict) or not patch:
+    return 400, {"code": 400, "message": "fields 必填"}
+```
+
+签发本来只是改状态，却被迫把全部字段重发一遍。
+
+### 修法
+
+```python
+# 只传 state 也允许
+if not patch and not (body.get("state") or "").strip():
+    return 400 {"message": "fields 或 state 至少给一个"}
+
+# 缺项时不许标待签/已签（和新建保持一致）
+if missing and wanted in ("待签", "已签"):
+    return 400 {"message": "监理通知单 还缺 6 项，不能标成「已签」", "missing": [...]}
+```
+
+### 实测（doc 141，测完已删）
+
+```
+只改状态标已签（缺 6 项）→ 400  「还缺 6 项，不能标成『已签』」
+补齐必填（只传 fields）   → 200   state=待签, missing=[]
+只改状态标已签           → 200   state=已签
+```
+
+测试用的 140 / 141 两份文书已从库和磁盘删掉。
+
+### 现在的完整状态机
+
+```
+出稿            → 待补（缺什么由 schema 算）
+手机补字段      → 待补 → 待签（补齐后自动）
+签发            → 已签（只传 state 即可，但缺项会被拒）
+```
+
+**这条链今天才第一次真正闭合。**
+
 ## 🔴 严重：手机上补缺项，补的字段被静默丢掉（2026-11-06 11:45）
 
 **这是今晚发现的最严重问题 —— 它直接卡住产品的核心动作。**

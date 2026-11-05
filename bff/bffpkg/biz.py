@@ -554,8 +554,12 @@ def handle_doc_patch(doc_id, body, user=None):
     fields = dict(fields or {})
 
     patch = body.get("fields") or {}
-    if not isinstance(patch, dict) or not patch:
-        return 400, {"code": 400, "message": "fields 必填"}
+    if not isinstance(patch, dict):
+        return 400, {"code": 400, "message": "fields 必须是对象"}
+    # 允许「只改状态」（比如签发）：不传 fields 就只动 state。
+    # 原来强制 fields 必填，导致签发时还得把全部字段重发一遍。
+    if not patch and not (body.get("state") or "").strip():
+        return 400, {"code": 400, "message": "fields 或 state 至少给一个"}
 
     # 允许补 schema 里的字段（不只是已有字段）。
     #
@@ -582,7 +586,15 @@ def handle_doc_patch(doc_id, body, user=None):
     # 缺项以 schema 为准（不是「当前 fields 里为空的键」）
     chk = validate_fields(d["kind"], fields)
     missing = list(chk.get("missing") or []) + list(chk.get("placeholder") or [])
-    state = body.get("state") or ("待补" if missing else "待签")
+
+    wanted = (body.get("state") or "").strip()
+    # 新建时缺字段会被降级成「待补」；这里必须一致 ——
+    # 否则客户端一句 state=已签 就能把缺项的文书标成签发。
+    if missing and wanted in ("待签", "已签"):
+        return 400, {"code": 400,
+                     "message": "%s 还缺 %d 项，不能标成「%s」" % (d["kind"], len(missing), wanted),
+                     "missing": missing}
+    state = wanted or ("待补" if missing else "待签")
 
     exec_sql("UPDATE doc SET fields=%s, state=%s, updated_at=NOW(3) WHERE id=%s",
              (json.dumps(fields, ensure_ascii=False), state, doc_id))
