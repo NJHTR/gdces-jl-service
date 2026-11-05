@@ -18,7 +18,7 @@ import pymysql
 
 留 Python：它跟子进程、文件、git 打交道。
 """
-from .appserver import run_isolated, run_stream
+from .appserver import _client, run_isolated, run_stream
 from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
@@ -186,6 +186,9 @@ def build_context(project_id, user_id, query=None):
             meta = json.loads(meta)
         except Exception:
             meta = {}
+    # 库里的 meta 可能是字符串 "null"（json.loads → None），不能直接 dict(None)
+    if not isinstance(meta, dict):
+        meta = {}
 
     pm = q("SELECT id, text, hits FROM memory WHERE scope='project' AND owner_id=%s AND status=1 "
            "ORDER BY hits DESC, id DESC LIMIT 30", (project_id,))
@@ -333,6 +336,16 @@ def handle_bootstrap(params, user):
         return deny
 
     user_id = user["id"] if user else 1
+    # 预热：打开小程序就把常驻会话和线程起好。
+    # 冷启动第一单实测要 86 秒，预热后第二单只要 21 秒 —— 差别就在线程初始化。
+    def _warm():
+        try:
+            c = _client(project_id, user_id)
+            c.ensure_thread(model=os.environ.get("ENGINE_MODEL") or None)
+            sys.stderr.write("[warm] %s#%s 会话已预热\n" % (project_id, user_id))
+        except Exception as exc:
+            sys.stderr.write("[warm] 预热失败 %s：%s\n" % (project_id, exc))
+    threading.Thread(target=_warm, daemon=True).start()
     proj = get_project(project_id)
     meta = proj.get("meta") or {}
     if isinstance(meta, str):
@@ -340,6 +353,9 @@ def handle_bootstrap(params, user):
             meta = json.loads(meta)
         except Exception:
             meta = {}
+    # meta 可能是字符串 "null"（json.loads → None），不能直接 dict(None)
+    if not isinstance(meta, dict):
+        meta = {}
 
     project_view = dict(meta)
     project_view.update({
@@ -746,6 +762,40 @@ def _set_progress(task_id, steps):
         pass
 
 
+def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text,
+                  message_id, answer, trace, ms, trace_sum, cites, started):
+    """后台跑复核，完成后回写消息并把任务置 done。
+
+    为什么要异步：复核要 24~31 秒，而用户要的是文书本身（9~44 秒就有）。
+    让复核挡在前面，等于让人干等一件"加分项"。
+    """
+    try:
+        got = _review_pass(task_id, project_id, doc_id, final_text,
+                           images=images, user_text=text, user_id=user_id)
+        if got:
+            review_text, rtrace, rdoc = got
+            trace2 = list(trace) + list(rtrace or [])
+            trace2.append({"kind": "note", "icon": "check",
+                           "text": "复核意见", "output": review_text[:2000]})
+            ans2 = dict(answer or {})
+            ans2["review"] = review_text
+            exec_sql("UPDATE message SET trace=%s, answer=%s WHERE id=%s",
+                     (json.dumps(trace2, ensure_ascii=False), json.dumps(ans2, ensure_ascii=False),
+                      message_id))
+            sys.stderr.write("[review] task %s 复核完成 doc=%s（异步）\n" % (task_id, rdoc))
+    except Exception as exc:
+        sys.stderr.write("[review] 异步复核失败 task %s：%s\n" % (task_id, exc))
+    finally:
+        try:
+            exec_sql("UPDATE task SET status='done', finished_at=NOW(3) WHERE id=%s", (task_id,))
+        except Exception:
+            traceback.print_exc()
+        try:
+            learn_from_turn(project_id, user_id, text, final_text, trace)
+        except Exception:
+            pass
+
+
 # ---------------------------------------------------------------- _run_cli_turn
 # ---------------------------------------------------------------- _review_pass
 REVIEW_PROMPT = (
@@ -987,35 +1037,11 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     (project_id, doc_before))
         doc_row = new_doc[0] if new_doc else None
 
-        # 出了文书先复核；复核结果并进同一条消息，不单独占气泡
-        review_text = ""
         turn_ms = int((time.time() - started) * 1000)
-        review_t0 = time.time()
-        try:
-            if (ENGINE_MODE == "appserver" and doc_row
-                    and (os.environ.get("REVIEW_PASS") or "1") != "0"):
-                got = _review_pass(task_id, project_id, doc_row["id"], final_text,
-                                   images=images, user_text=text, user_id=user_id)
-                if got:
-                    review_text, rtrace, rdoc = got
-                    trace = list(trace) + list(rtrace or [])
-                    trace.append({"kind": "note", "icon": "check",
-                                  "text": "复核意见", "output": review_text[:2000]})
-                    if rdoc and rdoc != doc_row.get("id"):
-                        again = q("SELECT id, kind, obj, state, fields FROM doc WHERE id=%s", (rdoc,))
-                        doc_row = again[0] if again else doc_row
-                    sys.stderr.write("[review] task %s 复核完成 doc=%s\n" % (task_id, rdoc))
-        except Exception as exc:
-            sys.stderr.write("[review] 复核轮异常：%s\n" % exc)
-
-        # 阶段耗时：出稿（turn）vs 复核（review）vs 总计 —— 用来判断 40 秒目标差在哪
-        review_ms = int((time.time() - review_t0) * 1000)
-        sys.stderr.write("[perf] task %s turn=%dms review=%dms total=%dms cmds=%d\n"
-                         % (task_id, turn_ms, review_ms, turn_ms + review_ms, len(trace)))
+        sys.stderr.write("[perf] task %s turn=%dms total=%dms cmds=%d (复核转后台)\n"
+                         % (task_id, turn_ms, turn_ms, len(trace)))
 
         answer = build_answer(doc_row, cites, final_text)
-        if review_text:
-            answer["review"] = review_text
 
         # 对账：文件写了但没入库的，要让人看见（不然用户以为系统里有，其实没有）
         try:
@@ -1029,13 +1055,24 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         except Exception as exc:
             sys.stderr.write("[doc] 对账失败：%s\n" % exc)
 
-        exec_sql(
+        message_id = exec_sql(
             "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync, cites, answer) "
             "VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1,%s,%s)",
             (project_id, user_id, f"r-{task_id}-{int(time.time())}", clean_reply(final_text),
              json.dumps(trace, ensure_ascii=False) if trace else None, trace_sum, ms, task_id,
              json.dumps(cites, ensure_ascii=False) if cites else None,
              json.dumps(answer, ensure_ascii=False) if answer else None))
+
+        # 有文书且开复核 → 交给后台，任务等复核完成后才置 done（前端会一直轮询到那时）
+        if (ENGINE_MODE == "appserver" and doc_row
+                and (os.environ.get("REVIEW_PASS") or "1") != "0" and message_id):
+            threading.Thread(target=_review_async,
+                             args=(task_id, project_id, user_id, text, images, doc_row["id"],
+                                   final_text, message_id, answer, trace, ms, trace_sum,
+                                   cites, started),
+                             daemon=True).start()
+            sys.stderr.write("[review] task %s 复核已转后台\n" % task_id)
+            return
         exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, finished_at=NOW(3) WHERE id=%s",
                  (thread_id, new_doc[0]["id"] if new_doc else None, task_id))
         sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令)\n")
