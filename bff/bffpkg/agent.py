@@ -18,7 +18,7 @@ import pymysql
 
 留 Python：它跟子进程、文件、git 打交道。
 """
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
 
@@ -706,7 +706,7 @@ def _set_progress(task_id, steps):
 
 
 # ---------------------------------------------------------------- _run_cli_turn
-def _run_cli_turn(task_id, project_id, user_id, text):
+def _run_cli_turn(task_id, project_id, user_id, text, images=None):
     """让 easyCode 自己跑：它读 AGENTS.md、调 jl-tool、产出文书。
 
     边跑边把步骤写进 task.progress —— 前端不用等全部结束才有反馈。
@@ -730,7 +730,12 @@ def _run_cli_turn(task_id, project_id, user_id, text):
         )
         cmd = [ENGINE, "exec", "-C", ws,
                "--dangerously-bypass-approvals-and-sandbox",
-               "--json", "-o", out_file, text + hint]
+               "--json", "-o", out_file]
+        # 顺序要紧：`-i <FILE>...` 是变长参数，会把后面的东西全当文件名，
+        # 所以 prompt 必须排在 -i 之前。
+        cmd.append(text + hint)
+        for img in (images or []):
+            cmd += ["-i", img]
 
         before = q("SELECT COALESCE(MAX(id),0) AS m FROM doc WHERE project_id=%s", (project_id,))
         doc_before = before[0]["m"] if before else 0
@@ -882,14 +887,14 @@ def _user_lock(project_id, user_id):
 
 
 # ---------------------------------------------------------------- run_turn
-def run_turn(task_id, project_id, user_id, text):
+def run_turn(task_id, project_id, user_id, text, images=None):
     # 先排自己的队，再抢全局并发槽。
     # 这样同一个人连发三条，后两条会等前一条做完 —— 不会三个 turn 同时改同一个工作区。
     with _user_lock(project_id, user_id):
         with TURN_SLOTS:
             exec_sql("UPDATE task SET status='running', started_at=NOW(3) WHERE id=%s", (task_id,))
             if ENGINE_MODE == "cli":
-                _run_cli_turn(task_id, project_id, user_id, text)
+                _run_cli_turn(task_id, project_id, user_id, text, images)
             else:
                 _run_agent_loop_inner(task_id, project_id, user_id, text)
 
@@ -1024,10 +1029,33 @@ def handle_chat(body, headers=None):
     project_id = body.get("projectId")
     user_id = int(body.get("userId") or 1)
     client_id = body.get("clientId") or f"c-{uuid.uuid4().hex[:16]}"
-    text = (body.get("text") or "").strip()
 
-    if not project_id or not text:
-        return 400, {"code": 400, "message": "projectId 和 text 必填"}
+    # parts 是新的内容模型：文字 / 图片 / 语音 / 定位，任意组合。
+    # 老客户端只发 text，这里兼容。
+    parts = body.get("parts")
+    if not isinstance(parts, list) or not parts:
+        parts = [{"type": "text", "text": body.get("text") or ""}]
+
+    # 语音：没带转写就现转
+    for part in parts:
+        if part.get("type") == "audio" and not part.get("transcript"):
+            got, err = transcribe_audio(part.get("blob") or part.get("sha"))
+            part["transcript"] = got or ""
+            if err:
+                part["asrNote"] = err
+
+    text = "".join(p.get("text") or "" for p in parts if p.get("type") == "text").strip()
+    transcripts = [p.get("transcript") for p in parts
+                   if p.get("type") == "audio" and p.get("transcript")]
+    images = [p for p in parts if p.get("type") == "image"]
+
+    if not project_id or not (text or transcripts or images):
+        return 400, {"code": 400, "message": "projectId 和 内容 必填"}
+
+    # 语音转写要进 prompt，否则模型只知道"有段录音"
+    prompt_text = text
+    for t in transcripts:
+        prompt_text = (prompt_text + "\n\n" if prompt_text else "") + "[语音转写] " + t
 
     deny = guard_project(project_id, resolve_token(bearer(headers)))
     if deny:
@@ -1043,14 +1071,22 @@ def handle_chat(body, headers=None):
     task_id = exec_sql(
         "INSERT INTO task (project_id, user_id, client_id, kind, payload, status) "
         "VALUES (%s,%s,%s,'chat',%s,'queued')",
-        (project_id, user_id, client_id, json.dumps({"text": text}, ensure_ascii=False)))
+        (project_id, user_id, client_id,
+         json.dumps({"text": prompt_text, "transcripts": transcripts,
+                     "images": [i.get("blob") or i.get("sha") for i in images]},
+                    ensure_ascii=False)))
 
-    exec_sql("INSERT INTO message (project_id, user_id, client_id, role, text, task_id, sync) "
-             "VALUES (%s,%s,%s,'user',%s,%s,1)",
-             (project_id, user_id, client_id, text, task_id))
+    display = text or ("[语音] " + ("；".join(transcripts) if transcripts else "")) or "[图片]"
+    exec_sql("INSERT INTO message (project_id, user_id, client_id, role, text, task_id, sync, parts) "
+             "VALUES (%s,%s,%s,'user',%s,%s,1,%s)",
+             (project_id, user_id, client_id, display, task_id,
+              json.dumps(parts, ensure_ascii=False)))
 
     # 立刻返回，任务在后台跑 —— 手机断了也照跑
-    threading.Thread(target=run_turn, args=(task_id, project_id, user_id, text),
+    # 图片落成真实文件，交给引擎（exec -i），模型直接看到，不用调工具
+    img_files = materialize_images(parts)
+    threading.Thread(target=run_turn,
+                     args=(task_id, project_id, user_id, prompt_text, img_files),
                      daemon=True).start()
 
     return 202, {"code": 0, "data": {
