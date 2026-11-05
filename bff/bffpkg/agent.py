@@ -19,7 +19,7 @@ import pymysql
 留 Python：它跟子进程、文件、git 打交道。
 """
 from .appserver import _client, run_isolated, run_stream
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
 
@@ -849,11 +849,14 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
         pass
 
     # 缺项和依据直接从库里给，别让复核员自己去查/试 —— 它之前重复跑了 4 次 validate_doc
+    missing = []
     try:
-        _chk = validate_fields((doc_fields.get("kind") or ""), doc_fields) if isinstance(doc_fields, dict) else {}
-    except Exception:
-        _chk = {}
-    missing = (_chk or {}).get("missing") or []
+        if isinstance(doc_fields, dict) and doc_fields.get("kind"):
+            _chk = validate_fields(doc_fields.get("kind") or "", doc_fields)
+            missing = (_chk or {}).get("missing") or []
+    except Exception as e:  # 不许静默：出错要让复核员知道「缺项没查到」
+        print("[review] 取缺项失败 doc=%s: %r" % (doc_id, e), flush=True)
+        missing = ["（缺项查询失败，请自己核对）"]
     prompt = (
         "你是独立复核会话。给你一份已经写完的监理文书，请审它。\n"
         "不要派子 agent，不要重写文书，也不要改文件 —— 只列问题。\n\n"
