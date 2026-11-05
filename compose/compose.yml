@@ -1,0 +1,37 @@
+name: jl
+
+# 监理 AI 服务 · 数据与服务编排
+# 所有容器统一前缀 jl-，网络独立 jl-net
+# 资源不设硬配额，只留安全上限（防异常膨胀挤占他人）
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: jl-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+      - --max_connections=300
+      - --innodb-buffer-pool-size=4G
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?需要在 .env 里设置}
+      MYSQL_DATABASE: jl
+      MYSQL_USER: jl
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?需要在 .env 里设置}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:3309:3306"
+    volumes:
+      - ../data/mysql:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - jl-net
+    # 安全上限，不是配额
+    mem_limit: 16g
+    cpus: 16
+
+networks:
+  jl-net:
+    name: jl-net
