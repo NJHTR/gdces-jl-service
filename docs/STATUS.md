@@ -92,6 +92,39 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## Loop 归属理清 + 服务侧调度器（2026-11-06 凌晨）
+
+**问题**：开发用的 loop 和服务要的 loop 混在一起，搞错地方不会报错，
+只会「以为它在跑」。
+
+**规则**：服务停了用户会受影响 → 放服务器；只影响开发 → 放开发环境。
+详见 `docs/ARCHITECTURE-LOOPS.md`。
+
+**新增服务侧调度器**（`bff/bffpkg/jobs.py`）：
+
+```
+service_job 表    name / cron_expr / handler / enabled / last_status / next_run_at
+Cron 解析         5 段，支持 * */n a a-b a-b/n 逗号
+worker 线程       每 20 秒认领到点任务（乐观锁，单写者）
+handler 注册表    加任务 = 加一个函数 + 一行登记
+管理接口          GET /api/v1/jobs、POST /api/v1/jobs/<name>/run
+```
+
+**第一个业务任务**：`pending_docs_digest`（每天 18:00 统计待补文书并写审计）
+
+**实测**：
+
+```
+[job] 注册服务任务 pending_docs_digest（0 18 * * *，下次 2026-11-06 18:00）
+POST /api/v1/jobs/pending_docs_digest/run → {"projects":2,"pending":72}
+audit_log: yun-gu-3qi job.pending_docs {"pending":70} / baiyun-a2 {"pending":2}
+把 next_run_at 改成过去 → 30 秒内自动跑（00:02:06 ok），并自动排到下一天
+```
+
+**顺带发现**：待补文书 **72 份**（云谷 70 + 白云 2），
+之前 progress.sh 显示「待补 0」是因为口径不同（那个只看某个状态）。
+72 份缺字段的文书是个真问题，值得单独看。
+
 ## R7 第一步：每用户 EASYCODE_HOME（2026-11-05 深夜）
 
 **做了什么**：BFF 给每个用户准备一个引擎家目录，起 app-server 时传 `EASYCODE_HOME`。
