@@ -114,6 +114,19 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 
 ---
 
+### R7 知识架构（终态，不返工）
+
+详细设计见 `docs/ARCHITECTURE-KNOWLEDGE.md`。四条都要一次做到位：
+
+- [ ] 每个用户一个 `EASYCODE_HOME`（`data/homes/<user>/`），记忆/会话/技能天然隔离
+- [ ] `AGENTS.md` 瘦身到只留项目事实（≤800 字节，不含工具清单）
+- [ ] `data/knowledge/` 冷启动知识包（规范/模板/技能），只读、git 版本化
+- [ ] 多模态沉淀：图片/语音入库时由 agent 写描述，描述进记忆、原文件留 blob
+
+**验收**：见 ARCHITECTURE-KNOWLEDGE 第八节（6 条，都能用命令验）。
+
+---
+
 ## 当前优先级
 
 
