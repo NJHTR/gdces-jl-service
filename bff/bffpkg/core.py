@@ -82,6 +82,11 @@ ENGINE_ENV = dict(
 if ENV.get("JL_LLM_KEY"):
     ENGINE_ENV["JL_LLM_KEY"] = ENV["JL_LLM_KEY"]
 
+# 备选线路（阿里云百炼）：env_key 里只写变量名，值在这里注入
+for _k in ("DASHSCOPE_API_KEY", "HUAGONG_VLM_TOKEN"):
+    if ENV.get(_k):
+        ENGINE_ENV[_k] = ENV[_k]
+
 
 # ---------------------------------------------------------------- db
 def db():
