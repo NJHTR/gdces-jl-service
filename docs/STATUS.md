@@ -92,6 +92,56 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 带图慢的真正原因：MCP 工具没生效（2026-11-06 03:25）
+
+### 证据
+
+把一次出稿的 trace 摊开看，**每一次工具调用都是这样**：
+
+```
+[get_context]     /bin/bash -lc 'export PATH=… && jl-tool get_context {…}'
+[search_standards]/bin/bash -lc 'export PATH=… && jl-tool search_standards {…}'
+[create_doc_draft]/bin/bash -lc 'export PATH=… && jl-tool create_doc_draft {…}'
+```
+
+也就是说：**模型没有拿到 MCP 工具，它是用 shell 调我们的 CLI**。
+而 `jl-tool` 每次调用都要 `docker run` 一个容器 —— 一次 2~4 秒。
+一次出稿 11~17 次这样的调用，时间就这么没了。
+
+旁证：
+
+```
+app-server 日志里 0 处 mcp 初始化记录
+日志里 0 个 mcp__ 前缀的工具名
+每轮开头都有 1~2 次 `list（失败）` —— 那是引擎在试 MCP resources/list
+```
+
+### 试过一个修法（无效，但配置留着无害）
+
+```toml
+[features]
+tool_search_always_defer_mcp_tools = false   # 不让 MCP 工具被「推迟」
+```
+
+21 个家目录都补了，重启后复测：**shell 调用 11 次、list 仍失败 2 次**，没变化。
+说明不是这个开关的问题，或者 app-server 根本没去初始化 MCP。
+
+### 下一轮要查的（具体）
+
+1. 用 `RUST_LOG=easycode_core=debug,easycode_mcp=debug` 起 app-server，看它到底有没有尝试 spawn MCP
+   （现在 `JL_ENGINE_LOG` 已经能注入 RUST_LOG，只需改环境变量）
+2. 对比 `exec` 路径：同一份配置下 exec 有没有 MCP 工具（如果 exec 有、app-server 没有，问题就在 app-server）
+3. 如果是 app-server 不支持 MCP，退路是：**给 agent 一个原生工具壳**——
+   把 `jl-tool` 的 8 个能力做成短路径命令，避免每次 docker run（比如常驻一个本地 HTTP 工具服务，CLI 只是 curl）
+
+### 为什么这条最重要
+
+```
+纯文字出稿 40s 里有 ~20s 是这些 shell+容器调用
+带图 66s 同理
+把它修掉，40 秒目标对带图也能达成 —— 而且顺带解决「注册偶发失败」（每次起容器都可能失败）
+```
+
 ## 注册路径压测 + 时间构成（2026-11-06 03:05）
 
 ### 上一轮那个『4 次只成功 1 次』复现不出来

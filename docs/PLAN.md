@@ -116,7 +116,8 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 
 ### R10 带图场景的 40 秒 + 防手写
 
-- [ ] 带图出稿 105s → 压缩到 40s 以内（先量：图片 token 占比、命令次数）
+- [x] 量清楚了：慢在「每次工具调用都起一个容器」——MCP 工具在 app-server 里没生效
+- [ ] 查清 app-server 是否初始化 MCP（RUST_LOG 看 spawn），否则给工具做常驻壳
 - [ ] 用 PostToolUse 钩子拦住「绕过 create_doc_draft 手写 docs 下的 md」
 - [ ] 钩子生效后，把契约里那句提醒删掉（D27 的推翻条件）
 
