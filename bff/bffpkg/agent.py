@@ -239,8 +239,9 @@ def build_context(project_id, user_id, query=None):
     try:
         n_std = q("SELECT COUNT(*) AS n FROM standard")[0]["n"]
         parts.append("【规范库】现有 %s 条条文（搜一次没有，就是没有；别换关键词反复搜）" % n_std)
-    except Exception:
-        pass
+    except Exception as e:
+        # 不许静默：这条事实缺失会让 agent 反复搜规范
+        print("[ctx] 取规范条数失败: %r" % (e,), flush=True)
 
     # ---- 以下三行是「指针」，不是行为规则 ----
     # 工具清单不写死：跑 `jl-tool list` 永远是最新的（以前写死过，加工具忘了改）。
@@ -792,8 +793,9 @@ def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text
             traceback.print_exc()
         try:
             learn_from_turn(project_id, user_id, text, final_text, trace)
-        except Exception:
-            pass
+        except Exception as e:
+            # 这条绝对不能静默：学习功能曾 403 几个月没人发现（R5）
+            print("[learn] 学习失败 project=%s user=%s: %r" % (project_id, user_id, e), flush=True)
 
 
 # ---------------------------------------------------------------- _run_cli_turn
@@ -845,8 +847,8 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
                     f = {}
             doc_fields = f or {}
             doc_state = row.get("state") or ""
-    except Exception:
-        pass
+    except Exception as e:
+        print("[review] 取文书字段失败 doc=%s: %r" % (doc_id, e), flush=True)
 
     # 缺项和依据直接从库里给，别让复核员自己去查/试 —— 它之前重复跑了 4 次 validate_doc
     missing = []

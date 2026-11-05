@@ -157,8 +157,9 @@ class _Client:
                         self.pending[msg["id"]] = msg
                 else:
                     self.notifications.append(msg)
-        except Exception:
-            pass
+        except Exception as e:
+            # 解析失败会丢掉一条消息（可能是工具结果或复核），必须留痕
+            print("[appserver] 读输出失败: %r | raw=%r" % (e, line[:200]), flush=True)
         self._dead = True
 
     def alive(self):
