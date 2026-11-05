@@ -139,14 +139,15 @@ class _Client:
             time.sleep(0.02)
         raise AppServerError("等 %s 超时" % method)
 
-    def open_thread(self, model=None, developer_instructions=None):
+    def open_thread(self, model=None, developer_instructions=None, cwd=None):
         """开一条独立线程，不占用主线程。
 
         复核用它：换一个模型、换一份角色说明，互不干扰。
         比让主 agent 自己调 spawn_agent 可靠 —— 那个工具偶尔会报 unsupported。
         """
         params = {
-            "cwd": self.ws,
+            # 复核线程要给干净 cwd：项目 AGENTS.md 里的多 agent 说明会把复核员带偏
+            "cwd": cwd or self.ws,
             "approvalPolicy": "never",
             "sandbox": "danger-full-access",
         }
@@ -157,11 +158,13 @@ class _Client:
         res = self.call("thread/start", params, timeout=120)
         return res.get("threadId") or (res.get("thread") or {}).get("id")
 
-    def run_on_thread(self, thread_id, prompt, timeout=600):
+    def run_on_thread(self, thread_id, prompt, timeout=600, images=None):
         """在指定线程上跑一轮，返回 (文本, 事件列表)"""
         start = len(self.notifications)
-        self.call("turn/start", {"threadId": thread_id,
-                              "input": [{"type": "text", "text": prompt}]}, timeout=120)
+        inputs = [{"type": "text", "text": prompt}]
+        for img in images or []:
+            inputs.append({"type": "localImage", "path": img})
+        self.call("turn/start", {"threadId": thread_id, "input": inputs}, timeout=120)
         text_parts, events = [], []
         t0 = time.time()
         cursor = start
@@ -169,6 +172,12 @@ class _Client:
             ready = self.notifications[cursor:]
             cursor = len(self.notifications)
             for msg in ready:
+                # 只认本线程的通知：同一个 app-server 里可能有别的线程在跑，
+                # 不过滤会把别人的消息、甚至子 agent 的信封混进来
+                p_params = msg.get("params") or {}
+                tid = p_params.get("threadId") or (p_params.get("thread") or {}).get("id")
+                if tid and tid != thread_id:
+                    continue
                 events.append(msg)
                 if msg.get("method") == "item/agentMessage/delta":
                     piece = (msg.get("params") or {}).get("delta") or ""
@@ -302,15 +311,17 @@ def run_stream(project_id, prompt, images=None, timeout=600):
     raise AppServerError("这一轮超过 %d 秒还没结束" % timeout)
 
 
-def run_isolated(project_id, prompt, model=None, developer_instructions=None, timeout=600):
+def run_isolated(project_id, prompt, model=None, developer_instructions=None,
+                 timeout=600, cwd=None, images=None):
     """开一条独立线程跑一轮，跑完就关。
 
     给复核用：独立模型、独立角色、独立上下文，不污染主对话。
     """
     c = _client(project_id)
-    thread_id = c.open_thread(model=model, developer_instructions=developer_instructions)
+    thread_id = c.open_thread(model=model, developer_instructions=developer_instructions,
+                              cwd=cwd)
     try:
-        return c.run_on_thread(thread_id, prompt, timeout=timeout)
+        return c.run_on_thread(thread_id, prompt, timeout=timeout, images=images)
     finally:
         try:
             c.call("thread/close", {"threadId": thread_id}, timeout=30)

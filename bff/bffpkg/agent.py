@@ -737,7 +737,7 @@ REVIEW_PROMPT = (
 )
 
 
-def _review_pass(task_id, project_id, doc_id, first_text):
+def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text=""):
     """复核：开一条独立会话，用复核员角色 + 独立模型审这份文书。
 
     为什么不再让主 agent 自己 spawn_agent：
@@ -746,25 +746,42 @@ def _review_pass(task_id, project_id, doc_id, first_text):
       独立会话是确定能用的：新开一条线程、指定模型和角色、跑完就关。
     """
     model = (os.environ.get("REVIEW_MODEL") or "").strip() or None
+    ws = WS_ROOT + "/" + project_id
+    # 复核线程用一个空目录当 cwd：项目 AGENTS.md 里写着多 agent 的用法，
+    # 复核员读了会跑去试 spawn_agent，而不是审文书（实测过）。
+    clean_cwd = "/tmp/jl-review"
+    try:
+        os.makedirs(clean_cwd, exist_ok=True)
+    except Exception:
+        clean_cwd = None
+
     prompt = (
-        "你是独立复核会话，**不要派子 agent**，也不要重写文书，直接审这一份。\n"
-        "请复核这份监理文书（doc id=" + str(doc_id) + "）。\n"
-        "工作区：/home/baize/jl-service/data/workspaces/" + project_id + "\n"
-        "用户的原始要求：" + (first_text or "")[:400] + "\n\n"
+        "你是独立复核会话。给你一份已经写完的监理文书，请审它。\n"
+        "不要派子 agent，不要重写文书，也不要改文件 —— 只列问题。\n\n"
+        "文书：doc id=" + str(doc_id) + "\n"
+        "工作区：" + ws + "\n"
+        "用户的原始要求：" + ((user_text or "").strip() or "（用户只发了图片/语音，没写文字）")[:300] + "\n"
+        "这一轮用户发的图片：" + (("共 %d 张，见附件" % len(images)) if images else "无") + "\n\n"
         "怎么审：\n"
-        "1. 先用 /home/baize/jl-service/scripts/jl-tool validate_doc 查字段齐不齐；\n"
-        "2. 打开工作区里最新的这份文书读一遍；\n"
+        "1. 用 /home/baize/jl-service/scripts/jl-tool validate_doc 查字段齐不齐"
+        "（kind 和 fields 从文书里取）；\n"
+        "2. 用绝对路径读 " + ws + "/docs 下最新那份文书；\n"
         "3. 逐条核对：结论有没有事实依据、有没有自相矛盾、引用的条号是否真的检索到。\n"
-        "输出：逐条列问题，每条标「必须改 / 建议改 / 可忽略」；没有问题就说无需修改。"
+        "输出格式：直接写审查意见本身，逐条列问题，每条标「必须改 / 建议改 / 可忽略」；"
+        "没有问题就写「无需修改」。\n"
+        "不要写 FINAL_ANSWER / Sender / Payload 这类信封，也不要描述你是怎么审的。"
     )
     steps = []
     try:
         text, events = run_isolated(
             project_id, prompt,
             model=model,
+            cwd=clean_cwd,
+            images=images,
             developer_instructions=(
                 "你是监理文书复核员，只挑毛病，不重写文书，也不改文件。"
                 "说话要短、要具体，指出哪一句站不住、缺什么。"
+                "这个会话不需要派子 agent。"
             ),
         )
     except Exception as exc:
@@ -787,47 +804,6 @@ def _review_pass(task_id, project_id, doc_id, first_text):
 
 
 # ---------------------------------------------------------------- _run_cli_turn
-# ---------------------------------------------------------------- _review_pass
-REVIEW_PROMPT = (
-    "刚出完文书（doc id={doc_id}），现在做复核。\n"
-    "复核要用子 agent：调 spawn_agent（这是引擎自带的工具，不是 jl-tool 命令行），"
-    "agent_type 填 reviewer，把文书路径、你的关键判断、用户的原始要求都告诉它。\n"
-    "它给意见后：有「必须改」的用 create_doc_draft 出新版；没有就说无需修改。\n"
-    "重要问题原样列出来，别改写成你自己的话。\n"
-    "如果 spawn_agent 真的调不通，就明说调不通，然后自己按同样清单审一遍 —— "
-    "不要把没试过的说成不可用。"
-)
-
-
-def _review_pass(task_id, project_id, doc_id, first_text):
-    """出稿后的自检一轮。返回 (文本, 时间线, 新 doc_id) ；失败返回 None"""
-    prompt = REVIEW_PROMPT.format(doc_id=doc_id)
-    # 子 agent 可以用别的模型：让便宜/快的模型去挑毛病，省主模型的额度
-    review_model = (os.environ.get("REVIEW_MODEL") or "").strip()
-    if review_model:
-        prompt += ("\n（派子 agent 时把 model 参数填 " + review_model +
-                   "，reasoning_effort 用默认即可）")
-    lines, steps = [], []
-    try:
-        for ev in run_stream(project_id, prompt):
-            lines.append(json.dumps(ev, ensure_ascii=False) + "\n")
-            # 复核轮不再从命令行文本里抠工具名（那属于后端解析模型输出，是技术债）
-            it = ev.get("item") or {}
-            if (it.get("type") or "") == "command_execution":
-                steps.append({"label": "复核中", "tool": "review",
-                              "state": "done", "secs": 0})
-                _set_progress(task_id, steps)
-    except Exception as exc:
-        sys.stderr.write(f"[review] 复核轮失败：{exc}\n")
-        return None
-
-    _thread, text, trace, _cites = _parse_cli_jsonl("".join(lines))
-    if not text:
-        return None
-    after = q("SELECT COALESCE(MAX(id),0) AS m FROM doc WHERE project_id=%s", (project_id,))
-    new_doc = after[0]["m"] if after else doc_id
-    return text, trace, max(new_doc, doc_id)
-
 
 def _run_cli_turn(task_id, project_id, user_id, text, images=None):
     """让 easyCode 自己跑：它读 AGENTS.md、调 jl-tool、产出文书。
@@ -981,7 +957,29 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     "WHERE project_id=%s AND id > %s ORDER BY id LIMIT 1",
                     (project_id, doc_before))
         doc_row = new_doc[0] if new_doc else None
+
+        # 出了文书先复核；复核结果并进同一条消息，不单独占气泡
+        review_text = ""
+        try:
+            if (ENGINE_MODE == "appserver" and doc_row
+                    and (os.environ.get("REVIEW_PASS") or "1") != "0"):
+                got = _review_pass(task_id, project_id, doc_row["id"], final_text,
+                                   images=images, user_text=text)
+                if got:
+                    review_text, rtrace, rdoc = got
+                    trace = list(trace) + list(rtrace or [])
+                    trace.append({"kind": "note", "icon": "check",
+                                  "text": "复核意见", "output": review_text[:2000]})
+                    if rdoc and rdoc != doc_row.get("id"):
+                        again = q("SELECT id, kind, obj, state, fields FROM doc WHERE id=%s", (rdoc,))
+                        doc_row = again[0] if again else doc_row
+                    sys.stderr.write("[review] task %s 复核完成 doc=%s\n" % (task_id, rdoc))
+        except Exception as exc:
+            sys.stderr.write("[review] 复核轮异常：%s\n" % exc)
+
         answer = build_answer(doc_row, cites, final_text)
+        if review_text:
+            answer["review"] = review_text
 
         exec_sql(
             "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync, cites, answer) "
