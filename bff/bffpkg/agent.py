@@ -18,7 +18,7 @@ import pymysql
 
 留 Python：它跟子进程、文件、git 打交道。
 """
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, ANSWER_KEYS, ANSWER_RE, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_by_heuristic, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, enrich_answer, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_answer, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, commit_doc, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_create, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
 
@@ -209,20 +209,18 @@ def build_context(project_id, user_id, query=None):
     except Exception:
         pass
 
+    manual = tool_manual()
     parts.append(
-        "【可用工具】本机已装好命令行工具 jl-tool，**直接用，不需要先 list**。参数必须是 JSON：\n"
-        '  /home/baize/jl-service/scripts/jl-tool list                        # 列工具\n'
-        '  jl-tool get_project \'{"projectId":"' + project_id + '"}\'\n'
-        '  jl-tool search_records \'{"projectId":"' + project_id + '","place":"4#楼东侧外架"}\'\n'
-        '  jl-tool search_standards \'{"query":"连墙件 间距"}\'\n'
-        '  jl-tool create_doc_draft \'{"projectId":"' + project_id + '","kind":"监理通知单",'
-        '"obj":"部位","fields":{...},"bases":[{"kind":"rule","ref":"JGJ130-2011#6.4.3","text":"..."}]}\'\n'
-        "规则：\n"
+        "【可用工具】本机已装好命令行工具 jl-tool，**直接用，不需要先 list**。"
+        "参数必须是 JSON，格式：jl-tool <工具名> '{\"键\":\"值\"}'\n"
+        + (manual or "  （清单没取到，可以跑 jl-tool list 看看）")
+        + "\n规则：\n"
         "1. 用户说「出/写/生成 通知单、记录、日志」时，**必须真的调用 create_doc_draft**，"
         "不能只在回复里描述文书内容。\n"
         "2. 写文书前先用 search_standards 查到依据，把条号写进 bases。\n"
-        "3. create_doc_draft 会把文件写进项目工作区并 git 提交。\n"
-        "4. 缺的字段留空，会标成「待补」，不要编。"
+        "3. 出稿前先调 validate_doc 自查字段：缺什么它会告诉你，"
+        "缺的就留空、别编，交给人补。\n"
+        "4. create_doc_draft 会把文件写进项目工作区并 git 提交。"
     )
     parts.append(
         "【回复格式】最后一段话必须严格是下面三行（没有内容写「无」）：\n"
