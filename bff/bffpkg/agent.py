@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import queue
@@ -1051,6 +1052,9 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     final_text = f.read().strip()
             except FileNotFoundError:
                 pass
+            # 读完就删：按任务隔离后不清会一直堆在项目目录里
+            with contextlib.suppress(OSError):
+                os.remove(out_file)
         if not final_text:
             final_text = "".join(lines)[-1200:].strip() or "（引擎没有返回内容）"
 
@@ -1281,6 +1285,8 @@ def run_cli_turn(task_id, project_id, user_id, text):
                     text_out = f.read().strip()
             except FileNotFoundError:
                 pass
+            with contextlib.suppress(OSError):
+                os.remove(out_file)
         if not text_out:
             text_out = (p.stdout or "")[-1500:].strip() or "（模型没有返回内容）"
 

@@ -17,6 +17,7 @@
   - 这里只放「服务自己要的」loop：业务数据、通知、整理、统计
   - 开发用的 loop（开工检查、收工归档）挂在开发环境，不在这里
 """
+import contextlib
 import json
 import sys
 import threading
@@ -129,6 +130,41 @@ def pending_docs_digest(payload):
     return {"projects": len(rows), "pending": total}
 
 
+@handler("cleanup_temp")
+def cleanup_temp(payload):
+    """每天清一次临时产物。
+
+    为什么要有它：出稿结果、复核目录、语音 wav 都按任务隔离了（防串单），
+    代价是会随使用量增长 —— 没人清就会一直堆。
+    只删「超过 1 天」的，正在跑的不会被误删。
+    """
+    import glob
+    import os as _os
+    import shutil
+    import time as _time
+
+    cutoff = _time.time() - 24 * 3600
+    removed = {"dirs": 0, "files": 0}
+
+    for path in glob.glob("/tmp/jl-review-*"):
+        with contextlib.suppress(OSError):
+            if _os.path.isdir(path) and _os.path.getmtime(path) < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+                removed["dirs"] += 1
+
+    for pattern in ("/tmp/jl-asr-*.wav",
+                    "/home/baize/jl-service/data/workspaces/*/.agent/last-*.md"):
+        for path in glob.glob(pattern):
+            with contextlib.suppress(OSError):
+                if _os.path.isfile(path) and _os.path.getmtime(path) < cutoff:
+                    _os.remove(path)
+                    removed["files"] += 1
+
+    sys.stderr.write("[job] 清理临时产物：目录 %d 个、文件 %d 个\n"
+                     % (removed["dirs"], removed["files"]))
+    return removed
+
+
 # ---------------------------------------------------------------- 表与调度
 
 DDL = """
@@ -151,6 +187,8 @@ CREATE TABLE IF NOT EXISTS service_job (
 DEFAULTS = [
     ("pending_docs_digest", "0 18 * * *", "pending_docs_digest", {},
      "每天 18:00 统计待补文书并留痕"),
+    ("cleanup_temp", "0 4 * * *", "cleanup_temp", {},
+     "每天 04:00 清掉超过 1 天的临时产物（复核目录、语音 wav、出稿临时文件）"),
 ]
 
 
