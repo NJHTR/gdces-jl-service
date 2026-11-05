@@ -114,6 +114,15 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 
 ---
 
+### R8 让记忆真的产出
+
+现状：管线跑，整理 agent 失败（`failed_agent`），`stage1_outputs` 为 0。
+
+- [ ] `qwen3.7-plus` 加进 models.json（最小改动），重编译
+- [ ] 复测：`stage1_outputs` 是否开始有行、`MEMORY.md` 是否生成
+- [ ] 若仍失败：读 `memories/write/src/phase2.rs`，看 agent 是怎么起的、`failed_agent` 由哪一步产生
+
+---
 ### R7 知识架构（终态，不返工）
 
 详细设计见 `docs/ARCHITECTURE-KNOWLEDGE.md`。四条都要一次做到位：

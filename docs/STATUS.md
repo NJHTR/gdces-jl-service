@@ -92,6 +92,57 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 记忆为什么一直是空的（2026-11-06 凌晨，查清了）
+
+### 不是没跑，是**整理 agent 失败**
+
+查了引擎自己的 sqlite（`data/homes/<user>/*.sqlite`）：
+
+```
+memories_1.sqlite：
+  jobs: memory_consolidate_global | status=error | retry_remaining=2 | last_error=failed_agent
+  stage1_outputs: 0 行
+state_5.sqlite：
+  threads.memory_mode = enabled（三条线程都是）
+```
+
+**结论**：会话被正确标记为「可产生记忆」，管线也被触发了，
+但整理那一步的 agent 调用失败（`failed_agent`），所以 `stage1_outputs` 一直是 0，
+`raw_memories.md` 永远是 "No raw memories yet"。
+
+### 逐步排除了哪些可能
+
+| 假设 | 结论 |
+|---|---|
+| 会话来源不在允许列表（只收 cli/vscode/atlas/chatgpt） | ❌ 我们的是 `vscode`，在列表里（看 rollout 的 session_meta） |
+| 配置没开 | ❌ `feature.memories=true`、`generate_memories=true`、`max_rollouts_per_startup=8` |
+| 刚跑完的会话不够格（默认要闲置 6 小时） | ❌ 已设 `min_rollout_idle_hours = 0` |
+| 模型没指定 | ❌ 已设 `extract_model` / `consolidation_model = qwen3.7-plus` |
+| **整理 agent 本身失败** | ✅ 就是它：`last_error=failed_agent` |
+
+### 一条很可能相关的证据
+
+```
+WARN easycode_models_manager::model_info: Unknown model qwen3.7-plus is used.
+     This will use fallback model metadata.
+```
+
+我们的主模型 `qwen3.7-plus` **不在引擎的模型目录里**（models.json 只有我加过的
+`qwen3.8-flash`）。元数据回退会影响能力标记（工具支持、上下文窗口等），
+整理 agent 很可能因此跑不起来。
+
+**下一步**：把 `qwen3.7-plus` 按最小改动加进 `models-manager/models.json`（补丁 0002 的做法），
+重编译（11~13 分钟），再看 `stage1_outputs` 是否开始有行。
+
+### 顺带：app-server 日志现在可按需打开
+
+```
+JL_APPSERVER_LOG=1        → 引擎 stderr 写到 /tmp/jl-appserver-<user>.log
+JL_ENGINE_LOG='...=debug' → 注入 RUST_LOG，看模块级日志
+```
+
+以前是 DEVNULL，什么都看不到 —— 这次排查才发现。
+
 ## 照片描述可检索 + R7 验收（2026-11-06 凌晨）
 
 ### 缺口：描述存了，但查不到
