@@ -705,6 +705,44 @@ def _set_progress(task_id, steps):
 
 
 # ---------------------------------------------------------------- _run_cli_turn
+# ---------------------------------------------------------------- _review_pass
+REVIEW_PROMPT = (
+    "上一轮你刚出了文书（doc id={doc_id}）。现在做复核，不要重复出稿：\n"
+    "1. 先调 validate_doc 看字段齐不齐；\n"
+    "2. 打开工作区里最新的文书文件读一遍，逐条检查：结论有没有事实依据、"
+    "有没有自相矛盾、有没有编造规范条号；\n"
+    "3. 该改就用 create_doc_draft 出新版（不要手改旧文件）；不该改就明确说「无需修改」。\n"
+    "最后仍然按三行格式回复：结论 / 依据 / 待补。"
+)
+
+
+def _review_pass(task_id, project_id, doc_id, first_text):
+    """出稿后的自检一轮。返回 (文本, 时间线, 新 doc_id) ；失败返回 None"""
+    prompt = REVIEW_PROMPT.format(doc_id=doc_id)
+    lines, steps = [], []
+    try:
+        for ev in run_stream(project_id, prompt):
+            lines.append(json.dumps(ev, ensure_ascii=False) + "\n")
+            it = ev.get("item") or {}
+            if (it.get("type") or "") == "command_execution":
+                cmd = (it.get("command") or "").replace("\n", " ")
+                m = re.search(r"jl-tool\s+([a-z_]+)", cmd)
+                if m:
+                    steps.append({"label": describe_tool(m.group(1), {}), "tool": m.group(1),
+                                  "state": "done", "secs": 0})
+                    _set_progress(task_id, steps)
+    except Exception as exc:
+        sys.stderr.write(f"[review] 复核轮失败：{exc}\n")
+        return None
+
+    _thread, text, trace, _cites = _parse_cli_jsonl("".join(lines))
+    if not text:
+        return None
+    after = q("SELECT COALESCE(MAX(id),0) AS m FROM doc WHERE project_id=%s", (project_id,))
+    new_doc = after[0]["m"] if after else doc_id
+    return text, trace, max(new_doc, doc_id)
+
+
 def _run_cli_turn(task_id, project_id, user_id, text, images=None):
     """让 easyCode 自己跑：它读 AGENTS.md、调 jl-tool、产出文书。
 
@@ -870,6 +908,26 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
              json.dumps(trace, ensure_ascii=False) if trace else None, trace_sum, ms, task_id,
              json.dumps(cites, ensure_ascii=False) if cites else None,
              json.dumps(answer, ensure_ascii=False) if answer else None))
+        # 出了文书就让 agent 自己复核一轮（同一个会话，不是多 agent）
+        try:
+            if (ENGINE_MODE == "appserver" and doc_row
+                    and (os.environ.get("REVIEW_PASS") or "1") != "0"):
+                got = _review_pass(task_id, project_id, doc_row["id"], final_text)
+                if got:
+                    rtext, rtrace, rdoc = got
+                    exec_sql(
+                        "INSERT INTO message (project_id, user_id, client_id, role, text, trace, "
+                        "trace_sum, ms, task_id, sync) VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1)",
+                        (project_id, user_id, f"rv-{task_id}-{int(time.time())}",
+                         clean_reply(rtext),
+                         json.dumps(rtrace, ensure_ascii=False) if rtrace else None,
+                         "复核", 0, task_id))
+                    sys.stderr.write(f"[review] task {task_id} 复核完成 doc={rdoc}\n")
+                    # 复核可能出了新版，任务指向最新的那份
+                    doc_row = {"id": rdoc} if rdoc else doc_row
+        except Exception as exc:
+            sys.stderr.write(f"[review] 复核轮异常：{exc}\n")
+
         exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, finished_at=NOW(3) WHERE id=%s",
                  (thread_id, new_doc[0]["id"] if new_doc else None, task_id))
         sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令)\n")
