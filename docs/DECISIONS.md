@@ -126,3 +126,44 @@ Agent 运行时（任务编排、子进程、工作区 git） | Python | 跟进�
 **代价**：每次调用多一次文件 IO（可忽略）。
 
 **什么情况推翻**：如果以后不用沙箱执行命令，可以回到 stdin。
+
+---
+
+## D10 · 主线路从中转切到阿里云百炼（qwen3.7-plus）
+
+**背景**：`llmapi.xfcxb.com` 中转额度归零（`403 剩余额度 $0.000000`），
+所有 AI 任务停摆。在服务器上另一个项目 `rokid_glass` 里发现一套可用的
+阿里云百炼凭据（token-plan 套餐）。
+
+**决定**：把引擎主线路切到百炼，`wire_api` 从 `responses` 改成 `chat`。
+
+```toml
+model_provider = "dashscope"
+model = "qwen3.7-plus"
+model_context_window = 131072
+model_max_output_tokens = 16384
+
+[model_providers.dashscope]
+base_url = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+wire_api = "chat"
+env_key = "DASHSCOPE_API_KEY"
+```
+
+原 `xfcxb` provider 段保留，随时可切回。
+
+**代价**：
+
+- 百炼是 Chat Completions 协议，和 Responses 的 reasoning 呈现方式不同
+- 凭据属于另一个项目，**配额共享**，跑重任务会挤占对方
+- 模型元数据 easyCode 不认识，要靠 `model_context_window` 手动补，否则走 fallback
+
+**实测**（都在真机上跑）：
+
+| 项 | 结果 |
+|---|---|
+简单调用 | `"引擎可用"` ✓ |
+工具调用 | 调了 2 次 `jl-tool search_standards`，正确引用 JGJ 130-2011 第 6.4.3 条 ✓ |
+端到端任务 | 36.1 秒 / 49.8 秒两轮，产物与引用都正确 ✓ |
+
+**什么情况推翻**：如果 qwen 在多步工具调用上出现明显退化（比如漏调工具、
+乱编条号），或者对方项目要用这套凭据，就切回中转或换 `deepseek-v4.1-flash`。
