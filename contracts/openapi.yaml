@@ -1,0 +1,910 @@
+openapi: 3.0.3
+
+info:
+  title: 监理 AI 服务 · 业务契约
+  version: 1.0.0
+  description: |
+    广东建设工程监理有限公司 · 监理 AI 服务对外接口。
+
+    ## 所有权标注
+    每个接口都标了 `x-owner`：
+    - `biz`   —— 业务域（文书/项目/成员/审计/规范/统计）。**未来抽成 Java 服务**，
+                 真值和规则都在这里：状态机、字段校验、权限。
+    - `agent` —— Agent 运行时（任务编排、执行过程、记忆）。**留在 Python**。
+    - `infra` —— 基础设施（鉴权、上传、blob、地理、天气）。
+
+    ## 拆分的三条规矩
+    1. **一张表只有一个写者**。业务表（doc/project/photo/audit）只有 biz 写；
+       会话表（task/message.trace）只有 agent 写。
+    2. **Agent 只提议不决定**。要建文书就调 `POST /api/v1/docs`，
+       校验和状态流转留在 biz 侧。
+    3. **工作区文件由 agent 写**。数据库是真值，文件是产出物，用 doc_id 对齐。
+
+    ## 通用约定
+    - 所有响应统一包一层 `{code, message?, data}`
+    - `code = 0` 表示成功；HTTP 状态码同步表达语义
+    - 需要登录的接口带 `Authorization: Bearer <token>`
+    - 项目级接口都会校验"这个人是不是这个项目的成员"
+
+servers:
+  - url: http://127.0.0.1:8081
+    description: 本机开发（经 SSH 隧道）
+
+tags:
+  - name: 鉴权
+    x-owner: infra
+  - name: 项目
+    x-owner: biz
+  - name: 文书
+    x-owner: biz
+  - name: 影像
+    x-owner: biz
+  - name: 对话
+    x-owner: agent
+  - name: 任务
+    x-owner: agent
+  - name: 记忆
+    x-owner: agent
+  - name: 规范
+    x-owner: biz
+  - name: 审计与统计
+    x-owner: biz
+  - name: 基础设施
+    x-owner: infra
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------- 鉴权
+  /api/v1/auth/wx-login:
+    post:
+      tags: [鉴权]
+      x-owner: infra
+      summary: 小程序登录
+      description: 用 wx.login 拿到的 code 换 token。开发期 code 不校验。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: wx.login 返回的 code }
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnvelopeSession' }
+
+  /api/v1/auth/wx-phone:
+    post:
+      tags: [鉴权]
+      x-owner: infra
+      summary: 用微信手机号换手机号（需要 getPhoneNumber 的 code）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [鉴权]
+      x-owner: infra
+      summary: 退出登录（令牌失效）
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/me:
+    get:
+      tags: [鉴权]
+      x-owner: infra
+      summary: 当前登录用户
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/User' }
+
+  # ---------------------------------------------------------------- 项目
+  /api/v1/projects:
+    get:
+      tags: [项目]
+      x-owner: biz
+      summary: 项目列表（切换面板用）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ProjectBrief' }
+
+  /api/v1/project:
+    get:
+      tags: [项目]
+      x-owner: biz
+      summary: 单个项目
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200': { description: 成功 }
+    put:
+      tags: [项目]
+      x-owner: biz
+      summary: 新建或更新项目（只传要改的字段，不会清空其他字段）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectInput' }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/projects/{projectId}/render-memory:
+    post:
+      tags: [项目, 记忆]
+      x-owner: biz
+      summary: 重新渲染项目记忆文件（项目记忆变更后自动调用）
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdInPath'
+      responses:
+        '200': { description: 成功 }
+
+  # ---------------------------------------------------------------- 文书
+  /api/v1/docs:
+    get:
+      tags: [文书]
+      x-owner: biz
+      summary: 文书列表
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          list:
+                            type: array
+                            items: { $ref: '#/components/schemas/DocBrief' }
+                          total: { type: integer }
+    post:
+      tags: [文书]
+      x-owner: biz
+      summary: 新建文书（Agent 也走这个接口，不直接写库）
+      description: |
+        业务校验在这里：必填项、状态初值（有空的字段就是「待补」）。
+        Agent 侧的 create_doc_draft 工具改造后会调用它。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocCreate' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Doc' }
+
+  /api/v1/docs/{docId}:
+    get:
+      tags: [文书]
+      x-owner: biz
+      summary: 文书详情
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Doc' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [文书]
+      x-owner: biz
+      summary: 保存文书字段
+      description: |
+        只能改本文书已有的字段。改完自动重算状态：
+        还有空字段 → 待补；全填完 → 待签。
+        保存后会写回工作区并 git 提交（提交信息带「依据:」行，仓库钩子强制）。
+      parameters:
+        - $ref: '#/components/parameters/DocId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields:
+                  type: object
+                  additionalProperties: { type: string }
+                  example: { 签发人: 李工 }
+                state:
+                  type: string
+                  enum: [待补, 待签, 已签, 作废]
+                  description: 不传则按字段自动推导
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: integer }
+                          state: { type: string }
+                          missing:
+                            type: array
+                            items: { type: string }
+                          fields:
+                            type: object
+                            additionalProperties: { type: string }
+
+  # ---------------------------------------------------------------- 影像
+  /api/v1/photos:
+    get:
+      tags: [影像]
+      x-owner: biz
+      summary: 影像列表
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/photos/{photoId}:
+    patch:
+      tags: [影像]
+      x-owner: biz
+      summary: 改影像的部位描述
+      parameters:
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [place]
+              properties:
+                place: { type: string, example: 4#楼东侧外架 }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/upload:
+    post:
+      tags: [基础设施]
+      x-owner: infra
+      summary: 上传文件（走 multipart，按 sha256 去重）
+      description: |
+        ⚠️ 迁移注意：目前落本地 data/blobs/。
+        上多实例前必须改成对象存储（MinIO/OSS），否则换机器就 404。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                projectId: { type: string }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/blobs/{sha}:
+    get:
+      tags: [基础设施]
+      x-owner: infra
+      summary: 取文件内容
+      parameters:
+        - name: sha
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: 二进制内容 }
+
+  /api/v1/geo/reverse:
+    get:
+      tags: [基础设施]
+      x-owner: infra
+      summary: 逆地理编码（坐标 → 地址）
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema: { type: number }
+        - name: lng
+          in: query
+          required: true
+          schema: { type: number }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/weather:
+    get:
+      tags: [基础设施]
+      x-owner: infra
+      summary: 天气（监理日志要记气温）
+      parameters:
+        - name: city
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 成功 }
+
+  # ---------------------------------------------------------------- 对话
+  /api/v1/chat:
+    post:
+      tags: [对话]
+      x-owner: agent
+      summary: 发一句话给 AI（异步，返回 taskId）
+      description: |
+        同一个用户在同一个项目内**串行**：前一条没跑完，这一条会排队。
+        不同用户之间并行（受 MAX_CONCURRENT 限制）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, text]
+              properties:
+                projectId: { type: string, example: yun-gu-3qi }
+                userId: { type: integer }
+                clientId:
+                  type: string
+                  description: 客户端生成的幂等键，重发同一个 clientId 不会产生两个任务
+                text: { type: string }
+      responses:
+        '202':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          taskId: { type: integer }
+                          status: { type: string }
+
+  /api/v1/bootstrap:
+    get:
+      tags: [对话]
+      x-owner: agent
+      summary: 首屏聚合（项目 + 消息 + 记录 + 文书 + 记忆）
+      description: 小程序打开时只调这一个接口，减少往返。
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/messages:
+    get:
+      tags: [对话]
+      x-owner: agent
+      summary: 增量拉消息（断线重连用）
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: after
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200': { description: 成功 }
+
+  # ---------------------------------------------------------------- 任务
+  /api/v1/tasks:
+    get:
+      tags: [任务]
+      x-owner: agent
+      summary: 任务列表
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/tasks/{taskId}:
+    get:
+      tags: [任务]
+      x-owner: agent
+      summary: 任务详情（前端轮询这个看进度）
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Task' }
+
+  /api/v1/tasks/{taskId}/cancel:
+    post:
+      tags: [任务]
+      x-owner: agent
+      summary: 取消任务
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200': { description: 成功 }
+        '409': { description: 任务已结束，不能取消 }
+
+  /api/v1/tasks/{taskId}/retry:
+    post:
+      tags: [任务]
+      x-owner: agent
+      summary: 重试失败的任务
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200': { description: 成功 }
+
+  # ---------------------------------------------------------------- 记忆
+  /api/v1/memories:
+    get:
+      tags: [记忆]
+      x-owner: agent
+      summary: 记忆列表
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, enum: [user, project] }
+        - name: ownerId
+          in: query
+          schema: { type: string }
+      responses:
+        '200': { description: 成功 }
+    post:
+      tags: [记忆]
+      x-owner: agent
+      summary: 新增记忆
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scope: { type: string, enum: [user, project] }
+                ownerId: { type: string }
+                text: { type: string }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/memories/{memoryId}:
+    patch:
+      tags: [记忆]
+      x-owner: agent
+      summary: 改记忆
+      parameters:
+        - name: memoryId
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string }
+                status: { type: string, enum: [active, disabled] }
+      responses:
+        '200': { description: 成功 }
+    delete:
+      tags: [记忆]
+      x-owner: agent
+      summary: 删记忆
+      parameters:
+        - name: memoryId
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200': { description: 成功 }
+
+  # ---------------------------------------------------------------- 规范
+  /api/v1/standards:
+    get:
+      tags: [规范]
+      x-owner: biz
+      summary: 规范检索
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, example: 连墙件 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/standard:
+    get:
+      tags: [规范]
+      x-owner: biz
+      summary: 按标准号 + 条号取条文原文（点引用脚注用）
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string, example: JGJ 130-2011 }
+        - name: clause
+          in: query
+          required: true
+          schema: { type: string, example: '6.4.3' }
+      responses:
+        '200': { description: 成功 }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------------------------------------------------------- 审计与统计
+  /api/v1/audit:
+    get:
+      tags: [审计与统计]
+      x-owner: biz
+      summary: 审计日志
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+      responses:
+        '200': { description: 成功 }
+
+  /api/v1/stats:
+    get:
+      tags: [审计与统计]
+      x-owner: biz
+      summary: 项目统计
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          docs: { type: integer }
+                          pending: { type: integer, description: 待补文书数 }
+                          messages: { type: integer }
+                          photos: { type: integer }
+                          tasksDone: { type: integer }
+
+  # ---------------------------------------------------------------- 成员
+  /api/v1/members:
+    get:
+      tags: [项目]
+      x-owner: biz
+      summary: 项目成员列表
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200': { description: 成功 }
+    post:
+      tags: [项目]
+      x-owner: biz
+      summary: 加成员
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, userId]
+              properties:
+                projectId: { type: string }
+                userId: { type: integer }
+                role: { type: string, enum: [owner, engineer, viewer], default: engineer }
+      responses:
+        '200': { description: 成功 }
+
+  /healthz:
+    get:
+      tags: [基础设施]
+      x-owner: infra
+      security: []
+      summary: 健康检查
+      responses:
+        '200': { description: '{ok, engine}' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 登录拿到的 64 位 token
+
+  parameters:
+    ProjectId:
+      name: projectId
+      in: query
+      required: true
+      schema: { type: string, example: yun-gu-3qi }
+    ProjectIdInPath:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: string }
+    DocId:
+      name: docId
+      in: path
+      required: true
+      schema: { type: integer }
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: { type: integer }
+
+  responses:
+    NotFound:
+      description: 不存在
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Envelope:
+      type: object
+      required: [code]
+      properties:
+        code: { type: integer, example: 0 }
+        message: { type: string }
+        data: {}
+
+    EnvelopeSession:
+      allOf:
+        - $ref: '#/components/schemas/Envelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                token: { type: string }
+                user: { $ref: '#/components/schemas/User' }
+
+    Error:
+      type: object
+      properties:
+        code: { type: integer }
+        message: { type: string }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        role: { type: string }
+
+    ProjectBrief:
+      type: object
+      properties:
+        id: { type: string, example: yun-gu-3qi }
+        name: { type: string, example: 云谷智造园 · 3期 }
+        code: { type: string, nullable: true }
+        addr: { type: string, nullable: true }
+        builder: { type: string, description: 建设单位 }
+        msgs: { type: integer, description: 消息数，切换面板用来区分 }
+
+    ProjectInput:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        code: { type: string }
+        addr: { type: string }
+        builder: { type: string }
+
+    DocBrief:
+      type: object
+      properties:
+        id: { type: integer }
+        kind: { type: string, example: 监理通知单 }
+        obj: { type: string, example: 4#楼东侧外架 }
+        state: { type: string, enum: [待补, 待签, 已签, 作废] }
+        created_at: { type: string }
+
+    Doc:
+      type: object
+      properties:
+        id: { type: integer }
+        projectId: { type: string }
+        kind: { type: string }
+        obj: { type: string }
+        state: { type: string, enum: [待补, 待签, 已签, 作废] }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+          description: 文书字段。值为空的字段就是「待补」。
+        missing:
+          type: array
+          items: { type: string }
+          description: 值为空的字段名（前端做行内标注用）
+        bases:
+          type: array
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              clause: { type: string }
+        path: { type: string, description: 工作区相对路径 }
+        commit: { type: string, description: git 提交短号 }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+
+    DocCreate:
+      type: object
+      required: [projectId, kind]
+      properties:
+        projectId: { type: string }
+        kind: { type: string, example: 监理通知单 }
+        obj: { type: string }
+        fields:
+          type: object
+          additionalProperties: { type: string }
+        bases:
+          type: array
+          items:
+            type: object
+        taskId:
+          type: integer
+          description: 由哪个任务产生的（Agent 调用时传）
+
+    Task:
+      type: object
+      properties:
+        id: { type: integer }
+        projectId: { type: string }
+        userId: { type: integer }
+        status:
+          type: string
+          enum: [queued, running, done, failed, cancelled]
+        queueAhead:
+          type: integer
+          description: 同一个人前面还有几条在跑
+        progress:
+          type: array
+          description: 执行中的步骤（前端轮询画进度）
+          items:
+            type: object
+            properties:
+              label: { type: string }
+              tool: { type: string }
+              state: { type: string, enum: [running, done] }
+              secs: { type: number }
+        artifact:
+          type: object
+          nullable: true
+          description: 这一轮产出的文书（按 task.doc_id 精确绑定）
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            state: { type: string }
+            commit: { type: string }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+
+    Message:
+      type: object
+      properties:
+        id: { type: integer }
+        role: { type: string, enum: [user, assistant] }
+        text: { type: string, description: 已经清洗过的话（无路径/markdown/提交号） }
+        ms: { type: integer }
+        msLabel: { type: string, example: 2 分 51 秒 }
+        traceSum: { type: string, example: 调了 查规范、写文书 }
+        trace:
+          type: array
+          description: 执行时间线（note 是它说的话，cmd 是它做的事）
+          items:
+            type: object
+            properties:
+              kind: { type: string, enum: [note, cmd, shell] }
+              text: { type: string }
+              cmd: { type: string }
+              output: { type: string }
+              secs: { type: number }
+              ok: { type: boolean }
+        cites:
+          type: array
+          description: 引用（从工具真实输出里提取，不是模型编的）
+          items:
+            type: object
+            properties:
+              code: { type: string }
+              clause: { type: string }
+              title: { type: string }
+        answer:
+          type: object
+          description: 行内标注所需数据
+          properties:
+            rich:
+              type: array
+              description: 片段数组，s ∈ t/b/n/r/g/br
+              items:
+                type: object
+                properties:
+                  s: { type: string }
+                  v: { type: string }
+                  code: { type: string }
+                  clause: { type: string }
+            gaps:
+              type: array
+              items: { type: string }
+            text: { type: string }
