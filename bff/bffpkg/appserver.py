@@ -220,25 +220,31 @@ class _Client:
             pass
 
 
-def _client(project_id):
+def _client(project_id, user_id=1):
+    """会话按「项目 + 用户」隔离。
+
+    只按项目复用的话，同一个项目里的两个用户会共享一条线程 ——
+    看到对方的上下文，甚至接着对方的话说，那是串话不是记忆。
+    """
+    key = "%s#%s" % (project_id, user_id or 1)
     with _LOCK:
-        c = _CLIENTS.get(project_id)
+        c = _CLIENTS.get(key)
         if c is None or not c.alive():
             if c is not None:
                 c.close()
             c = _Client(project_id)
             c._spawn()
-            _CLIENTS[project_id] = c
+            _CLIENTS[key] = c
         return c
 
 
-def run_stream(project_id, prompt, images=None, timeout=600):
+def run_stream(project_id, prompt, images=None, timeout=600, user_id=1):
     """跑一轮，边跑边吐事件。
 
     事件形状和 `exec --json` 对齐（{"type":"item.completed","item":{...}}），
     这样 agent.py 里那套解析两个后端共用。
     """
-    c = _client(project_id)
+    c = _client(project_id, user_id)
     c.ensure_thread(model=os.environ.get("ENGINE_MODEL") or None)
 
     inputs = [{"type": "text", "text": prompt}]
@@ -312,12 +318,12 @@ def run_stream(project_id, prompt, images=None, timeout=600):
 
 
 def run_isolated(project_id, prompt, model=None, developer_instructions=None,
-                 timeout=600, cwd=None, images=None):
+                 timeout=600, cwd=None, images=None, user_id=1):
     """开一条独立线程跑一轮，跑完就关。
 
     给复核用：独立模型、独立角色、独立上下文，不污染主对话。
     """
-    c = _client(project_id)
+    c = _client(project_id, user_id)
     thread_id = c.open_thread(model=model, developer_instructions=developer_instructions,
                               cwd=cwd)
     try:

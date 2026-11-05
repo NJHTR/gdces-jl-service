@@ -737,7 +737,7 @@ REVIEW_PROMPT = (
 )
 
 
-def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text=""):
+def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text="", user_id=1):
     """复核：开一条独立会话，用复核员角色 + 独立模型审这份文书。
 
     为什么不再让主 agent 自己 spawn_agent：
@@ -775,6 +775,7 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
     try:
         text, events = run_isolated(
             project_id, prompt,
+            user_id=user_id,
             model=model,
             cwd=clean_cwd,
             images=images,
@@ -821,13 +822,19 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         except FileNotFoundError:
             pass
 
-        # 不再要求固定格式：模型用自己的话说，结构由数据和工具给
+        # 不再要求固定格式：模型用自己的话说话，结构由数据和工具给
         hint = ""
+        # 把"本轮附件"标清楚：会话是复用的，历史里也有图片，
+        # 不说明的话模型会把历史图片也当成这一轮的来复述（踩过）。
+        if images:
+            hint += ("\n\n【本轮附件】这一条消息带了 %d 张图片（已作为附件传给你）。\n"
+                     "请只针对这几张回答；历史对话里出现过的图片不要重复描述，"
+                     "除非用户明确问起。" % len(images))
         # 两种后端共用后面的解析：事件来源不同，事件形状一样
         proc = None
         if ENGINE_MODE == "appserver":
             line_iter = (json.dumps(ev, ensure_ascii=False) + "\n"
-                         for ev in run_stream(project_id, text + hint, images))
+                         for ev in run_stream(project_id, text + hint, images, user_id=user_id))
         else:
             cmd = [ENGINE, "exec", "-C", ws,
                    "--dangerously-bypass-approvals-and-sandbox",
@@ -964,7 +971,7 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
             if (ENGINE_MODE == "appserver" and doc_row
                     and (os.environ.get("REVIEW_PASS") or "1") != "0"):
                 got = _review_pass(task_id, project_id, doc_row["id"], final_text,
-                                   images=images, user_text=text)
+                                   images=images, user_text=text, user_id=user_id)
                 if got:
                     review_text, rtrace, rdoc = got
                     trace = list(trace) + list(rtrace or [])
