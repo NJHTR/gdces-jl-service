@@ -432,7 +432,19 @@ def handle_asr(body, user=None):
     text, err = transcribe_audio(sha)
     if err and text is None:
         return 503, {"code": 503, "message": err}
-    return 200, {"code": 0, "data": {"text": text or "", "note": err or ""}}
+
+    # 沉淀：转写结果写进这条音频的描述里，否则"说过的"跟"拍过的"一样，读完就没了。
+    # 描述是数据不是判断 —— 后端只负责存，怎么用由 agent 决定。
+    saved = False
+    if (text or "").strip():
+        rows = q("SELECT id, caption FROM photo WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
+        if rows and not (rows[0].get("caption") or "").strip():
+            exec_sql("UPDATE photo SET caption=%s, caption_at=NOW(3) WHERE id=%s",
+                     ("语音：" + text.strip()[:480], rows[0]["id"]))
+            saved = True
+
+    return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
+                                     "saved": saved}}
 
 # ---------------------------------------------------------------- handle_doc_register
 def handle_doc_validate(body, user=None):
