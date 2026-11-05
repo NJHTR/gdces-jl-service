@@ -92,6 +92,65 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## 记忆为什么是空的：找到根因了（2026-11-06 01:35）
+
+### 根因：引擎把 `min_rollout_idle_hours` 钳死在 [1, 48]
+
+```rust
+// config/src/types.rs:431
+min_rollout_idle_hours: toml
+    .min_rollout_idle_hours
+    .unwrap_or(defaults.min_rollout_idle_hours)
+    .clamp(1, 48),          // ← 写 0 也没用，最少 1 小时
+```
+
+也就是说：**只抽取「闲置 ≥1 小时」的会话**（设计上避免拿正在进行的活去提炼经验）。
+我之前的测试会话都是几分钟前的，所以 claim 永远返回 0 —— 不是坏了，是没到点。
+
+### 验证（把线程时间往回拨 3 小时）
+
+```
+UPDATE threads SET updated_at_ms = updated_at_ms - 3h   （测试家用目录，仅此一次）
+
+轮次后日志：
+  jl-memory: startup task spawning (source=VSCode, idle_hours=1, max_rollouts=8)
+  jl-memory: phase1 claimed 0 candidates        ← 前一轮
+  jl-memory: phase1 claimed 1 candidate(s)      ← 回拨之后
+  memory stage-1 extraction complete: 1 claimed, 1 succeeded (1 with output, 0 failed)
+
+memories_1.sqlite:
+  jobs: memory_stage1 | done
+  stage1_outputs: 1 行，内容是真实抽取结果：
+    description: User searched test-sandbox project photos for "绿色" …
+    rollout_summary: # User searched project photos for green items, then establi…
+```
+
+**phase1 完全打通了。** 记忆真的能被抽出来。
+
+### 还差最后一步：整理（phase2）
+
+```
+jobs: memory_consolidate_global | pending
+stage1_outputs: selected_for_phase2 = 0
+consolidation_progress: (version=1, watermark=0)
+MEMORY.md 仍是 No consolidated memories yet
+```
+
+下一步：读 `phase2` 的 claim 条件（为什么 pending 不被认领、`selected_for_phase2` 谁来置 1）。
+
+### 产品含义（值得记住）
+
+**记忆不是即时的**：今天的会话，最早一小时后才可能被提炼。这符合引擎的设计意图，
+但要让用户有正确预期 —— 别指望「刚说完它就记住」。
+
+### 新增补丁 0004（诊断日志）
+
+```
+memories/write/src/start.rs    三个提前返回点打原因 + 启动参数
+memories/write/src/phase1.rs   claim 到几个候选
+```
+有了它，以后再出问题看一眼日志就知道卡在哪，不用再猜三轮。
+
 ## R8 第二步：phase1 为什么一个都不claim（2026-11-06 01:20）
 
 ### 已确认的事实

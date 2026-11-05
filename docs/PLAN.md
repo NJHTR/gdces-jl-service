@@ -122,7 +122,9 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 - [x] 复测：整理任务从 failed_agent → done，生成了 MEMORY.md / memory_summary.md 骨架
       **但 phase1 仍 0 行**（没有 stage1 任务被 claim）
 - [x] 读 claim SQL：手工执行能选出 6 条候选，**排除 SQL 条件问题**
-- [ ] 给引擎打日志补丁（start.rs 三个提前返回点 + phase1 候选/认领数），重编译后定位
+- [x] 给引擎打日志补丁（补丁 0004），重编译后定位 → **根因是 idle_hours 被 clamp 到 ≥1 小时**
+- [x] 验证 phase1：回拨线程时间后 claim 1 个、抽取成功、stage1_outputs 有内容
+- [ ] 查 phase2：整理任务一直 pending（selected_for_phase2=0），MEMORY.md 仍为空
 
 ---
 ### R7 知识架构（终态，不返工）

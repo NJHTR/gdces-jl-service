@@ -1,0 +1,56 @@
+diff --git a/easycode-rs/memories/write/src/phase1.rs b/easycode-rs/memories/write/src/phase1.rs
+index 800e260f..127553fe 100644
+--- a/easycode-rs/memories/write/src/phase1.rs
++++ b/easycode-rs/memories/write/src/phase1.rs
+@@ -62,6 +62,8 @@ pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
+         return;
+     };
+     if claimed_candidates.is_empty() {
++        // 【补丁 0004】没有候选时说明为什么：这个窗口里有没有可用的线程
++        info!("jl-memory: phase1 claimed 0 candidates");
+         stage_one_context.counter(
+             MEMORY_PHASE_ONE_JOBS,
+             /*inc*/ 1,
+@@ -69,6 +71,7 @@ pub async fn run(context: Arc<MemoryStartupContext>, config: Arc<Config>) {
+         );
+         return;
+     }
++    info!("jl-memory: phase1 claimed {} candidate(s)", claimed_candidates.len());
+ 
+     // 3. Run the parallel sampling.
+     let outcomes = run_jobs(
+diff --git a/easycode-rs/memories/write/src/start.rs b/easycode-rs/memories/write/src/start.rs
+index c5c57465..1952a2a0 100644
+--- a/easycode-rs/memories/write/src/start.rs
++++ b/easycode-rs/memories/write/src/start.rs
+@@ -15,6 +15,7 @@ use easycode_protocol::ThreadId;
+ use easycode_protocol::models::PermissionProfile;
+ use easycode_protocol::protocol::SessionSource;
+ use std::sync::Arc;
++use tracing::info;
+ use tracing::warn;
+ 
+ /// Starts the asynchronous startup memory pipeline for an eligible root session.
+@@ -34,8 +35,22 @@ pub fn start_memories_startup_task(
+         || !config.features.enabled(Feature::MemoryTool)
+         || source.is_non_root_agent()
+     {
++        // 【补丁 0004】把被挡掉的原因打出来 —— 以前这里静默 return，无法排查
++        tracing::info!(
++            "jl-memory: startup skipped (ephemeral={}, feature_memories={}, non_root_agent={}, source={:?})",
++            config.ephemeral,
++            config.features.enabled(Feature::MemoryTool),
++            source.is_non_root_agent(),
++            source
++        );
+         return;
+     }
++    tracing::info!(
++        "jl-memory: startup task spawning (source={:?}, idle_hours={}, max_rollouts={})",
++        source,
++        config.memories.min_rollout_idle_hours,
++        config.memories.max_rollouts_per_startup
++    );
+ 
+     let versions = if config.memories.dual_write {
+         vec![MemoryVersion::V1, MemoryVersion::V2]
