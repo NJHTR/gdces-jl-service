@@ -222,7 +222,38 @@ interrupt.rs · model_request.rs · permission_request.rs
 
 ---
 
-## 四、常驻会话（app-server）
+## 四、常驻会话（app-server）🟢 已实测可用
+
+
+### 4.1 实测（2026-11-05）🟢
+
+协议（`app-server generate-json-schema` 产出，不是猜的）：
+
+```
+initialize   { clientInfo, capabilities.experimentalApi }
+thread/start { cwd（必须绝对路径）, model, approvalPolicy, sandbox }
+turn/start   { threadId, input: [{type:"text",text}] | [{type:"localImage",path}] }
+```
+
+通知（实测抓到的）：
+
+```
+thread/started · turn/started · turn/completed
+item/started · item/completed
+item/reasoning/textDelta · item/agentMessage/delta
+error · warning · mcpServer/startupStatus/updated
+```
+
+item 类型：`userMessage` · `reasoning` · `agentMessage` · `commandExecution` · `mcpToolCall`
+
+**延迟对比**：简单一轮 2.6/2.3 秒；带工具一轮 4.8/4.1 秒（exec 是 8~14 秒）。
+
+**三个坑**：
+
+1. 子进程要继承 BFF 的 `ENGINE_ENV`，只继承 `os.environ` 会报缺 key
+2. `cwd` 是相对路径时，`exec_command` 报
+   `Failed to create unified exec process: No such file or directory`
+3. `item/completed` 的 agentMessage 正文常为空，文本在 `item/agentMessage/delta`
 
 `app-server-protocol` 里出现的 JSON-RPC 方法 🟢：
 

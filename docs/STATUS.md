@@ -30,7 +30,7 @@
 | BFF（Python） | 8081 | ✅ `{"ok":true,"engine":"up"}` | `runtime/entry.py`，包版 |
 | jl-biz（Java） | 8082 | ✅ 200 | `service-java/target/jl-biz-0.1.0.jar` |
 | MySQL | 3309 | ✅ Up 19h | docker `jl-mysql` |
-| 引擎 easycode | — | provider=`dashscope` model=`qwen3.7-plus` | 每轮任务拉起子进程 |
+| 引擎 easycode | — | provider=`dashscope` model=`qwen3.7-plus` | **常驻** app-server，会话复用 |
 | 百炼（阿里云） | — | ✅ 已验证 LLM / 看图 / ASR / 华工隐患识别 | 凭据复用 `rokid_glass` |
 
 **启动命令**
@@ -90,6 +90,43 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
   不是 OpenAI 的 `/audio/transcriptions`（这个端点 404）
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
+
+## R3 常驻 agent 服务（2026-11-05 已接入）
+
+**做法**：`easycode app-server` 常驻，每个项目一条进程 + 一个线程（会话复用），
+BFF 用 stdio JSON-RPC 驱动，事件翻译成和 `exec --json` 一样的形状，
+**解析代码两个后端共用**（`bff/bffpkg/appserver.py`）。
+
+**实测延迟**（同一台机器，同一模型）：
+
+| 场景 | exec（旧） | app-server（新） |
+|---|---|---|
+简单一轮 | 8~14 秒 | **2.6 / 2.3 秒** |
+带工具一轮 | 14 秒+ | **4.8 / 4.1 秒** |
+真实出稿任务 | 36~50 秒 | **53 / 22 / 17 / 12 / 21 秒** |
+
+> 真实任务的总时长主要花在模型调用和查规范上，进程启动省下的 5~10 秒是净赚。
+
+**怎么切换**：`ENGINE_MODE=appserver`（现在是默认），`ENGINE_MODE=cli` 回退旧方式。
+
+```bash
+cd /home/baize/jl-service
+ENGINE_MODE=appserver ENGINE_MODEL=qwen3.7-plus \
+  nohup python3 runtime/entry.py > runtime/bff.log 2>&1 &
+```
+
+**踩到的四个坑（都写进代码注释了）**：
+
+1. 子进程必须继承 `ENGINE_ENV`，不是 `os.environ` —— 否则报
+   `Missing environment variable: DASHSCOPE_API_KEY`
+2. `thread/start` 的 `cwd` 必须是绝对路径，相对路径会让工具起不来，
+   报 `Failed to create unified exec process: No such file or directory`
+3. item 类型是驼峰 `agentMessage` / `userMessage`，不是下划线
+4. `item/completed` 里的 agentMessage 正文经常是空的，真正的文本在
+   `item/agentMessage/delta` 里，要自己拼
+
+**debug**：`JL_APPSERVER_DEBUG=1` 会把原始通知落到 `/tmp/jl-appserver-last.jsonl`。
+这次就是靠它一眼看到 `Missing environment variable` 的。
 
 ## R2 第一块：文书字段按 schema 校验（2026-11-05）
 
