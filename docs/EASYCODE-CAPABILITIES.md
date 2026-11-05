@@ -285,3 +285,59 @@ MCP（`mcp_servers.jl`） | 配置了但路由不通 | 🔴 我们用 `jl-tool` 
    —— 决定断线续跑怎么做，以及是否值得常驻。
 
 验证方法：每项都用最小用例，把 `--json` 事件流里的证据贴进 `STATUS.md`。
+
+### 1.6 第二轮实测：换模型也没用（2026-11-05）
+
+把上游 21 个模型逐个探了一遍（`scripts/probe_models.py`）：
+
+```
+模型                        HTTP  推理块  推token  判定
+qwen3.7-max                 200   有      255     有推理
+qwen3.7-plus                200   有      15      有推理
+qwen3.6-flash               200   有      188     有推理
+glm-5.2                     200   有      224     有推理
+deepseek-v4-pro             200   有      17      有推理
+qwen3.8-max                 200   有      35      有推理
+deepseek-v4.1-flash         200   有      90      有推理
+glm-5.3                     200   无      0       ✅ 唯一无推理
+auto                        200   有      16      有推理
+decision-model-preview      400   -       -       不可用
+```
+
+**拿唯一无推理的 `glm-5.3` 试 `spawn_agent`，仍然失败**：
+
+```
+Invalid content type: encrypted_content
+```
+
+原因：即便模型本身不产生推理，**引擎在 agent 场景下仍会请求并回放推理项**
+（`core/src/client.rs` 里 `include` 无条件带 `reasoning.encrypted_content`，
+且对非 OpenAI 服务端只清理其它项的加密内容，**Reasoning 项被豁免保留**）。
+
+### 1.7 补丁已写好，但编译环境凑不齐
+
+改法（两处，`core/src/client.rs`）：
+
+```rust
+// 1) 非 OpenAI 一律清掉加密内容（原来 Reasoning 项被豁免）
+item.clear_encrypted_content();
+
+// 2) 非 OpenAI 不再请求加密推理内容
+let mut include = if is_openai {
+    vec!["reasoning.encrypted_content".to_string()]
+} else {
+    Vec::new()
+};
+```
+
+补丁已打到服务器源码上，但**编译不起来**：
+
+| 障碍 | 现状 |
+|---|---|
+服务器没有 C 编译器 | 系统无 cc/gcc/clang，无 root 装不了 |
+rust-toolchain 要 1.95.0 | 镜像上没有该版本（stable 是 1.99.1） |
+改用 stable | 可以装，但 build script 全挂（缺 cc） |
+用 zig 充当 cc | zig 下载 8MB 后卡死，镜像不可用 |
+
+**结论**：多 agent 目前被"编译环境 + 服务端兼容性"双重卡住。
+单 agent 走 responses 协议是通的，且能拿到 reasoning。
