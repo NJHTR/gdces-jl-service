@@ -92,6 +92,40 @@ LLM | `qwen3.7-plus` | 200，**返回带 `reasoning_content`**（真正的思考
 - ASR 只吃 16k 单声道 wav，webm/mp3 要先转（容器里有 ffmpeg）
 - 华工 VLM 要求文件**带扩展名**，没扩展名直接 400
 
+## R8 第一步：模型进目录 + 整理 agent 活了（2026-11-06 01:10）
+
+### 做了什么
+
+```
+models-manager/models.json   加 qwen3.7-plus（复制 qwen3.8-flash 整块，只改 slug/名称/描述）
+patches/0003-add-qwen37-plus.patch   生成的补丁
+重编译 11m06s（jl-easycode-build:local），strip 后 297MB
+部署：repos/easycode/.target/release/easycode（注意这是运行位置，不是 easycode-rs/target）
+```
+
+**踩的坑**：第一次把新 bin 从 `.target` 复制回 `.target`，等于没换。
+构建产物在 `easycode-rs/target/release/`，运行位置是 `.target/release/` —— 两个目录。
+
+### 结果
+
+```
+Unknown model qwen3.7-plus 警告：之前每轮都有，现在 0 次
+memory_consolidate_global：之前 status=error / failed_agent，现在 status=done
+记忆目录开始有文件：
+  memory_summary.md（首行 v1，各节都是 No…yet）
+  MEMORY.md（# Memory Handbook / No consolidated memories yet）
+  raw_memories.md（仍为空）
+```
+
+**结论：整理 agent 能跑了，但 phase1（从会话里抽候选记忆）仍然产出 0。**
+所以记忆还是空的 —— 骨架有了，内容没有。
+
+### 下一步（具体到函数）
+
+读 `easycode_state` 里 `claim_stage1_jobs_for_startup` 的 SQL，看它到底要什么条件：
+线程完成态？rollout watermark？还是需要 `threads` 某个标志位。
+现在 `jobs` 表里只有全局整理任务，**没有任何 stage1 任务行** —— 说明 claim 阶段就没选上。
+
 ## 记忆为什么一直是空的（2026-11-06 凌晨，查清了）
 
 ### 不是没跑，是**整理 agent 失败**

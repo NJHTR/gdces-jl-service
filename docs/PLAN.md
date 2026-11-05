@@ -118,9 +118,10 @@ project / member / audit / standard 搬到 Java，Python 通过 HTTP 调。
 
 现状：管线跑，整理 agent 失败（`failed_agent`），`stage1_outputs` 为 0。
 
-- [ ] `qwen3.7-plus` 加进 models.json（最小改动），重编译
-- [ ] 复测：`stage1_outputs` 是否开始有行、`MEMORY.md` 是否生成
-- [ ] 若仍失败：读 `memories/write/src/phase2.rs`，看 agent 是怎么起的、`failed_agent` 由哪一步产生
+- [x] `qwen3.7-plus` 加进 models.json（补丁 0003），重编译并部署
+- [x] 复测：整理任务从 failed_agent → done，生成了 MEMORY.md / memory_summary.md 骨架
+      **但 phase1 仍 0 行**（没有 stage1 任务被 claim）
+- [ ] 读 `easycode_state::claim_stage1_jobs_for_startup` 的 SQL，查 phase1 为什么一个都没选上
 
 ---
 ### R7 知识架构（终态，不返工）
