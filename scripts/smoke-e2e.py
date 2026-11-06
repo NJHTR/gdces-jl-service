@@ -677,12 +677,6 @@ def main():
     else:
         check("缺字段标已签被拒", False, "反向用例没建起来")
 
-    # 清理是否干净：smoke 造的东西不许留在库里（以前 DELETE /docs 不存在，静默 404）
-    left = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s' AND "
-               "(obj LIKE 'smoke%%' OR obj LIKE 'F4 自测%%' OR obj LIKE '%%受控状态机%%')"
-               % PROJECT)
-    check("测试文书已清干净", left.strip() == "0", "残留 %s" % left.strip())
-
     check_patrol_report()
     check_form_report(ctl)
     check_daily_report()
@@ -709,6 +703,13 @@ def finish(created):
                     if os.path.isfile(fp):
                         os.remove(fp)
                 print("  按任务删除 doc %s（task %s）" % (did, tid))
+
+    # 清理是否干净：smoke 造的东西不许留在库里
+    # （这句必须放在清理之后 —— 之前放在前面，永远看到本次自己的 3 份）
+    got = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s' AND "
+              "(obj LIKE 'smoke%%' OR obj LIKE 'F4 自测%%' OR obj LIKE '%%受控状态机%%')"
+              % PROJECT)
+    check("测试文书已清干净", got.strip() == "0", "残留 %s" % got.strip())
 
     if KEEP:
         print("  保留测试文书: %s" % created)
