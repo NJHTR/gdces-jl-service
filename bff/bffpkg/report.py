@@ -18,6 +18,9 @@ EXPORT_ROOT = os.path.join(ROOT, "data", "exports")
 ISSUE_KEYS = ("事由", "隐患描述", "问题描述", "存在问题", "检查内容", "检查事项")
 DEADLINE_KEYS = ("整改期限", "期限", "deadline")
 CHECK_KINDS = ("监理检查记录", "平行检查记录", "旁站记录", "监理日志")
+# 这些词出现在对象名里，说明是自测/压测产物，不是现场记录
+NOISE_WORDS = ("测试", "自测", "复现", "接口", "容器", "压力", "CLI", "校验",
+               "参数形状", "Java骨架", "工具状态")
 
 
 def _safe_name(s):
@@ -53,6 +56,10 @@ def _docs_between(project_id, start, end):
         r = dict(r)
         r["fields"] = _loads(r.get("fields"))
         r["date"] = str(r.get("created_at") or "")[:10]
+        obj = (r.get("obj") or "")
+        # 自测/压测产物不是现场记录，不进巡视记录
+        if any(w in obj for w in NOISE_WORDS):
+            continue
         out.append(r)
     return out
 
@@ -276,10 +283,16 @@ def build_patrol_docx(project_id, start, end, inspector="", org="广东建设工
     ]:
         _para(doc, line, size=9, space_after=2)
 
-    name = "%s-巡视记录-%s_%s.docx" % (_safe_name(proj.get("name") or project_id), start, end)
+    # 中文显示名放进 Content-Disposition；URL 与磁盘名只用 ASCII，
+    # 否则 wx.downloadFile 里带中文会让请求行编码失败（实测 URLError）
+    display = "%s-巡视记录-%s_%s.docx" % (proj.get("name") or project_id, start, end)
+    url_name = "patrol-%s_%s.docx" % (start.replace("-", ""), end.replace("-", ""))
     dest = os.path.join(EXPORT_ROOT, _safe_name(project_id))
     os.makedirs(dest, exist_ok=True)
-    path = os.path.join(dest, name)
+    path = os.path.join(dest, url_name)
     doc.save(path)
-    return {"path": path, "name": name, "bytes": os.path.getsize(path),
+    with open(path + ".meta.json", "w", encoding="utf-8") as f:
+        json.dump({"name": display, "from": start, "to": end}, f, ensure_ascii=False)
+    return {"path": path, "name": display, "url_name": url_name,
+            "bytes": os.path.getsize(path),
             "days": len(blocks), "docs": len(docs), "photos": len(photos)}

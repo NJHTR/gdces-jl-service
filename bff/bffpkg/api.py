@@ -83,7 +83,13 @@ class Handler(BaseHTTPRequestHandler):
                     fp = hits[0] if hits else fp
                 ctype = ("application/vnd.openxmlformats-officedocument."
                          "wordprocessingml.document")
-                return self._send_file(fp, os.path.basename(fp), ctype)
+                show = os.path.basename(fp)
+                try:
+                    with open(fp + ".meta.json", encoding="utf-8") as mf:
+                        show = json.load(mf).get("name") or show
+                except (OSError, ValueError) as e:
+                    sys.stderr.write("[export] 读不到显示名（用文件名）%s: %r\n" % (fp, e))
+                return self._send_file(fp, show, ctype)
             if path == "/api/v1/jobs":
                 return self._send(200, {"code": 0, "data": {"list": list_jobs()}})
             if path == "/api/v1/project":
@@ -311,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
                 sub = os.path.basename(os.path.dirname(got["path"]))
                 return self._send(200, {"code": 0, "data": {
                     "name": got["name"],
-                    "url": "/api/v1/exports/%s/%s" % (sub, got["name"]),
+                    "url": "/api/v1/exports/%s/%s" % (sub, got.get("url_name") or got["name"]),
                     "bytes": got["bytes"], "days": got["days"],
                     "docs": got["docs"], "photos": got["photos"],
                     "from": start, "to": end}})
