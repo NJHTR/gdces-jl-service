@@ -23,8 +23,8 @@ SEP = re.compile(r"^·\s*|\s+·\s+")
 
 
 def parse_file(path):
-    """解析一个规范文件 → (code, version, [(clause, title, body), ...])"""
-    code, version = None, None
+    """解析一个规范文件 → (code, version, std_title, [(clause, title, body), ...])"""
+    code, version, std_title = None, None, None
     items, cur, body = [], None, []
 
     def flush():
@@ -42,6 +42,9 @@ def parse_file(path):
             if m and code is None:
                 parts = SEP.split(m.group(1))
                 code = parts[0].strip()
+                # 一级标题形如「GB 50204-2015 · 混凝土结构工程施工质量验收规范」
+                if len(parts) > 1:
+                    std_title = parts[1].strip()
                 continue
             m = H2.match(line)
             if m:
@@ -51,7 +54,7 @@ def parse_file(path):
             if cur is not None:
                 body.append(line)
     flush()
-    return code, version, items
+    return code, version, std_title, items
 
 
 def sync_standards(dry_run=False, verbose=True):
@@ -59,7 +62,7 @@ def sync_standards(dry_run=False, verbose=True):
     files = sorted(glob.glob(os.path.join(STD_DIR, "*.md")))
     new = upd = skip = 0
     for path in files:
-        code, version, items = parse_file(path)
+        code, version, std_title, items = parse_file(path)
         if not code or not items:
             if verbose:
                 sys.stderr.write("[knowledge] 跳过格式不对的文件：%s\n" % os.path.basename(path))
@@ -74,12 +77,13 @@ def sync_standards(dry_run=False, verbose=True):
                     print("  %s %s %s → %s" % (code, clause, ctitle, "更新" if exists else "新增"))
                 continue
             if exists:
-                exec_sql("UPDATE standard SET title=%s, body=%s, version=%s WHERE id=%s",
-                         (ctitle, body, version, exists[0]["id"]))
+                exec_sql("UPDATE standard SET title=%s, std_title=%s, body=%s, version=%s "
+                         "WHERE id=%s", (ctitle, std_title, body, version, exists[0]["id"]))
                 upd += 1
             else:
-                exec_sql("INSERT INTO standard (code, clause, title, body, version) "
-                         "VALUES (%s,%s,%s,%s,%s)", (code, clause, ctitle, body, version))
+                exec_sql("INSERT INTO standard (code, clause, title, std_title, body, version) "
+                         "VALUES (%s,%s,%s,%s,%s,%s)",
+                         (code, clause, ctitle, std_title, body, version))
                 new += 1
     if verbose and not dry_run:
         total = q("SELECT COUNT(*) AS n FROM standard")[0]["n"]

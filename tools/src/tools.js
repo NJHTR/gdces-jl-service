@@ -65,7 +65,7 @@ export async function searchRecords({ projectId, keyword, place, kind, dateFrom,
 export async function searchStandards({ query: text, limit = 5 }) {
   if (!text || !String(text).trim()) return [];
   const rows = await q(
-    `SELECT code, clause, title, body, version, effective_at,
+    `SELECT code, clause, title, std_title, body, version, effective_at,
             ROUND(MATCH(title, body) AGAINST (? IN NATURAL LANGUAGE MODE), 3) AS score
        FROM standard
       HAVING score > 0

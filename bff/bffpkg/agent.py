@@ -640,10 +640,20 @@ def _cites_from_output(label, output):
     if not isinstance(data, list):
         return out
     if label == "search_standards":
-        for x in data[:3]:
-            if isinstance(x, dict) and x.get("code") and x.get("clause"):
-                out.append({"kind": "rule", "code": x["code"], "clause": x["clause"],
-                            "title": x.get("title") or ""})
+        for x in data[:5]:
+            if not (isinstance(x, dict) and x.get("code") and x.get("clause")):
+                continue
+            body = (x.get("body") or "").strip().replace("\n", " ")
+            out.append({
+                "kind": "rule",
+                "std": (x.get("std_title") or "").strip(),
+                "code": x["code"],
+                "clause": x["clause"],
+                "title": (x.get("title") or "").strip(),
+                # 摘录：像论文引用那样给一句原文，够读者判断，不是全文
+                "quote": body[:140],
+                "source": "标准原文（公司购买版）",
+            })
     return out
 
 
@@ -750,6 +760,7 @@ def _parse_cli_jsonl(stdout):
 
             for ci in _cites_from_output(label, out):
                 if not any((x["code"], x["clause"]) == (ci["code"], ci["clause"]) for x in cites):
+                    ci["n"] = len(cites) + 1
                     cites.append(ci)
 
     # 收尾：没标记完成的按完成算
