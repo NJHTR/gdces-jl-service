@@ -283,6 +283,50 @@ def check_imports():
     return 0
 
 
+def check_architecture():
+    """架构不变量（docs/ARCHITECTURE-FINAL.md）：一件事只能有一个实现。
+
+    这几条都是真出过问题的地方：
+      · 两套建文书路径（老的那条绕过守卫）→ 现在只允许 register 一条
+      · doc 表多个写者 → 只允许 register 一处 INSERT
+    """
+    import glob
+    import io as _io
+    import os as _os
+
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    pkg = _os.path.join(root, "bff", "bffpkg")
+    problems = []
+
+    files = sorted(glob.glob(_os.path.join(pkg, "*.py")))
+    text = {}
+    for f in files:
+        text[f] = _io.open(f, encoding="utf-8", errors="replace").read()
+
+    # 1) 老的单体/老路径不许回来
+    for f, t in text.items():
+        if "def handle_doc_create" in t:
+            problems.append("%s 里又出现了 handle_doc_create（POST /docs 已下线）" % _os.path.basename(f))
+
+    # 2) doc 表只有一个 INSERT
+    hits = [( _os.path.basename(f), t.count("INSERT INTO doc ")) for f, t in text.items()]
+    total = sum(n for _, n in hits)
+    if total != 1:
+        problems.append("INSERT INTO doc 出现 %d 次（应为 1 次）：%s"
+                        % (total, [h for h in hits if h[1]]))
+
+    # 3) 解析点不许再用下划线字段（引擎协议是驼峰）
+    # 只查"读字段"的写法：it.get("aggregated_output") / it.get("exit_code")
+    for f, t in text.items():
+        for bad, good in (('it.get("aggregated_output")', "it.get(\"aggregatedOutput\")"),
+                          ('it.get("exit_code")', "it.get(\"exitCode\")")):
+            if bad in t:
+                problems.append("%s 用了 %s，应为 %s"
+                                % (_os.path.basename(f), bad, good))
+
+    return problems
+
+
 def main():
     say("preflight —— 提交前自检")
     total = 0
@@ -299,6 +343,8 @@ def main():
     total += check_imports()
 
     print("")
+    problems.extend(check_architecture())
+
     if problems:
         print("发现 %d 个问题：" % len(problems))
         for p in problems:

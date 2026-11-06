@@ -916,7 +916,11 @@ def _parse_cli_jsonl(stdout, ctx=None):
             if not cmd:
                 continue
             status = it.get("status")
-            out = it.get("aggregated_output") or ""
+            # 引擎字段是 camelCase（实测 keys：aggregatedOutput / exitCode / durationMs）。
+            # 以前读成下划线 → 输出永远空、退出码永远 None → 失败也显示成功。
+            out = it.get("aggregatedOutput") or ""
+            exit_code = it.get("exitCode")
+            ok_flag = exit_code in (0, None)
 
             m = re.search(r"jl-tool\s+([a-z_]+)", cmd)
             label = m.group(1) if m else "shell"
@@ -937,15 +941,15 @@ def _parse_cli_jsonl(stdout, ctx=None):
                     item["state"] = "done"
                     item["secs"] = round(time.time() - item.pop("_t0", time.time()), 1)
                     item["output"] = out[:2000] or item.get("output") or ""
-                    item["ok"] = it.get("exit_code") in (0, None)
+                    item["ok"] = ok_flag
             else:
                 item = {"kind": "cmd" if m else "shell", "tool": label,
                         "icon": "search" if "search" in label else ("doc" if "create" in label else "run"),
-                        "text": title + ("" if it.get("exit_code") in (0, None) else "（失败）"),
+                        "text": title + ("" if ok_flag else "（失败）"),
                         "cmd": cmd[:500], "output": out[:2000],
                         "args": json.dumps(args, ensure_ascii=False)[:300] if args else "",
                         "state": "done" if status != "in_progress" else "running",
-                        "_t0": time.time(), "ok": it.get("exit_code") in (0, None)}
+                        "_t0": time.time(), "ok": ok_flag}
                 if item["state"] == "done":
                     item["secs"] = 0
                     item.pop("_t0", None)
