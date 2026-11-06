@@ -580,14 +580,17 @@ def handle_bootstrap(params, user):
         })
 
     # ---- 记忆 ----
-    memos = [{"id": f"m{m['id']}", "text": m["text"],
-              "meta": f"用了 {m['hits']} 次 · 来自我的习惯"} for m in
-             q("SELECT id, text, hits FROM memory WHERE scope='user' AND owner_id=%s AND status=1 "
-               "ORDER BY hits DESC, id DESC", (str(user_id),))]
-    proj_memos = [{"id": f"p{m['id']}", "text": m["text"],
-                   "meta": f"{m['source']} · 全项目"} for m in
-                  q("SELECT id, text, source FROM memory WHERE scope='project' AND owner_id=%s AND status=1 "
-                    "ORDER BY hits DESC, id DESC", (project_id,))]
+    # 元数据交给前端展示（来源/次数/是否生效）；停用的也返回，才能"恢复"
+    memos = [{"id": f"m{m['id']}", "text": m["text"], "source": m["source"],
+              "hits": m["hits"], "status": m["status"], "appliesTo": m["applies_to"]}
+             for m in q("SELECT id, text, source, hits, status, applies_to FROM memory "
+                        "WHERE scope='user' AND owner_id=%s "
+                        "ORDER BY status DESC, hits DESC, id DESC", (str(user_id),))]
+    proj_memos = [{"id": f"p{m['id']}", "text": m["text"], "source": m["source"],
+                   "hits": m["hits"], "status": m["status"], "appliesTo": m["applies_to"]}
+                  for m in q("SELECT id, text, source, hits, status, applies_to FROM memory "
+                             "WHERE scope='project' AND owner_id=%s "
+                             "ORDER BY status DESC, hits DESC, id DESC", (project_id,))]
 
     return 200, {"code": 0, "data": {
         "msgs": msgs, "records": records, "docs": docs,

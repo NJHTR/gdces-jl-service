@@ -557,6 +557,26 @@ def main():
     if mid3:
         call("DELETE", "/api/v1/memories/%s" % mid3)
 
+    # 4.98) C4 记忆页要能显示来源/次数/状态（bootstrap 的 projMemos）
+    kw4 = "smoke记忆页" + uuid.uuid4().hex[:4]
+    st, b = call("POST", "/api/v1/memories", {
+        "scope": "project", "ownerId": PROJECT, "text": kw4 + "：先写结论"})
+    mid4 = (b.get("data") or {}).get("id")
+    st, b = call("GET", "/api/v1/bootstrap?projectId=" + PROJECT)
+    pm = (b.get("data") or {}).get("projMemos") or []
+    one = next((x for x in pm if str(x.get("id")) == "p" + str(mid4)), None)
+    check("记忆页拿到元数据", bool(one) and one.get("status") is not None
+          and one.get("hits") is not None and bool(one.get("source")),
+          str(one)[:80])
+    if mid4:
+        call("PATCH", "/api/v1/memories/%s" % mid4, {"status": 0})
+        st, b = call("GET", "/api/v1/bootstrap?projectId=" + PROJECT)
+        pm2 = (b.get("data") or {}).get("projMemos") or []
+        off = next((x for x in pm2 if str(x.get("id")) == "p" + str(mid4)), None)
+        check("停用后仍在列表（可恢复）", bool(off) and int(off.get("status")) == 0,
+              str(off)[:60])
+        call("DELETE", "/api/v1/memories/%s" % mid4)
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {
