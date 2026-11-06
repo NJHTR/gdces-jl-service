@@ -850,6 +850,17 @@ def rich_reply(text, gap_items):
         if pos < len(s):
             out.extend(_split_num(s[pos:]))
 
+    def push_cites(s):
+        """把 [n] 切成角标片段；其余交回 push_num。"""
+        pos = 0
+        for m in CITE_MARK_RE.finditer(s):
+            if m.start() > pos:
+                push_num(s[pos:m.start()])
+            out.append({"s": "r", "v": m.group(0), "n": int(m.group(1))})
+            pos = m.end()
+        if pos < len(s):
+            push_num(s[pos:])
+
     pos = 0
     for m in BOLD_RE.finditer(text):
         if m.start() > pos:
@@ -916,8 +927,12 @@ NUM_RE = re.compile(
 
 
 # ---------------------------------------------------------------- rich_segments
+# 角标：[1] [2] …（模型自己写的引用序号）
+CITE_MARK_RE = re.compile(r"\[(\d{1,2})\]")
+
+
 def rich_segments(text):
-    """把一句话切成 [{s,v}]，s ∈ t(普通)/n(数字)/b(加粗)。"""
+    """把一句话切成 [{s,v}]，s ∈ t(普通)/n(数字)/b(加粗)/r(角标)。"""
     text = text or ""
     if not text:
         return []
@@ -937,11 +952,11 @@ def rich_segments(text):
     pos = 0
     for m in BOLD_RE.finditer(text):
         if m.start() > pos:
-            push_num(text[pos:m.start()])
+            push_cites(text[pos:m.start()])
         out.append({"s": "b", "v": m.group(1)})
         pos = m.end()
     if pos < len(text):
-        push_num(text[pos:])
+        push_cites(text[pos:])
 
     return [x for x in out if x["v"]]
 

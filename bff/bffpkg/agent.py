@@ -707,8 +707,98 @@ def _cites_from_output(label, output):
     return out
 
 
+# ---------------------------------------------------------------- _cite_from_entry
+CITE_KIND_PREFIX = (
+    ("standard://", "standard"),
+    ("thread://", "thread"),
+    ("web://", "web"),
+)
+
+
+def _read_span(ws, path, start, end, limit=40):
+    """按行号读一小段原文当摘录（读不到就返回空，不报错）。
+
+    只读被引用的那几行，不读全文：摘录 ≤140 字，够读者判断。
+    """
+    if not path or start is None or end is None:
+        return ""
+    if end < start:
+        start, end = end, start
+    end = min(end, start + limit)
+    cands = []
+    if path.startswith("/"):
+        cands.append(path)
+    elif path.startswith("homes/") or path.startswith("data/"):
+        cands.append(os.path.join(ROOT, path))
+    else:
+        cands.append(os.path.join(ws or "", path))
+    for fp in cands:
+        try:
+            with open(fp, encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+        seg = [ln.strip() for ln in lines[start - 1:end] if ln.strip()]
+        if seg:
+            return " ".join(seg)[:140]
+    return ""
+
+
+def _cite_from_entry(ws, e):
+    """把引擎的一条 entry（path/lineStart/lineEnd/note）归一成我们的引用结构。"""
+    path = (e.get("path") or "").strip()
+    note = (e.get("note") or "").strip()
+    try:
+        start = int(e.get("lineStart") or e.get("line_start") or 0)
+        end = int(e.get("lineEnd") or e.get("line_end") or 0)
+    except (TypeError, ValueError):
+        start = end = 0
+
+    kind, ref = "file", path
+    for prefix, k in CITE_KIND_PREFIX:
+        if path.startswith(prefix):
+            kind, ref = k, path[len(prefix):]
+            break
+    else:
+        base = os.path.basename(path)
+        if path.endswith("records/photos.md"):
+            kind = "photo"
+        elif "/memories/" in path or base in ("MEMORY.md", "memory_summary.md"):
+            kind = "memory"
+
+    item = {"kind": kind, "ref": ref, "path": path, "note": note,
+            "lineStart": start, "lineEnd": end,
+            "source": "模型声明"}
+
+    if kind == "standard":
+        # ref 形如 JGJ 130-2011#6.4.3
+        code, _, clause = ref.partition("#")
+        item["code"], item["clause"] = code.strip(), clause.strip()
+        item["std"], item["quote"] = "", ""
+        try:
+            rows = q("SELECT title, std_title, body FROM standard WHERE code=%s AND clause=%s",
+                     (item["code"], item["clause"]))
+            if rows:
+                r = rows[0]
+                item["std"] = (r.get("std_title") or "").strip()
+                item["title"] = (r.get("title") or "").strip()
+                item["quote"] = (r.get("body") or "").strip().replace("\n", " ")[:140]
+                item["source"] = "标准库"
+        except Exception as exc:
+            sys.stderr.write("[cite] 查条文失败 %s#%s: %r\n" % (item["code"], item["clause"], exc))
+    elif kind in ("file", "photo", "memory"):
+        item["quote"] = _read_span(ws, path, start, end)
+    elif kind == "web":
+        item["quote"] = note      # 搜索结果不回传，只能用它自己的话
+        item["source"] = "联网检索（未核验）"
+    elif kind == "thread":
+        item["quote"] = note
+        item["source"] = "本轮对话"
+    return item
+
+
 # ---------------------------------------------------------------- _parse_cli_jsonl
-def _parse_cli_jsonl(stdout):
+def _parse_cli_jsonl(stdout, ctx=None):
     """从 exec --json 里取：会话 id、最终文本、时间线（命令 + 模型插话）、引用
 
     时间线用来做"两层折叠"：外层是整轮过程，内层每条都能单独展开看细节。
@@ -740,6 +830,16 @@ def _parse_cli_jsonl(stdout):
                 texts.append(txt)
                 timeline.append({"kind": "note", "icon": "think", "text": txt[:400],
                                  "output": txt[:2000]})
+            # 引擎已把 <oai-mem-citation> 从正文剥掉，结构化放在这里
+            mc = it.get("memoryCitation") or it.get("memory_citation") or {}
+            ws = (ctx or {}).get("ws")
+            for _e in (mc.get("entries") or []):
+                if not isinstance(_e, dict):
+                    continue
+                _ci = _cite_from_entry(ws, _e)
+                if not any((x.get("kind"), x.get("ref")) == (_ci["kind"], _ci["ref"])
+                           for x in cites):
+                    cites.append(_ci)
 
         # ---- 子 agent 的活动（多 agent 时才有）----
         elif kind == "sub_agent_activity":
@@ -1122,13 +1222,16 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                 st.pop("t0", None)
         _set_progress(task_id, steps)
 
-        thread_id, final_text, trace, cites = _parse_cli_jsonl("".join(lines))
+        thread_id, final_text, trace, cites = _parse_cli_jsonl("".join(lines), ctx={"ws": ws})
 
         # 工具侧落盘的引用（命令输出不回传，只能这么取）
         for _ci in _drain_cites(ws, started):
-            if not any((x["code"], x["clause"]) == (_ci["code"], _ci["clause"]) for x in cites):
-                _ci["n"] = len(cites) + 1
+            if not any((x.get("kind"), x.get("ref")) == (_ci["kind"], _ci["ref"])
+                       for x in cites if x.get("ref")):
                 cites.append(_ci)
+        # 统一编号：模型声明在前、工具实测在后，编号从 1 连续
+        for _i, _c in enumerate(cites, 1):
+            _c["n"] = _i
 
         # 耗时以运行时的 progress 为准（事件流里 completed 可能没有 in_progress 配对）
         cmd_items = [t for t in trace if t.get("kind") in ("cmd", "shell")]
