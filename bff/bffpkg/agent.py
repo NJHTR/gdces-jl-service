@@ -232,6 +232,8 @@ def build_context(project_id, user_id, query=None):
             here.append("项目技能 `.easycode/skills/`（目录见系统技能清单，正文按需读）")
     except OSError:
         pass
+    if os.path.isdir(f"{ws}/knowledge"):
+        here.insert(0, "组织知识 `knowledge/`（规范、模板、填写示例、验收要点；只读）")
     if here:
         parts.append("【在哪找】" + " · ".join(here))
 
@@ -1165,6 +1167,26 @@ def run_turn(task_id, project_id, user_id, text, images=None):
 
 
 # ---------------------------------------------------------------- render_agents_md
+def ensure_ws_links(project_id):
+    """把组织知识挂进项目工作区：<ws>/knowledge -> data/knowledge（只读）。
+
+    为什么需要：agent 的 cwd 是工作区，`knowledge/...` 相对路径才找得到；
+    绝对路径能写但提示词里难看、也容易写错（以前指针写的是 data/knowledge，
+    在工作区里根本不存在）。
+    """
+    ws = f"{WS_ROOT}/{project_id}"
+    src = os.path.join(ROOT, "data", "knowledge")
+    dst = os.path.join(ws, "knowledge")
+    if os.path.islink(dst):
+        return
+    if os.path.exists(dst):
+        return                     # 已经是真目录（有人手动建过），不覆盖
+    try:
+        os.symlink(src, dst)
+    except OSError as e:
+        sys.stderr.write("[ws] 建 knowledge 软链失败 %s: %r\n" % (dst, e))
+
+
 HUMAN_START = "<!-- human:start -->"
 HUMAN_END = "<!-- human:end -->"
 HUMAN_SEED = "\n（这个项目的人工约定写在这里，服务重写 AGENTS.md 时不会覆盖）\n"
@@ -1179,9 +1201,10 @@ def render_agents_md(project_id, user_id):
 
     这样 AGENTS.md 能进 git、能 diff、能 review；机器生成的部分不会被误当成人写的。
     """
-    ctx = build_context(project_id, user_id)
     ws = f"{WS_ROOT}/{project_id}"
     os.makedirs(f"{ws}/.agent", exist_ok=True)
+    ensure_ws_links(project_id)
+    ctx = build_context(project_id, user_id)
     path = f"{ws}/AGENTS.md"
 
     human = HUMAN_SEED
