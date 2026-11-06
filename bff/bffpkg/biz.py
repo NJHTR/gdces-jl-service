@@ -164,6 +164,10 @@ def handle_upload(project_id, params, data, user=None):
     if len(data) > 20 * 1024 * 1024:
         return 413, {"code": 413, "message": "超过 20MB"}
 
+    deny = guard_project(project_id, user)
+    if deny:
+        return deny
+
     sha, blob_path, size = store_blob(data)
     # params 里已经合并了 query + 表单字段（见 api.py）
     place = q1(params, "place")
@@ -279,9 +283,6 @@ def index_photo(project_id, sha, caption, place=None):
     """
     if not project_id or not sha or not (caption or "").strip():
         return None
-    deny = guard_project(project_id, user)
-    if deny:
-        return deny
     ws = f"{WS_ROOT}/{project_id}"
     rel = "records/photos.md"
     path = f"{ws}/{rel}"
