@@ -341,8 +341,9 @@ def _rerender_if_project(scope, owner):
         return None
     try:
         # biz 依赖 core，core 不能顶层导入 biz（循环）—— 调用时导入
-        from .biz import render_project_memory
+        from .biz import render_project_memory, render_rules_md
 
+        render_rules_md(owner)
         return render_project_memory(owner)
     except Exception:
         traceback.print_exc()

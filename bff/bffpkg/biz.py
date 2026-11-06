@@ -536,6 +536,51 @@ def handle_asr(body, user=None):
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
                                      "saved": saved}}
 
+# ---------------------------------------------------------------- render_rules_md
+def render_rules_md(project_id):
+    """把项目规矩渲染成 <ws>/records/rules.md（memory 表是条目账本，这里是视图）。
+
+    以前是"创建时往文件追加一行 + 同时写库"——两处各写各的，改了库文件不动、
+    删了库文件还在。现在只有 memory 表写，文件每次从表重渲染。
+    """
+    ws = f"{WS_ROOT}/{project_id}"
+    try:
+        os.makedirs(f"{ws}/records", exist_ok=True)
+    except OSError as e:
+        sys.stderr.write("[rules] 建目录失败 %s: %r\n" % (ws, e))
+        return None
+    rows = q("SELECT text FROM memory WHERE scope='project' AND owner_id=%s "
+             "AND status=1 ORDER BY id", (project_id,))
+    lines = ["# 项目规矩", "",
+             "> 由小程序/接口写入（条目来源见记忆账本）。AGENTS.md 只放指针，正文在这里。",
+             ""]
+    for r in rows:
+        t = (r.get("text") or "").strip()
+        if t:
+            lines.append("- %s" % t)
+    body = "\n".join(lines).rstrip() + "\n"
+    rel = "records/rules.md"
+    full = os.path.join(ws, rel)
+    try:
+        old = ""
+        if os.path.exists(full):
+            with open(full, encoding="utf-8") as f:
+                old = f.read()
+        if old == body:
+            return rel
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(body)
+        subprocess.run(["/usr/bin/git", "-C", ws, "add", "--", rel], check=False)
+        subprocess.run(["/usr/bin/git", "-C", ws,
+                        "-c", "user.name=jl-service", "-c", "user.email=jl@local",
+                        "commit", "-m", "docs(规矩): 重渲染项目规矩 %d 条" % len(rows)],
+                       check=False)
+    except OSError as e:
+        sys.stderr.write("[rules] 写文件失败 %s: %r\n" % (full, e))
+        return None
+    return rel
+
+
 # ---------------------------------------------------------------- 引用账本
 def _base_ref(b):
     """把一条依据归一成 (kind, ref)。支持两种形态：
@@ -879,6 +924,8 @@ def handle_doc_register(body, user=None):
     bases = body.get("bases") or []
     path = (body.get("path") or "").strip()
     commit = (body.get("commit") or "").strip()
+    # 这一步由哪条任务产出（工具从 .agent/turn-<uid>.json 带上来）
+    task_id = body.get("taskId") or None
 
     fields, bases = prepare_bases(fields, bases)
 
@@ -891,10 +938,11 @@ def handle_doc_register(body, user=None):
     # 用 lastrowid：以前 SELECT ... ORDER BY id DESC LIMIT 1 回头捞，
     # 同项目并发登记会捞到别人的行（返回错误的 docId）。
     doc_id = exec_sql(
-        "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit, task_id) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (pid, kind, obj or None, state, json.dumps(fields, ensure_ascii=False),
-         json.dumps(bases, ensure_ascii=False), path or None, commit or None))
+         json.dumps(bases, ensure_ascii=False), path or None, commit or None,
+         task_id))
 
     audit(pid, (user or {}).get("id") or 1, "doc.create", f"doc:{doc_id}", commit)
     return 200, {"code": 0, "data": {

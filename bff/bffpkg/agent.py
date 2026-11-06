@@ -275,20 +275,14 @@ def handle_memory_create(body):
     if scope not in ("user", "project") or not owner or not text:
         return 400, {"code": 400, "message": "scope/ownerId/text 必填"}
     kept = text[:512]
-    # 知识写文件，DB 只做索引（谁在什么时候说过这条）。
-    # 个人 → 引擎的 notes 通道（整理时会消费）；项目 → 项目工作区的规矩文件（git 版本化）。
+    # 记忆只有一个写者：memory 表。
+    # 项目规矩的 records/rules.md 是**渲染视图**（像 AGENTS.md），由 render_rules_md 生成；
+    # 个人笔记写进引擎的 notes 通道（整理时消费）。
     note = ""
     try:
         if scope == "project":
-            ws = f"{WS_ROOT}/{owner}"
-            os.makedirs(f"{ws}/records", exist_ok=True)
-            path = f"{ws}/records/rules.md"
-            if not os.path.exists(path):
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write("# 项目规矩\n\n> 由人通过小程序/接口添加；引擎每轮读 AGENTS.md 时按需看这里。\n\n")
-            with open(path, "a", encoding="utf-8") as f:
-                f.write("- %s\n" % kept)
-            note = path.replace(WS_ROOT + "/", "")
+            from .biz import render_rules_md
+            note = render_rules_md(str(owner)) or ""
         else:
             d = os.path.join(HOMES_ROOT, str(owner), "memories", "extensions", "ad_hoc", "notes")
             os.makedirs(d, exist_ok=True)
@@ -504,6 +498,14 @@ def handle_bootstrap(params, user):
 
 # ---------------------------------------------------------------- learn_from_turn
 def learn_from_turn(project_id, user_id, user_text, assistant_text, trace):
+    """模型抽取式学习。**默认关闭**。
+
+    为什么关：记忆只能有一个写者。个人记忆交给引擎整理（homes/<uid>/memories），
+    项目规矩交给 memory 表（rules.md 是渲染视图）。这里再写一遍 = 三方抢写、
+    而且用字面相似度去重，越写越脏。需要临时验证再开 MEMORY_LEARN=1。
+    """
+    if os.environ.get("MEMORY_LEARN", "0") != "1":
+        return []
     """让模型自己判断这轮有没有值得记的习惯/规矩，写进 memory 表"""
     convo = (f"用户说：{user_text[:800]}\n\n"
              f"助手回：{assistant_text[:800]}\n\n"
@@ -1160,6 +1162,13 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
     # 按任务隔离：以前是项目级共享的 last.md，同一项目两个人在跑时会互相覆盖
     out_file = f"{ws}/.agent/last-{task_id}.md"
     started = time.time()
+    # 本轮标记：工具登记文书时读它，把 doc 挂到这条任务上（不再靠时间窗认领）
+    try:
+        with open(f"{ws}/.agent/turn-{user_id}.json", "w", encoding="utf-8") as f:
+            json.dump({"taskId": task_id, "userId": user_id, "ts": started},
+                      f, ensure_ascii=False)
+    except OSError as e:
+        sys.stderr.write("[doc] 写轮次标记失败 %s: %r\n" % (ws, e))
     try:
         render_agents_md(project_id, user_id)
         try:
@@ -1329,10 +1338,19 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         ]
         trace_sum = ("调了 " + "、".join(short.get(t["tool"], t["tool"]) for t in ok_steps[:3])) if ok_steps else None
 
-        # 先看这一轮有没有产出文书 —— 结构化回答以它为真值
+        # 先看这一轮有没有产出文书 —— 结构化回答以它为真值。
+        # 优先按 task_id 认领（工具登记时带的），避免同项目并发时认错文书；
+        # 老工具没带 taskId 时才退回时间窗（并把原因写日志）。
         new_doc = q("SELECT id, kind, obj, state, fields FROM doc "
-                    "WHERE project_id=%s AND id > %s ORDER BY id LIMIT 1",
-                    (project_id, doc_before))
+                    "WHERE project_id=%s AND task_id=%s ORDER BY id DESC LIMIT 1",
+                    (project_id, task_id))
+        if not new_doc:
+            new_doc = q("SELECT id, kind, obj, state, fields FROM doc "
+                        "WHERE project_id=%s AND id > %s ORDER BY id LIMIT 1",
+                        (project_id, doc_before))
+            if new_doc:
+                sys.stderr.write("[doc] task %s 未按 task_id 认领，退回时间窗（doc %s）\n"
+                                 % (task_id, new_doc[0]["id"]))
         doc_row = new_doc[0] if new_doc else None
 
         turn_ms = int((time.time() - started) * 1000)
@@ -1708,7 +1726,16 @@ def handle_chat(body, headers=None):
                      "images": [i.get("blob") or i.get("sha") for i in images]},
                     ensure_ascii=False)))
 
-    display = text or ("[语音] " + ("；".join(transcripts) if transcripts else "")) or "[图片]"
+    # 按 parts 组装：以前用 or 链，图片消息 transcripts 为空时
+    # "[语音] " + "" 是真值 → 图片被标成语音（实测）
+    _bits = []
+    if text:
+        _bits.append(text)
+    if transcripts:
+        _bits.append("[语音] " + "；".join(transcripts))
+    if images:
+        _bits.append("[图片]×%d" % len(images))
+    display = " ".join(_bits) or "[空消息]"
     exec_sql("INSERT INTO message (project_id, user_id, client_id, role, text, task_id, sync, parts) "
              "VALUES (%s,%s,%s,'user',%s,%s,1,%s)",
              (project_id, user_id, client_id, display, task_id,

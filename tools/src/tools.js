@@ -108,6 +108,32 @@ export async function searchStandards(args = {}) {
   return rows;
 }
 
+/** 本轮任务号：BFF 在每轮开始写 <ws>/.agent/turn-<uid>.json，这里读最新的一个。
+ *
+ * 为什么要它：文书要挂到"是哪一轮产出的"上。以前 BFF 只能按"本轮之后第一条新文书"
+ * 认领，同项目并发时会把别人刚建的文书算成自己的（实测删过用户文书）。
+ */
+function currentTurn(projectId) {
+  try {
+    const dir = path.join("/ws", projectId, ".agent");
+    if (!fs.existsSync(dir)) return null;
+    const cands = fs.readdirSync(dir)
+      .filter((f) => /^turn-\d+\.json$/.test(f))
+      .map((f) => {
+        const fp = path.join(dir, f);
+        return { fp, mtime: fs.statSync(fp).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    if (!cands.length) return null;
+    if (Date.now() - cands[0].mtime > 30 * 60 * 1000) return null;  // 半小时前的不要
+    const j = JSON.parse(fs.readFileSync(cands[0].fp, "utf8"));
+    return j && j.taskId ? j.taskId : null;
+  } catch (e) {
+    console.error("[turn] 读本轮标记失败:", e && e.message);
+    return null;
+  }
+}
+
 /* ---------------- create_doc_draft ---------------- */
 // 不再在这里写字段表：字段规则只有一个出处 —— 服务端 schemas/<类型>.json。
 // 以前这里有一份 TEMPLATES，加字段时两边不同步，算出的状态和数据库对不上。
@@ -184,6 +210,7 @@ export async function createDocDraft({ projectId, kind, obj, fields, bases = [],
     body: JSON.stringify({
       projectId, kind, obj: obj || "",
       fields: fields || {}, bases, path: relPath, commit,
+      taskId: currentTurn(projectId),
     }),
   });
   const payload = await resp.json().catch(() => ({}));
