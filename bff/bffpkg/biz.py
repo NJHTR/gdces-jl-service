@@ -570,8 +570,10 @@ def _parse_ref(kind, ref):
 
 
 def _cite_digest(kind, ref, quote=""):
+    """一条 ref 一行。quote 不进 digest —— 否则同一法条引用十次会拆成十行，
+    计数失效。摘录不一致用 disputed 标记（见 record_citations）。"""
     import hashlib
-    return hashlib.md5(("%s|%s|%s" % (kind, ref, (quote or "")[:120])).encode("utf-8")).hexdigest()
+    return hashlib.md5(("%s|%s" % (kind, ref)).encode("utf-8")).hexdigest()
 
 
 def record_citations(bases):
@@ -588,11 +590,22 @@ def record_citations(bases):
             quote = (b.get("quote") or b.get("text") or "")[:120]
         dg = _cite_digest("standard", canon, quote)
         try:
-            exec_sql(
-                "INSERT INTO citation (source_kind, ref, quote, digest, used_count, last_used_at) "
-                "VALUES ('standard', %s, %s, %s, 1, NOW()) "
-                "ON DUPLICATE KEY UPDATE used_count=used_count+1, last_used_at=NOW()",
-                (canon, quote, dg))
+            old = q("SELECT id, quote FROM citation WHERE digest=%s", (dg,))
+            if old:
+                prev = (old[0].get("quote") or "")[:120]
+                # 同一 ref 出现不同摘录 = 有冲突，降级回 raw，等人工核对
+                if prev and quote and prev != quote:
+                    exec_sql("UPDATE citation SET used_count=used_count+1, disputed=1, "
+                             "status='raw', last_used_at=NOW() WHERE digest=%s", (dg,))
+                else:
+                    exec_sql("UPDATE citation SET used_count=used_count+1, "
+                             "last_used_at=NOW(), quote=COALESCE(NULLIF(quote,''), %s) "
+                             "WHERE digest=%s", (quote, dg))
+            else:
+                exec_sql(
+                    "INSERT INTO citation (source_kind, ref, quote, digest, used_count, last_used_at) "
+                    "VALUES ('standard', %s, %s, %s, 1, NOW())",
+                    (canon, quote, dg))
             n += 1
         except Exception as exc:
             sys.stderr.write("[cite] 记账失败 %s: %r\n" % (canon, exc))
