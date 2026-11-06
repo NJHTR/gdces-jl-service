@@ -323,6 +323,31 @@ class Handler(BaseHTTPRequestHandler):
                     "bytes": got["bytes"], "days": got["days"],
                     "docs": got["docs"], "photos": got["photos"],
                     "from": start, "to": end}})
+            if path == "/api/v1/reports/daily":
+                from .report import build_daily_docx
+                usr = resolve_token(bearer(self.headers))
+                pid = (body.get("projectId") or "").strip()
+                kind = (body.get("kind") or "监理日志").strip()
+                start = (body.get("from") or "").strip()
+                end = (body.get("to") or start).strip()
+                if not pid or not start:
+                    return self._send(400, {"code": 400, "message": "projectId 和 from 必填"})
+                deny = guard_project(pid, usr)
+                if deny:
+                    return self._send(*deny)
+                try:
+                    got = build_daily_docx(kind, pid, start, end,
+                                           (body.get("inspector") or "").strip())
+                except FileNotFoundError as exc:
+                    return self._send(400, {"code": 400,
+                                            "message": "这张表还没接模板：%s" % (exc,)})
+                except Exception as exc:
+                    traceback.print_exc()
+                    return self._send(500, {"code": 500, "message": "生成失败: %r" % (exc,)})
+                sub = os.path.basename(os.path.dirname(got["path"]))
+                return self._send(200, {"code": 0, "data": {
+                    "name": got["name"], "url": "/api/v1/exports/%s/%s" % (sub, got["url_name"]),
+                    "bytes": got["bytes"], "days": got["days"], "kind": kind}})
             if path == "/api/v1/reports/form":
                 from .report import build_form_docx
                 usr = resolve_token(bearer(self.headers))

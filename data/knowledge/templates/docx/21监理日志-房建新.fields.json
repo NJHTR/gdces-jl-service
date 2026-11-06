@@ -1,0 +1,108 @@
+{
+  "form": "监理日志",
+  "code": "GD-B-220",
+  "template": "21监理日志-房建新.docx",
+  "version": 1,
+  "desc": "省统表 21（房建新）。表头一行四格，中间四块内容是「标签行 + 下一行内容」。",
+  "slots": [
+    {
+      "key": "project",
+      "label": "工程项目名称",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "serial",
+      "label": "编号",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "日期",
+      "label": "日期",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "气温",
+      "label": "气温",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "天气",
+      "label": "天气",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "施工进展",
+      "label": "当日施工进展情况",
+      "target": "below",
+      "kind": "lines",
+      "lines_key": "施工进展lines"
+    },
+    {
+      "key": "监理工作",
+      "label": "当日监理工作情况",
+      "target": "below",
+      "kind": "lines",
+      "lines_key": "监理工作lines"
+    },
+    {
+      "key": "问题处理",
+      "label": "当日存在问题及处理情况",
+      "target": "below",
+      "kind": "lines",
+      "lines_key": "问题处理lines"
+    },
+    {
+      "key": "其他",
+      "label": "其他有关事项",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "其他lines"
+    },
+    {
+      "key": "记录人",
+      "label": "记录人（签名）",
+      "target": "cell",
+      "kind": "block",
+      "keep_tail": ["记录人（签名）"],
+      "sig_label": "记录人（签名）：",
+      "sig_key": "记录人"
+    },
+    {
+      "key": "审阅人",
+      "label": "总监理工程师",
+      "target": "cell",
+      "kind": "block",
+      "keep_tail": ["总监理工程师"],
+      "sig_label": "总监理工程师/总监理工程师（代表）：",
+      "sig_key": "审阅人"
+    },
+    {
+      "key": "审阅日期",
+      "label": "审阅日期",
+      "target": "cell",
+      "kind": "block",
+      "keep_tail": ["审阅日期"],
+      "sig_label": "审阅日期：",
+      "sig_key": "审阅日期"
+    }
+  ],
+  "fixed_labels": [
+    "工程项目名称",
+    "编号",
+    "日期",
+    "气温",
+    "天气",
+    "当日施工进展情况",
+    "当日监理工作情况",
+    "当日存在问题及处理情况",
+    "其他有关事项",
+    "记录人（签名）",
+    "总监理工程师",
+    "审阅日期"
+  ]
+}

@@ -154,6 +154,19 @@ def write_text(cell, text):
     return cell
 
 
+def write_lines(cell, lines, size=10.5):
+    """把多行写进一个空单元格（内容是独立一行的那种表，如监理日志）。"""
+    p0 = clear_cell(cell)
+    lines = [str(x) for x in (lines or []) if str(x).strip()] or ["（待补）"]
+    for i, line in enumerate(lines):
+        p = p0 if i == 0 else cell.add_paragraph()
+        r = p.add_run(line)
+        r.font.name = "宋体"
+        r.font.size = Pt(size)
+        r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    return cell
+
+
 def write_block(cell, lines, keep_tail=None, sig_line=None, date_line=None):
     """多行写入：保留标签段（不一定是第 0 段！）与尾部签名行，中间换成 lines。
 
@@ -229,6 +242,19 @@ def write_block(cell, lines, keep_tail=None, sig_line=None, date_line=None):
             if not font_name:
                 r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
 
+    # 5.5) 没有独立签名行时（标签本身就是「记录人（签名）：」这种），
+    #      把名字接在标签后面，别把标签整段丢掉
+    if tail_el is None and sig_line:
+        for p in cell.paragraphs:
+            if p._element is label_el:
+                for r in list(p.runs):
+                    r._element.getparent().remove(r._element)
+                r = p.add_run(sig_line)
+                r.font.name = font_name or "宋体"
+                r.font.size = font_size or Pt(10.5)
+                r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+                break
+
     # 6) 日期行：放签名后
     if date_line:
         dp = cell.add_paragraph()
@@ -283,6 +309,15 @@ def _fill_one(doc, spec, data, table_idx=0, header_idx=0):
         ri, ci = find_cell(tb, slot.get("label"))
         if ri is None:
             raise RuntimeError("模板里找不到标签「%s」" % slot.get("label"))
+        if slot["target"] == "below":
+            # 标签行的下一行（整行合并的那种内容格）
+            if ri + 1 >= len(tb.rows):
+                raise RuntimeError("标签「%s」下面没有内容行" % slot.get("label"))
+            write_lines(tb.rows[ri + 1].cells[ci],
+                        data.get(slot.get("lines_key") or "lines") or [],
+                        size=float(slot.get("size") or 10.5))
+            changed.append(("below", ri, ci))
+            continue
         if slot["target"] == "right":
             target = cell_right_of(tb, ri, ci)
             if target is None:

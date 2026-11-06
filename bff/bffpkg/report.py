@@ -431,3 +431,89 @@ def build_form_docx(project_id, doc_id):
         json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
     return {"path": path, "name": display, "url_name": url_name,
             "bytes": os.path.getsize(path), "docId": doc_id, "kind": kind}
+
+
+# ---------------------------------------------------------------- 按天出表（监理日志等）
+def _supervision_lines(b, limit=8):
+    """当日监理工作：按文书类型汇总 + 影像张数（只陈述做了什么，不评价）。"""
+    kinds = {}
+    for d in b.get("docs") or []:
+        k = (d.get("kind") or "文书").strip()
+        kinds[k] = kinds.get(k, 0) + 1
+    lines = []
+    for k, n in kinds.items():
+        lines.append("审阅/签发《%s》%d 份。" % (k, n))
+    photos = len(b.get("photos") or [])
+    if photos:
+        lines.append("现场影像 %d 张已归档（含部位/时间/天气水印）。" % photos)
+    if not lines:
+        lines.append("本日无新增文书或影像；现场情况未记录。")
+    return lines[:limit]
+
+
+def _temp_of(b):
+    """气温：影像里若有「29℃」这类就取，取不到留空（不编）。"""
+    for p in b.get("photos") or []:
+        cap = " " + (p.get("caption") or "") + " " + (p.get("weather") or "")
+        for i, ch in enumerate(cap):
+            if ch == "℃":
+                j = i - 1
+                while j >= 0 and (cap[j].isdigit() or cap[j] in "-~. "):
+                    j -= 1
+                seg = cap[j + 1:i].strip()
+                if seg:
+                    return seg
+    return ""
+
+
+def build_daily_docx(kind, project_id, start, end, inspector=""):
+    """按天出表（监理日志这类"一天一张"的表）。数据与巡视记录同一套 collect。"""
+    from .formfill import build as fill_forms, load_spec
+
+    spec = load_spec(kind)
+    proj, blocks, docs, photos = collect(project_id, start, end)
+    proj_name = proj.get("name") or project_id
+
+    records = []
+    for i, b in enumerate(blocks, 1):
+        y, m, d = b["date"].split("-")
+        records.append({
+            "project": proj_name,
+            "serial": "%s %04d" % (spec.get("code") or "", i),
+            "日期": "%s 年 %s 月 %s 日" % (y, m.lstrip("0"), d.lstrip("0")),
+            "气温": _temp_of(b),
+            "天气": b.get("weather") or "",
+            "施工进展lines": _parts(b) or ["（本日无新增文书）"],
+            "监理工作lines": _supervision_lines(b),
+            "问题处理lines": _issue_lines(b, limit=8),
+            "其他lines": ["现场影像与文书已归档，无其他事项。"] if (b.get("photos") or b.get("docs"))
+                          else ["无。"],
+            "记录人": inspector or "",
+            "审阅人": "",
+            "审阅日期": "",
+        })
+
+    if not records:
+        records = [{
+            "project": proj_name, "serial": "%s 0001" % (spec.get("code") or ""),
+            "日期": "%s 至 %s" % (start, end), "气温": "", "天气": "",
+            "施工进展lines": ["本期间没有可用于监理日志的文书或影像。"],
+            "监理工作lines": ["无记录。"], "问题处理lines": ["无记录。"],
+            "其他lines": ["无。"], "记录人": inspector or "", "审阅人": "", "审阅日期": "",
+        }]
+
+    code = (spec.get("code") or "form").replace("-", "").lower()
+    display = "%s-%s-%s_%s.docx" % (proj_name, kind, start, end)
+    url_name = "%s-%s_%s.docx" % (code, start.replace("-", ""), end.replace("-", ""))
+    dest = os.path.join(EXPORT_ROOT, _safe_name(project_id))
+    os.makedirs(dest, exist_ok=True)
+    path = os.path.join(dest, url_name)
+
+    got = fill_forms(kind, records, path)
+    if not got.get("labels_ok"):
+        raise RuntimeError("模板校验未通过，拒绝交付")
+    with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
+        json.dump({"name": display, "kind": kind, "from": start, "to": end,
+                   "forms": len(records)}, f, ensure_ascii=False)
+    return {"path": path, "name": display, "url_name": url_name,
+            "bytes": os.path.getsize(path), "days": len(records)}
