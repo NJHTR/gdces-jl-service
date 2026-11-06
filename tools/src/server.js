@@ -126,10 +126,6 @@ const TOOLS = [
   },
   {
     name: "record_review",
-  // 只能"提议"项目规矩；人确认后才进 rules.md
-  name: "recall_memory",
-  // 检索记忆；用到哪条就在回答里标 [m:<id>]
-  name: "propose_rule",
     description: "复核判定落库（verdict: must_fix/suggest/ok）。findings 与 counter 每条必须带 locator（出处定位符），没有 locator 的意见会被拒收。",
     inputSchema: {
       type: "object",
@@ -164,6 +160,37 @@ const TOOLS = [
         uncertainty: { type: "string", description: "还有哪些不确定" },
       },
       required: ["docId", "verdict"],
+    },
+  },
+  {
+    name: "recall_memory",
+    description: "检索记忆（项目规矩 / 我的跨项目记忆 / 我在这个项目的习惯）。"
+      + "用到哪一条，就在回答里写 [m:<id>]；系统据此记使用次数并在出处里显示。"
+      + "不写标记 = 当作没用过。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        query: { type: "string", description: "要找回什么（关键词，别写整句）" },
+        userId: { type: "string", description: "查谁的个人记忆，默认当前用户" },
+      },
+      required: ["projectId", "query"],
+    },
+  },
+  {
+    name: "propose_rule",
+    description: "提议一条项目规矩（只是候选）。人确认后才会写进项目规矩；"
+      + "不要直接改规矩文件。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        text: { type: "string", description: "一条规矩，独立可执行，别写成长段" },
+        source: { type: "string", enum: ["agent", "correction", "manual"] },
+        sourceRef: { type: "string", description: "哪次对话/哪个文书（可追溯）" },
+        evidence: { type: "string", description: "为什么提这条：原文或字段改动" },
+      },
+      required: ["projectId", "text"],
     },
   },
   {
