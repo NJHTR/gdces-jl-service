@@ -1026,22 +1026,25 @@ def clean_reply(text):
     # 6) 去掉开头的过程叙述（"我先核对…""我会先查…"）——轨迹里已经显示了
     t = re.sub(r"^[^。\n]{0,30}(我先|我会先|我将先|我先来)[^。\n]*。\s*", "", t)
 
-    # 7) 句子去重：模型常把同一句换个说法重复一遍
+    # 7) 句子去重：只删"几乎一模一样"的重复句（≥0.95），且只删短的那句
+    #    以前阈值 0.72 + 硬截 160 字 —— 那是在替模型删内容（实测把整段回答截没了）
     import difflib as _dl
     parts = [x.strip() for x in re.split(r"(?<=[。！？\n])", t) if x.strip()]
     kept = []
     for seg in parts:
-        if any(_dl.SequenceMatcher(None, seg, k).ratio() > 0.72 for k in kept):
-            continue
-        kept.append(seg)
+        dup = next((i for i, k in enumerate(kept)
+                    if _dl.SequenceMatcher(None, seg, k).ratio() > 0.95), None)
+        if dup is None:
+            kept.append(seg)
+        elif len(seg) > len(kept[dup]):
+            kept[dup] = seg          # 留更完整的那句
     t = "".join(kept)
 
-    # 8) 长度上限：一句话能说完的，别写成小作文
-    LIMIT = 160
-    if len(t) > LIMIT:
-        cut = t[:LIMIT]
-        pos = max(cut.rfind("。"), cut.rfind("！"), cut.rfind("？"))
-        t = cut[: pos + 1] if pos > 60 else cut.rstrip() + "…"
+    # 8) 不再截断。内容长短由模型决定，不由后端限制。
+    #    只修一种排版事故：** 不成对（被别处切断）时会把星号露出来
+    while t.count("**") % 2:
+        idx = t.rfind("**")
+        t = t[:idx] + t[idx + 2:]
 
     # 9) 空括号、多余空白
     t = re.sub(r"[（(]\s*[）)]", "", t)
