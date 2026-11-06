@@ -271,6 +271,56 @@ def default_project_id():
     return rows[0]["id"] if rows else None
 
 
+def index_photo(project_id, sha, caption, place=None):
+    """把一张图的描述追加进 <ws>/records/photos.md（证据索引，git 版本化）。
+
+    索引的意义：让"这个部位以前查过什么"变成一次 grep，而不是必须先想到调工具。
+    同一张图重复写同一句描述时不重复追加。
+    """
+    if not project_id or not sha or not (caption or "").strip():
+        return None
+    ws = f"{WS_ROOT}/{project_id}"
+    rel = "records/photos.md"
+    path = f"{ws}/{rel}"
+    head = "# 现场影像索引\n\n> 服务在写完描述后追加，一行一张图；大图取 /api/v1/blobs/<sha>\n"
+    line = "- %s · %s · %s%s · sha %s\n" % (
+        time.strftime("%Y-%m-%d %H:%M"),
+        ("部位 %s" % place) if place else "部位未标",
+        caption.strip()[:200],
+        "",
+        sha[:12],
+    )
+    try:
+        os.makedirs(f"{ws}/records", exist_ok=True)
+        old = ""
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                old = f.read()
+        else:
+            old = head + "\n"
+        if line in old:
+            return rel
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(old.rstrip("\n") + "\n" + line)
+    except OSError as e:
+        sys.stderr.write("[photos] 写索引失败 %s: %r\n" % (path, e))
+        return None
+
+    # 进 git：证据索引要能 diff、能回滚
+    try:
+        subprocess.run(["git", "add", "--", rel], cwd=ws,
+                       capture_output=True, text=True, timeout=30)
+        msg = "docs(证据): 追加影像索引（%s）" % sha[:12]
+        r = subprocess.run(["git", "commit", "-m", msg], cwd=ws,
+                           capture_output=True, text=True, timeout=30)
+        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
+            sys.stderr.write("[photos] 提交失败 %s: %s\n"
+                             % (project_id, (r.stdout + r.stderr)[:160]))
+    except (OSError, subprocess.SubprocessError) as e:
+        sys.stderr.write("[photos] 提交异常 %s: %r\n" % (project_id, e))
+    return rel
+
+
 # ---------------------------------------------------------------- handle_project_get
 def handle_project_get(project_id):
     pid = project_id or default_project_id()
@@ -439,10 +489,13 @@ def handle_asr(body, user=None):
     # 描述是数据不是判断 —— 后端只负责存，怎么用由 agent 决定。
     saved = False
     if (text or "").strip():
-        rows = q("SELECT id, caption FROM photo WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
+        rows = q("SELECT id, caption, project_id, place FROM photo "
+                 "WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
         if rows and not (rows[0].get("caption") or "").strip():
+            cap = "语音：" + text.strip()[:480]
             exec_sql("UPDATE photo SET caption=%s, caption_at=NOW(3) WHERE id=%s",
-                     ("语音：" + text.strip()[:480], rows[0]["id"]))
+                     (cap, rows[0]["id"]))
+            index_photo((body.get("projectId") or "").strip(), sha, cap)
             saved = True
 
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
@@ -773,8 +826,8 @@ def handle_photo_caption(body, user=None):
         deny = guard_project(pid, user)
         if deny:
             return deny
-        rows = q("SELECT id, caption FROM photo WHERE project_id=%s AND sha256=%s "
-                 "ORDER BY id DESC LIMIT 1", (pid, sha))
+        rows = q("SELECT id, caption, project_id, place FROM photo "
+                 "WHERE project_id=%s AND sha256=%s ORDER BY id DESC LIMIT 1", (pid, sha))
     elif sha:
         rows = q("SELECT id, caption FROM photo WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
     else:
@@ -786,7 +839,10 @@ def handle_photo_caption(body, user=None):
         return 200, {"code": 0, "data": {"id": row["id"], "caption": row["caption"],
                                          "skipped": True}}
     exec_sql("UPDATE photo SET caption=%s, caption_at=NOW(3) WHERE id=%s", (caption[:500], row["id"]))
-    return 200, {"code": 0, "data": {"id": row["id"], "caption": caption[:500]}}
+    index_photo(pid or (row.get("project_id") or ""), sha, caption[:500],
+                row.get("place"))
+    return 200, {"code": 0, "data": {"id": row["id"], "caption": caption[:500],
+                                     "indexed": "records/photos.md"}}
 
 
 # ---------------------------------------------------------------- handle_photo_search
