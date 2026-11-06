@@ -4,6 +4,7 @@
 为什么要单独跑：ensure_home 只在用户下次对话时执行，老用户永远不会被补到。
 用法：python3 scripts/migrate-homes.py
 """
+import io
 import os
 import sys
 
