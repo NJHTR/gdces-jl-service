@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C6  指标可查（主动写/复用/撤销率/确认率）
+next = Wave3 / C7  近义规矩归并（现有重复条目收敛）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -209,7 +209,13 @@ next = Wave3 / C6  指标可查（主动写/复用/撤销率/确认率）
           （重复键），且 import 行没同步 → "proposeRule is not defined"，
           模型空跑、出稿 doc=None、部署连红两次
           → preflight 新增「import 是否覆盖 HANDLERS」检查，以后这类直接报错
-[ ] C6 指标可查：每人每周主动写记忆次数、记忆复用次数、撤销率、确认率
+[x] C6 指标可查：GET /api/v1/metrics/memory?projectId=
+      口径：主动写=source in (manual,confirmed) · 复用=SUM(hits) ·
+            撤销率=停用/总数 · 确认率=accepted/(accepted+rejected)
+      实测 test-sandbox：entries=12 active=12 revokeRate=0.0
+            recallUses=524 humanWrites=3；byWeek 202645；
+            proposals pending/accepted/rejected=0 → acceptRate=null
+      smoke：字段齐全 + byWeek 是数组
 [ ] C6 指标可查：每人每周主动写记忆次数、记忆复用次数、撤销率、确认率
 [ ] C7 近义归并：现有 5 条「整改回复附对比图」变体，人工或整理员合并（不自动删）
 [ ] C8 验证引擎整理真的在工作（phase1 闲置≥1h / phase2 6h）——从没验证过
