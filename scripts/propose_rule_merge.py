@@ -32,8 +32,22 @@ def norm(t):
     return t
 
 
+def bigrams(t):
+    t = norm(t)
+    return {t[i:i + 2] for i in range(len(t) - 1)} if len(t) > 1 else {t}
+
+
 def similar(a, b):
-    return SequenceMatcher(None, norm(a), norm(b)).ratio()
+    """两种口径取大的：编辑相似度 + 二元组 Jaccard。
+
+    单用 SequenceMatcher 会把「整改必须配前后对比照片」和
+    「整改回复须附对比图」判成不像（措辞差太多、意思一样）；
+    单用 Jaccard 又容易把短句判得太像。取大的，宁可多提几条让人筛。
+    """
+    r1 = SequenceMatcher(None, norm(a), norm(b)).ratio()
+    ba, bb = bigrams(a), bigrams(b)
+    r2 = len(ba & bb) / max(1, len(ba | bb))
+    return max(r1, r2)
 
 
 def clusters(rows, threshold=THRESHOLD):
