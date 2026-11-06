@@ -127,6 +127,8 @@ const TOOLS = [
   {
     name: "record_review",
   // 只能"提议"项目规矩；人确认后才进 rules.md
+  name: "recall_memory",
+  // 检索记忆；用到哪条就在回答里标 [m:<id>]
   name: "propose_rule",
     description: "复核判定落库（verdict: must_fix/suggest/ok）。findings 与 counter 每条必须带 locator（出处定位符），没有 locator 的意见会被拒收。",
     inputSchema: {
@@ -186,6 +188,7 @@ const HANDLERS = {
   search_photos: searchPhotos,
   record_review: recordReview,
   propose_rule: proposeRule,
+  recall_memory: recallMemory,
 };
 
 function send(msg) {

@@ -319,6 +319,23 @@ export async function searchPhotos({ projectId, q, place, dateFrom, dateTo, limi
  * 提议一条项目规矩。**只是候选**：人确认后才会写进 records/rules.md。
  * 为什么不让 agent 直接写规矩：规矩影响所有人的出稿，得有人拍板（C2 的设计）。
  */
+/**
+ * 检索记忆（项目规矩 / 我的跨项目记忆 / 我在这个项目的习惯）。
+ * 用到哪条，就在回答里写 [m:<id>] —— 系统据此记使用次数并在出处里显示。
+ * 不写标记 = 当作没用过（不虚报"依据你的习惯"）。
+ */
+export async function recallMemory({ projectId, query, userId = "" }) {
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const qs = new URLSearchParams({ projectId, q: query, userId: String(userId) });
+  const resp = await fetch(`${bff}/api/v1/memories/recall?${qs}`);
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`检索记忆失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
+  }
+  return payload.data || [];
+}
+
+
 export async function proposeRule({ projectId, text, source = "agent", sourceRef = "", evidence = "" }) {
   const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
   const resp = await fetch(`${bff}/api/v1/rule-proposals`, {

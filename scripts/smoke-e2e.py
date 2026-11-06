@@ -533,6 +533,28 @@ def main():
     check("否决后不进规矩文件", rule_text + "（否决测试）" not in _rules())
     sql("DELETE FROM rule_proposal WHERE id=%s" % int(rid2))
 
+    # 4.97) C3 记忆要被"看得见"：检索命中 hits+1；[m:id] 标记可解析
+    import sys as _sys
+    _sys.path.insert(0, os.path.join(ROOT, "bff"))
+    from bffpkg.memref import strip_mem_refs
+
+    clean, ids = strip_mem_refs("按你的习惯，结论放前面[m:12]。依据另起一行[m:13][m:12]")
+    check("记忆标记可解析", ids == [12, 13] and "[m:" not in clean,
+          "ids=%s clean=%r" % (ids, clean[:20]))
+
+    kw = "smoke记忆引用" + uuid.uuid4().hex[:4]
+    st, b = call("POST", "/api/v1/memories", {
+        "scope": "project", "ownerId": PROJECT, "text": kw + "：结论放前面再写依据"})
+    mid3 = (b.get("data") or {}).get("id")
+    st, b = call("GET", "/api/v1/memories/recall?projectId=%s&q=%s" % (PROJECT, kw))
+    items = b.get("data") or []
+    hit = next((x for x in items if str(x.get("id")) == str(mid3)), None)
+    check("检索能召回", st == 200 and bool(hit), "命中 %d 条" % len(items))
+    check("召回即记使用次数", bool(hit) and int(hit.get("hits") or 0) >= 1,
+          "hits=%s" % (hit or {}).get("hits"))
+    if mid3:
+        call("DELETE", "/api/v1/memories/%s" % mid3)
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

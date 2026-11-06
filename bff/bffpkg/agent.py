@@ -265,6 +265,43 @@ def build_context(project_id, user_id, query=None):
     return "\n\n".join(parts)
 
 
+# ---------------------------------------------------------------- handle_memory_recall
+def handle_memory_recall(params, user=None):
+    """按关键词找记忆（项目规矩 + 我的记忆 + 我在这个项目的习惯）。
+
+    命中即 hits+1：这条被检索出来，就算"用上了"。
+    检索是字面匹配（不引向量），宁可少召回，也不假装懂。
+    """
+    pid = q1(params, "projectId")
+    uid = q1(params, "userId") or (user or {}).get("id")
+    query = (q1(params, "q") or "").strip()
+    if not pid or not query:
+        return 400, {"code": 400, "message": "projectId 和 q 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+
+    tokens = [t for t in re.split(r"[\s,，。；;、]+", query) if len(t) >= 2][:6]
+    if not tokens:
+        tokens = [query[:8]]
+    like = " OR ".join(["text LIKE %s"] * len(tokens))
+    args = ["%" + t + "%" for t in tokens]
+    rows = q("SELECT id, scope, owner_id, project_id, text, hits, applies_to FROM memory "
+             "WHERE status=1 AND (" + like + ") AND ("
+             "(scope='project' AND owner_id=%s) OR "
+             "(scope='user' AND owner_id=%s AND (project_id=%s OR project_id IS NULL))"
+             ") ORDER BY hits DESC, id DESC LIMIT 6",
+             tuple(args) + (pid, str(uid), pid))
+    for r in rows:
+        try:
+            exec_sql("UPDATE memory SET hits=hits+1, updated_at=NOW(3) WHERE id=%s",
+                     (r["id"],))
+            r["hits"] = int(r.get("hits") or 0) + 1
+        except Exception as e:
+            sys.stderr.write("[mem] hits+1 失败 id=%s: %r\n" % (r.get("id"), e))
+    return 200, {"code": 0, "data": rows}
+
+
 # ---------------------------------------------------------------- handle_memory_list
 def handle_memory_list(params, user=None):
     scope = q1(params, "scope", "project")
@@ -1368,6 +1405,26 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         for _ci in _drain_cites(ws, started):
             if not any(_ck(x) == _ck(_ci) for x in cites):
                 cites.append(_ci)
+
+        # 记忆引用：[m:12] 是模型自己标的"这条我用上了"。
+        # 只做机械解析；没标的就当没用过，不虚报"依据你的习惯"。
+        if final_text:
+            from .memref import strip_mem_refs
+            final_text, _mids = strip_mem_refs(final_text)
+            for _mid in _mids:
+                try:
+                    _rows = q("SELECT id, text, source, scope FROM memory WHERE id=%s", (_mid,))
+                    if not _rows:
+                        continue
+                    _m = _rows[0]
+                    exec_sql("UPDATE memory SET hits=hits+1, updated_at=NOW(3) WHERE id=%s",
+                             (_mid,))
+                    _q = (_m.get("text") or "")[:80]
+                    cites.append({"kind": "memory", "ref": "memory:%s" % _mid,
+                                  "quote": _q, "note": "你记过的"})
+                except Exception as _e:
+                    sys.stderr.write("[mem] 记录记忆引用失败 id=%s: %r\n" % (_mid, _e))
+
         # 统一编号：模型声明在前、工具实测在后，编号从 1 连续
         for _i, _c in enumerate(cites, 1):
             _c["n"] = _i
