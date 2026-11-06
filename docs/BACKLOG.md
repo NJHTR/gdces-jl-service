@@ -51,7 +51,17 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave2 / B1  模板原件入库 + fields.json
+next = Wave2 / B5  smoke 断言（模板结构签名 + 固定标签 + 白名单单元格）
+```
+
+## 本轮踩的坑（记下来，避免重犯）
+
+```
+· lxml 元素不能用 id() 判"是否同一个格子"：代理对象回收后地址复用，
+  两个不同格子被判成同一个 → 报「标签右边没有可填的单元格」。
+  正确做法：`el is not anchor_el`（两个引用都活着）。
+· report.py 用了 io.open 却没 import io → 线上 500 NameError。
+  这类"改完没跑过"的问题，靠 deploy 的 smoke 抓不住（报告接口没被 smoke 覆盖）→ B5 要补。
 ```
 
 ## 开发 loop 协议（每轮照做，不许跳步）
@@ -76,12 +86,14 @@ next = Wave2 / B1  模板原件入库 + fields.json
 ## Wave 2 · 表式文书（下一步，2~3 天）
 
 ```
-[ ] B1 模板原件入库
-      放 data/knowledge/templates/docx/（省统表 5 张 + 危大巡视表）
-      每张配 <表名>.fields.json（标签定位，声明式，不写死行列号）
-[ ] B2 formfill.py：load → 按标签定位 → 只改 run.text → 校验 → save
-[ ] B3 /api/v1/reports/patrol 改为模板填充（替换现在的手绘表）
-[ ] B4 多份：一条记录一张表 + 分页 + 连续编号
+[x] B1 模板原件入库（6 张：旁站/平行检查/巡视/通知单/监理日志×2）+ README
+      16巡视记录.fields.json：标签定位（header/parts/org/period/issues）+ fixed_labels
+[x] B2 bffpkg/formfill.py：load → 标签定位 → 只改 run.text → 结构签名校验 → save
+      多份：复制模板一页元素 + 分页；空单元格回落 宋体 10pt
+      实测：本地 2 条记录 → 2 张 4×4 表、合并一致、标签齐全
+[x] B3 /reports/patrol 改为模板填充（实测 2 张 4×4、部位/时间/问题/签名/日期都在）
+      质量修正：部位去重限 8、时间只取 07:00–19:00、问题限 10 行
+[x] B4 多份：一记录一张表 + 分页 + 连续编号（GD-B-214 0001/0002，已实测）
 [ ] B5 smoke 断言：表格数/行列/合并不变、固定标签齐全、只改白名单单元格
 [ ] B6 其余表式接入（旁站/平行检查/监理日志/通知单/检查记录）
 ```
