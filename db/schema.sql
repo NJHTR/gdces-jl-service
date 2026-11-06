@@ -248,3 +248,20 @@ CREATE TABLE IF NOT EXISTS rule_proposal (
   KEY idx_pending (project_id, status),
   KEY idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目规矩提案（待确认）';
+
+-- 复核复议：一次、有界（同一条复核只能被申请一次；结果落库可追溯）
+CREATE TABLE IF NOT EXISTS review_appeal (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  review_id    BIGINT UNSIGNED NOT NULL,
+  doc_id       BIGINT UNSIGNED NOT NULL,
+  project_id   VARCHAR(64) NOT NULL,
+  user_id      VARCHAR(32) NULL,
+  reason       VARCHAR(500) NOT NULL,
+  status       ENUM('pending','upheld','overturned') NOT NULL DEFAULT 'pending',
+  decision_note VARCHAR(500) NULL,
+  decided_by   VARCHAR(32) NULL,
+  decided_at   DATETIME(3) NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_review (review_id),
+  KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='复核复议（一次、有界）';

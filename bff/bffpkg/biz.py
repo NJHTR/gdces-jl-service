@@ -676,6 +676,70 @@ def handle_asr(body, user=None):
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
                                      "saved": saved}}
 
+# ---------------------------------------------------------------- 复核复议（F4）
+def handle_review_appeal(review_id, body, user=None):
+    """对一条 must_fix 复核申请复议。**一次、有界**：同一条复核只能申请一次。"""
+    rows = q("SELECT id, doc_id, project_id, verdict FROM review WHERE id=%s", (review_id,))
+    if not rows:
+        return 404, {"code": 404, "message": "复核记录不存在"}
+    r = rows[0]
+    deny = guard_project(r["project_id"], user)
+    if deny:
+        return deny
+    if r["verdict"] != "must_fix":
+        return 400, {"code": 400,
+                     "message": "只有 must_fix 的复核可以复议（当前 %s）" % r["verdict"]}
+    reason = (body.get("reason") or "").strip()
+    if not reason:
+        return 400, {"code": 400, "message": "reason 必填（要说清为什么不同意）"}
+    old = q("SELECT id, status FROM review_appeal WHERE review_id=%s", (review_id,))
+    if old:
+        return 409, {"code": 409,
+                     "message": "这条复核已经复议过一次了（%s）" % old[0]["status"]}
+    aid = exec_sql(
+        "INSERT INTO review_appeal (review_id, doc_id, project_id, user_id, reason) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (review_id, r["doc_id"], r["project_id"],
+         str((user or {}).get("id") or ""), reason[:500]))
+    return 200, {"code": 0, "data": {"id": aid, "status": "pending"}}
+
+
+def handle_review_appeals(review_id, user=None):
+    rows = q("SELECT id, doc_id, project_id FROM review WHERE id=%s", (review_id,))
+    if not rows:
+        return 404, {"code": 404, "message": "复核记录不存在"}
+    deny = guard_project(rows[0]["project_id"], user)
+    if deny:
+        return deny
+    out = q("SELECT id, review_id, doc_id, reason, status, decision_note, "
+            "decided_by, decided_at, created_at FROM review_appeal "
+            "WHERE review_id=%s ORDER BY id", (review_id,))
+    return 200, {"code": 0, "data": out}
+
+
+def handle_appeal_decide(appeal_id, body, user=None):
+    """裁定复议：维持（uphold）或推翻（overturn）。裁定后不可再改。"""
+    rows = q("SELECT id, review_id, project_id, status FROM review_appeal WHERE id=%s",
+             (appeal_id,))
+    if not rows:
+        return 404, {"code": 404, "message": "复议不存在"}
+    a = rows[0]
+    deny = guard_project(a["project_id"], user)
+    if deny:
+        return deny
+    if a["status"] != "pending":
+        return 409, {"code": 409, "message": "这条复议已经裁定过了（%s）" % a["status"]}
+    action = (body.get("action") or "").strip()
+    if action not in ("uphold", "overturn"):
+        return 400, {"code": 400, "message": "action 只能是 uphold / overturn"}
+    status = "upheld" if action == "uphold" else "overturned"
+    note = (body.get("note") or "").strip()[:500] or None
+    exec_sql("UPDATE review_appeal SET status=%s, decision_note=%s, decided_by=%s, "
+             "decided_at=NOW(3) WHERE id=%s",
+             (status, note, str((user or {}).get("id") or ""), appeal_id))
+    return 200, {"code": 0, "data": {"id": appeal_id, "status": status}}
+
+
 # ---------------------------------------------------------------- 记忆指标（C6）
 def handle_memory_metrics(params, user=None):
     """记忆用起来没有：主动写 / 复用 / 撤销率 / 提案确认率。

@@ -627,6 +627,36 @@ def main():
     check("清洗后无残句标点", "，。" not in got and "，." not in got and bool(got.strip()),
           repr(got[:50]))
 
+    # 4.998) F4 复议：一次、有界
+    st, b = call("POST", "/api/v1/docs/register", {
+        "projectId": PROJECT, "kind": "监理通知单", "obj": "smoke-复议用例",
+        "fields": {"事由": "smoke 复议"}, "bases": ["JGJ 130-2011 第 6.4.3 条"]})
+    rdoc = (b.get("data") or {}).get("docId")
+    st, b = call("POST", "/api/v1/reviews", {
+        "docId": rdoc, "verdict": "must_fix",
+        "findings": [{"why": "依据条号对不上", "locator": "standard://JGJ 130-2011#6.4.3:1-1",
+                      "tag": "条号不符"}]})
+    rv = sql("SELECT id FROM review WHERE doc_id=%s ORDER BY id DESC LIMIT 1" % int(rdoc))
+    rv = int(rv.strip()) if rv.strip().isdigit() else 0
+    check("复核已建（must_fix）", bool(rv), "review=%s" % rv)
+    st, b = call("POST", "/api/v1/reviews/%s/appeals" % rv,
+                 {"reason": "该条号来自检索结果，请复核"})
+    ap = (b.get("data") or {}).get("id")
+    check("复议申请成功", st == 200 and bool(ap), "appeal=%s" % ap)
+    st2, b2 = call("POST", "/api/v1/reviews/%s/appeals" % rv, {"reason": "再来一次"})
+    check("同一条复核只能复议一次", st2 == 409, "HTTP %s" % st2)
+    st3, b3 = call("POST", "/api/v1/appeals/%s/decide" % ap,
+                   {"action": "overturn", "note": "核实后条号确实来自检索"})
+    check("复议裁定（推翻）", st3 == 200 and (b3.get("data") or {}).get("status") == "overturned",
+          "HTTP %s" % st3)
+    st4, b4 = call("POST", "/api/v1/appeals/%s/decide" % ap, {"action": "uphold"})
+    check("裁定后不可再改", st4 == 409, "HTTP %s" % st4)
+    # 清理
+    sql("DELETE FROM review_appeal WHERE review_id=%s" % rv)
+    sql("DELETE FROM review WHERE id=%s" % rv)
+    if rdoc:
+        call("DELETE", "/api/v1/docs/%s" % rdoc)
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

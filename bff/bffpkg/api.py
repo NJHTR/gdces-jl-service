@@ -19,7 +19,7 @@ from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE,
 from .jobs import list_jobs, run_now, start as start_jobs
 from .knowledge import sync_standards
 from .biz import (
-    handle_review_record, handle_observations, handle_rule_propose, handle_rule_proposals, handle_rule_decide, handle_memory_metrics, handle_asr, append_manifest, audit, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_register, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_photo_index, handle_photo_index, handle_photo_caption, handle_photo_search, parse_multipart_full, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob, handle_doc_validate)
+    handle_review_record, handle_observations, handle_rule_propose, handle_rule_proposals, handle_rule_decide, handle_review_appeal, handle_review_appeals, handle_appeal_decide, handle_memory_metrics, handle_asr, append_manifest, audit, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_register, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_photo_index, handle_photo_index, handle_photo_caption, handle_photo_search, parse_multipart_full, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob, handle_doc_validate)
 from .agent import (Engine, _cites_from_output, _parse_cli_jsonl, _run_agent_loop_inner, _run_cli_turn, _set_progress, _user_lock, build_context, engine, handle_bootstrap, handle_chat, handle_memory_create, handle_memory_delete, handle_memory_list, handle_memory_patch, handle_messages, handle_memory_recall, handle_task, handle_task_cancel, handle_task_list, handle_task_retry, learn_from_turn, render_agents_md, run_agent_loop, run_turn, sweeper)
 
 
@@ -136,6 +136,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_memory_metrics(
                     parse_qs(urlparse(self.path).query),
                     resolve_token(bearer(self.headers))))
+            m = re.match(r"^/api/v1/reviews/(\d+)/appeals$", path)
+            if m:
+                return self._send(*handle_review_appeals(
+                    int(m.group(1)), resolve_token(bearer(self.headers))))
             if path == "/api/v1/rule-proposals":
                 return self._send(*handle_rule_proposals(
                     parse_qs(urlparse(self.path).query),
@@ -395,6 +399,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_rule_decide(
                     int(m.group(1)), {"action": m.group(2)},
                     resolve_token(bearer(self.headers))))
+            m = re.match(r"^/api/v1/reviews/(\d+)/appeals$", path)
+            if m:
+                return self._send(*handle_review_appeal(
+                    int(m.group(1)), body, resolve_token(bearer(self.headers))))
+            m = re.match(r"^/api/v1/appeals/(\d+)/decide$", path)
+            if m:
+                return self._send(*handle_appeal_decide(
+                    int(m.group(1)), body, resolve_token(bearer(self.headers))))
             if path == "/api/v1/reviews":
                 usr = resolve_token(bearer(self.headers))
                 return self._send(*handle_review_record(body, usr))
