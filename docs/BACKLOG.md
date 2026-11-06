@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave5 / E2  删死端点（/members、/render-memory）
+next = Wave5 / E3  core.py 7 组重复常量、STD_RE、clean_reply 残句
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -341,7 +341,13 @@ next = Wave5 / E2  删死端点（/members、/render-memory）
       ① api.py 的 import 名单里漏删 run_cli_turn → 服务起不来（ImportError）
       ② 删 parse_multipart 时把 parse_multipart_full 一起删了（前者只是后者的死包装），
          而上传路由用的是 full 那个 → 又 ImportError；已恢复 full，只删包装
-[ ] E2 删死端点：/members、/render-memory
+[x] E2 删死端点：/members、/render-memory
+      证据：/members 无人调用；render-memory 只有后台一个按钮在用（AGENTS.md 早已自动渲染）
+      删除：两条路由 + handle_members/member_add + handle_render_memory + 后台按钮/JS + 三处 import
+      preflight 新增「死端点禁回退」检查（五个名字再出现就红）
+      实测（重启后）：/members → 404、render-memory → 404、后台页 renderMemory 出现 0 次
+      坑：最后一次部署被中断，文件已传但进程没重启 → 端点还 200；
+          重跑一次 deploy（幂等）后恢复，说明"部署成功"要看进程启动时间不能只看文件
 [ ] E3 core.py 7 个重复常量、STD_RE、clean_reply 残句
 [ ] E4 tools/workspace.js readMemories 改读 records/rules.md
 [ ] E5 test-sandbox 补 .gitignore
