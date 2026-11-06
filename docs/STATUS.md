@@ -168,6 +168,29 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 架构落地进度（2026-11-06 10:20，五步走了四步）
+
+你说的四层 × 三形态，现在这样落地：
+
+| 动作 | 状态 | 证据 |
+|---|---|---|
+① 拆并行记忆 | ✅ | AGENTS.md 1658→1025 / 1189→718 / 932→627 字节；【项目规矩】块消失；`pick_memories` 删除 |
+② AGENTS.md 分区 | ✅ | `<!-- generated:start/end -->` + `<!-- human:start/end -->`；人写区重写后保留（实测） |
+③ 技能真落位 | ✅ | 4 个 SKILL.md 装进 3 个项目 + 60 个家目录；问「你有哪些技能」模型答出 jl-doc-draft/review/evidence/speak |
+④ 组织知识=索引源 | ✅ | `knowledge.py` 只读 `data/knowledge/**`（无写入路径）；启动时 `规范同步：新增 0、更新 2` |
+⑤ 证据索引进 git | ✅ | `records/photos.md`：写描述后追加一行 + git 提交；AGENTS 指针出现 |
+
+**唯一写者现状**：
+
+```
+组织知识  data/knowledge/**          人 + git（代码里没有写它的路径）
+项目规矩  <ws>/records/rules.md      人（接口追加）
+项目证据  <ws>/records/photos.md     服务追加（index_photo 唯一入口）
+项目流程  <ws>/.easycode/skills/**   安装自 data/knowledge/skills
+个人知识  homes/<uid>/memories/**    引擎整理；人只能追加 notes/
+MySQL     memory 表                  索引/归档（不再注入上下文）
+```
+
 ## 拆掉并行记忆：AGENTS.md 从「规则清单」变回「事实 + 指针」（2026-11-06 10:20）
 
 **起因**：我说清楚了三层知识该在文件里、不在提示词里；而我的实现是 MySQL 表 + 字面相似度挑 6 条 + 拼成
