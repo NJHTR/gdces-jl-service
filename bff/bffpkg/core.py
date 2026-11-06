@@ -856,7 +856,7 @@ def rich_reply(text, gap_items):
         for m in CITE_MARK_RE.finditer(s):
             if m.start() > pos:
                 push_num(s[pos:m.start()])
-            out.append({"s": "r", "v": m.group(0), "n": int(m.group(1))})
+            out.append({"s": "c", "v": m.group(0), "n": int(m.group(1))})
             pos = m.end()
         if pos < len(s):
             push_num(s[pos:])
@@ -932,7 +932,7 @@ CITE_MARK_RE = re.compile(r"\[(\d{1,2})\]")
 
 
 def rich_segments(text):
-    """把一句话切成 [{s,v}]，s ∈ t(普通)/n(数字)/b(加粗)/r(角标)。"""
+    """把一句话切成 [{s,v}]，s ∈ t(普通)/n(数字)/b(加粗)/c(引用角标)/r(条文号)。"""
     text = text or ""
     if not text:
         return []

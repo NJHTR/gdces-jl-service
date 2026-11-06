@@ -235,6 +235,13 @@ def build_context(project_id, user_id, query=None):
             here.append("项目技能 `.easycode/skills/`（目录见系统技能清单，正文按需读）")
     except OSError:
         pass
+    # 引用格式属于流程：放技能、按需读。这里只给指针，不写格式本身。
+    try:
+        if os.path.isdir(f"{ws}/.easycode/skills/jl-cite"):
+            here.append("引用写法 `.easycode/skills/jl-cite/SKILL.md`（要标出处时读）")
+    except OSError as e:
+        sys.stderr.write("[ctx] 引用技能检查失败: %r\n" % (e,))
+
     if os.path.isdir(f"{ws}/knowledge"):
         here.insert(0, "组织知识 `knowledge/`（模板、填写示例、验收要点；只读）")
     if here:
