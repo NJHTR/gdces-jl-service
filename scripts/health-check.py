@@ -114,6 +114,16 @@ def main():
     print("  孤儿文件（磁盘有、库没有）: %d" % orphan)
     print("  丢失文件（库有、磁盘没有）: %d" % lost)
 
+    print("=== 测试残留（只报告，不删）===")
+    by_obj = sql("SELECT COUNT(*) FROM doc WHERE obj LIKE 'smoke%'")[0]
+    by_task = sql("SELECT COUNT(*) FROM doc d JOIN task t ON d.task_id=t.id "
+                  "WHERE t.client_id LIKE 'smoke-%'")[0]
+    stale = sql("SELECT COUNT(*) FROM doc WHERE state='待补' AND obj LIKE 'smoke%'")[0]
+    print("  smoke 标题文书 %s 份 · 归属 smoke 任务的文书 %s 份 · 其中待补 %s 份"
+          % (by_obj, by_task, stale))
+    if by_obj != "0" or by_task != "0":
+        print("  ⚠ 有测试文书残留在库里（smoke 清理漏了），pending 数会被它抬高")
+
     print("=== 影像 ===")
     rows = sql("SELECT COUNT(*), COALESCE(SUM(COALESCE(caption,'')=''),0), "
                "COALESCE(SUM(COALESCE(place,'')=''),0) FROM photo")
