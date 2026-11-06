@@ -1,0 +1,67 @@
+{
+  "form": "监理通知单",
+  "code": "GD-B-215",
+  "template": "17监理通知单、回复单.docx",
+  "version": 1,
+  "desc": "省统表 17。同一个 docx 里两张表：通知单（1×1 长文本）+ 回复单（8×2，留给施工单位填）。这里只填通知单，回复单保持空白。",
+  "slots": [
+    {
+      "key": "header",
+      "label": "工程项目名称：",
+      "target": "para",
+      "kind": "template",
+      "text": "工程项目名称：{project}\u3000\u3000编号：{serial}"
+    },
+    {
+      "key": "向谁发",
+      "target": "cell_para",
+      "table": 0,
+      "row": 0,
+      "col": 0,
+      "kind": "rewrite",
+      "match": "致：",
+      "text": "致：{受检单位}（施工项目经理部）\u3000\u3000事由：{事由}"
+    },
+    {
+      "key": "内容",
+      "target": "cell_para",
+      "table": 0,
+      "row": 0,
+      "col": 0,
+      "kind": "block_after",
+      "match": "内容：",
+      "lines_key": "内容lines"
+    },
+    {
+      "key": "署名",
+      "target": "cell_para",
+      "table": 0,
+      "row": 0,
+      "col": 0,
+      "kind": "rewrite",
+      "match": "项目监理机构（项目章）",
+      "text": "项目监理机构（项目章）\u3000\u3000总监理工程师（代表）/专业监理工程师（签名）：{签发人}"
+    },
+    {
+      "key": "日期",
+      "target": "cell_para",
+      "table": 0,
+      "row": 0,
+      "col": 0,
+      "kind": "last_rewrite",
+      "text": "{date_text}"
+    }
+  ],
+  "fixed_labels": [
+    "监理通知单",
+    "工程项目名称：",
+    "致：",
+    "事由：",
+    "内容：",
+    "项目监理机构（项目章）",
+    "总监理工程师",
+    "监理通知回复单",
+    "复查意见：",
+    "注：本表一式三份"
+  ]
+}

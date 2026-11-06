@@ -289,6 +289,10 @@ def build_patrol_docx(project_id, start, end, inspector="", org=None,
 
 
 # ---------------------------------------------------------------- 单份文书 → 表式
+def _wrap1(text, width=38):
+    return (str(text or "").strip()[:width]) or "（待补）"
+
+
 def _wrap(text, width=38, limit=14):
     """把长文本折成若干行（表格里一行一段，太长会压到签名行）。"""
     out = []
@@ -405,6 +409,21 @@ def build_form_docx(project_id, doc_id):
     if fields.get("结束时间"):
         data["结束时间"] = _hhmm(fields.get("结束时间"), created)
     data["date_text"] = _cn_date(fields.get("日期") or created or fields.get("开始时间") or "")
+
+    # 监理通知单：把「内容」那一段按条目拼出来（模板里是一整格文字）
+    if kind == "监理通知单":
+        body = []
+        if (fields.get("部位") or "").strip():
+            body.append("工程部位：%s" % fields["部位"].strip())
+        for key in ("问题描述", "事由", "整改要求"):
+            v = (fields.get(key) or "").strip()
+            if v and v not in body:
+                body.append(("%s：%s" % (key, v)) if key == "整改要求" else v)
+        if (fields.get("整改期限") or "").strip():
+            body.append("整改期限：%s" % fields["整改期限"].strip())
+        if (fields.get("依据") or "").strip():
+            body.append("依据：%s" % fields["依据"].strip())
+        data["内容lines"] = [_wrap1(x) for x in body][:12] or ["（待补）"]
 
     # block 槽：把对应字段折行
     for slot in spec.get("slots") or []:

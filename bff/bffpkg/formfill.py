@@ -154,6 +154,59 @@ def write_text(cell, text):
     return cell
 
 
+def _cell_paragraph_rewrite(cell, match, text):
+    for p in cell.paragraphs:
+        if match in p.text:
+            style = None
+            for r in p.runs:
+                if r.text.strip():
+                    style = r
+                    break
+            for r in list(p.runs):
+                r._element.getparent().remove(r._element)
+            r = p.add_run(text)
+            if style is not None and style.font.name:
+                r.font.name = style.font.name
+                r.font.size = style.font.size
+            else:
+                r.font.name = "宋体"
+                r.font.size = Pt(10)
+                r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+            return True
+    return False
+
+
+def _cell_paragraph_block_after(cell, match, lines):
+    """在包含 match 的那段之后插入若干行（保留那一段本身）。"""
+    target = None
+    for p in cell.paragraphs:
+        if match in p.text:
+            target = p
+            break
+    if target is None:
+        return False
+    for line in reversed([str(x) for x in (lines or [])]):
+        np = cell.add_paragraph()
+        r = np.add_run(line)
+        r.font.name = "宋体"
+        r.font.size = Pt(10)
+        r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+        target._element.addnext(np._element)
+    return True
+
+
+def _cell_last_rewrite(cell, text):
+    for p in reversed([x for x in cell.paragraphs if x.text.strip()]):
+        for r in list(p.runs):
+            r._element.getparent().remove(r._element)
+        r = p.add_run(text)
+        r.font.name = "宋体"
+        r.font.size = Pt(10)
+        r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+        return True
+    return False
+
+
 def write_lines(cell, lines, size=10.5):
     """把多行写进一个空单元格（内容是独立一行的那种表，如监理日志）。"""
     p0 = clear_cell(cell)
@@ -302,9 +355,33 @@ def _fill_one(doc, spec, data, table_idx=0, header_idx=0):
         write_para(header_paras[header_idx], text)
         changed.append(("para", header_idx))
 
+    # 单格长文本类（监理通知单：表里只有一个大单元格，按锚点填）
+    for slot in spec.get("slots") or []:
+        if slot.get("target") != "cell_para":
+            continue
+        ti = int(slot.get("table", 0))
+        ri = int(slot.get("row", 0))
+        ci = int(slot.get("col", 0))
+        cell = doc.tables[ti].rows[ri].cells[ci]
+        kind = slot.get("kind")
+        if kind == "rewrite":
+            ok = _cell_paragraph_rewrite(cell, slot.get("match") or "",
+                                         (slot.get("text") or "").format(**data))
+        elif kind == "block_after":
+            ok = _cell_paragraph_block_after(
+                cell, slot.get("match") or "",
+                data.get(slot.get("lines_key") or "lines") or [])
+        elif kind == "last_rewrite":
+            ok = _cell_last_rewrite(cell, (slot.get("text") or "").format(**data))
+        else:
+            raise RuntimeError("未知的 cell_para kind: %r" % kind)
+        if not ok:
+            raise RuntimeError("单元格里找不到锚点「%s」" % slot.get("match"))
+        changed.append(("cell_para", ti, ri, ci))
+
     # 单元格类
     for slot in spec.get("slots") or []:
-        if slot.get("target") == "para":
+        if slot.get("target") == "para" or slot.get("target") == "cell_para":
             continue
         ri, ci = find_cell(tb, slot.get("label"))
         if ri is None:
@@ -419,10 +496,12 @@ def build(form, records, out_path):
         raise RuntimeError("表格数量不对：模板 %d，生成 %d（记录 %d 条）"
                            % (len(base_sig["tables"]), len(after["tables"]), len(records)))
     if base_sig["tables"]:
+        n_base = len(base_sig["tables"])
         for i, tb_sig in enumerate(after["tables"]):
-            if tb_sig != base_sig["tables"][0]:
+            expect = base_sig["tables"][i % n_base]
+            if tb_sig != expect:
                 raise RuntimeError("第 %d 张表结构与模板不一致：%r → %r"
-                                   % (i + 1, base_sig["tables"][0], tb_sig))
+                                   % (i + 1, expect, tb_sig))
 
     doc.save(out_path)
     return {"path": out_path, "records": len(records),
