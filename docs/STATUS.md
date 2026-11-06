@@ -168,6 +168,56 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 批 2 + 拍照重做（2026-11-06 14:30）
+
+### 一个渲染器，改原文件（实测）
+
+```
+建单（register 只写库）→ 第一次补字段：docs/2026-11-06/监理通知单-渲染一致性验证-01.md
+  生成时间 ✓  待补 5 行 ✓  依据段 ✓
+第二次补字段 → 还是同一个文件 ✓  待补 4 行（少了一条）✓  生成时间/依据段都在 ✓
+```
+
+不再出现 `<kind>-<obj>-<docId>.md` 那种第二份文件。
+
+### 下线与清理
+
+```
+删 POST /api/v1/docs 与 handle_doc_create（小程序从未调用，且绕过 guard_project）
+删 bff/server.py（117KB 遗留单体，2915 行）+ .bak —— 服务器上 grep 才发现的
+deploy.ps1 加「删除清单」：scp 只覆盖不删，删掉的文件要显式清理（scripts/deploy-clean.txt）
+```
+
+### 顺手修掉的字段名 bug
+
+```
+引擎真实字段：aggregatedOutput / exitCode（驼峰）
+以前读 aggregated_output / exit_code（下划线）→ 输出永远空、失败也显示成功
+实测修复后：trace_sum = 「调了 查规范、查规范、查规范」（原来「shell、shell、shell」）
+            命令输出长度 62/109/3 字节（原来全 0）
+```
+
+preflight 新增架构不变量检查：
+```
+1. 不许再出现 handle_doc_create
+2. INSERT INTO doc 全库只允许 1 处
+3. 解析点不许读 it.get("aggregated_output") / it.get("exit_code")
+```
+
+### 拍照页（阶段 A+B）
+
+```
+定位五级兜底：定位中 → 成功 → 失败提示（可点）→ 地图选点(wx.chooseLocation) → 项目地址
+地址行可点：重新定位 / 地图选择位置 / 使用项目地址
+水印标来源：（选点）/（项目地址），不假装是现场定位
+可编辑：部位 / 工序 / 备注 / 拍摄人（编辑时暂停相机，因为普通 view 盖不住 camera）
+上传落库：place/work/note/address/addressSource/weatherSource/lat/lng/edited/capturedBy
+实测 photo 30：place=3号楼2层 work=外架搭设 note=连墙件缺失 address=深圳市南山区
+              address_source=map weather_source=api edited=["place"] captured_by=7
+```
+
+待真机验证：camera+cover-view 层级、chooseLocation 授权、取景水印与出图是否一致。
+
 ## L3 权威导出上线（2026-11-06 13:35 实测）
 
 ```
