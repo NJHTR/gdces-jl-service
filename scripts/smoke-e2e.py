@@ -651,11 +651,16 @@ def main():
           "HTTP %s" % st3)
     st4, b4 = call("POST", "/api/v1/appeals/%s/decide" % ap, {"action": "uphold"})
     check("裁定后不可再改", st4 == 409, "HTTP %s" % st4)
-    # 清理
+    # 清理：没有 DELETE /docs 接口，直接按 id 删库（顺带删文件）
     sql("DELETE FROM review_appeal WHERE review_id=%s" % rv)
     sql("DELETE FROM review WHERE id=%s" % rv)
     if rdoc:
-        call("DELETE", "/api/v1/docs/%s" % rdoc)
+        rel = sql("SELECT COALESCE(path,'') FROM doc WHERE id=%s" % int(rdoc)).strip()
+        sql("DELETE FROM doc WHERE id=%s" % int(rdoc))
+        if rel:
+            fp = os.path.join(ROOT, "data", "workspaces", PROJECT, rel)
+            if os.path.isfile(fp):
+                os.remove(fp)
 
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
@@ -671,6 +676,12 @@ def main():
               "HTTP %s missing=%d" % (st, len(b2.get("missing") or [])))
     else:
         check("缺字段标已签被拒", False, "反向用例没建起来")
+
+    # 清理是否干净：smoke 造的东西不许留在库里（以前 DELETE /docs 不存在，静默 404）
+    left = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s' AND "
+               "(obj LIKE 'smoke%%' OR obj LIKE 'F4 自测%%' OR obj LIKE '%%受控状态机%%')"
+               % PROJECT)
+    check("测试文书已清干净", left.strip() == "0", "残留 %s" % left.strip())
 
     check_patrol_report()
     check_form_report(ctl)
