@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C1  个人×项目记忆：homes/<uid>/memories/projects/<pid>.md
+next = Wave3 / C2  项目规矩提案 + 一键确认（复用 observation 队列）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -153,7 +153,12 @@ next = Wave3 / C1  个人×项目记忆：homes/<uid>/memories/projects/<pid>.md
             updated_at=2026-11-06 16:52:43
       **核实**：引擎整理确实在跑（homes/501 的 MEMORY.md 4409B + summary 2060B，
       02:53 生成）；notes 通道 0 文件（用户级记忆还没人写过）
-[ ] C1 个人×项目记忆：homes/<uid>/memories/projects/<pid>.md（同一记忆根，不新建第三处）
+[x] C1 个人×项目记忆：homes/<uid>/memories/projects/<pid>.md（同一记忆根，不新建第三处）
+      实测：user 980 写 test-sandbox / yun-gu-3qi 两条 → 各进各的文件，互不串；
+      删除后文件重渲染成（空）；user 981 没有该目录（按家目录隔离）
+      memory 表加 project_id；applies_to=user:<uid>@project:<pid>；list 支持按项目过滤
+      顺带修：agent.py 用了 HOMES_ROOT 却没导入（用户级记忆一写就 500）；
+             create 先渲染后插入 → 文件写成（空）；delete 没重渲染 → 文件留着条目
 [ ] C2 项目规矩提案：从“人改字段/否定结论/重复要求”捕捉 → 观察队列 → 确认写库
 [ ] C3 memory:// 引用：回答里标「依据你上次说的…」+ 命中时 hits+1
 [ ] C4 「我的记忆」页补：来源、使用次数、撤销、删除（现在只有真写）
