@@ -20,6 +20,10 @@ import urllib.request
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.environ.get("BFF_URL") or "http://127.0.0.1:8081"
 PROJECT = sys.argv[1] if len(sys.argv) > 1 else "test-sandbox"
+# 硬守卫：验收会生成/删除导出文件，只允许在测试项目上跑
+if PROJECT != "test-sandbox":
+    print("拒绝运行：PROJECT=%r，必须是 test-sandbox" % PROJECT)
+    sys.exit(2)
 rows = []
 
 

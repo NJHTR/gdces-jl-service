@@ -20,6 +20,8 @@
 import json
 import os
 import sys
+import shutil
+import contextlib
 import subprocess
 import threading
 import time
@@ -56,88 +58,92 @@ HOMES_ROOT = os.environ.get("JL_HOMES_ROOT", "/home/baize/jl-service/data/homes"
 _MAIN_CONFIG = "/home/baize/.easycode/config.toml"
 
 
-def ensure_home(user_id):
-    """给每个用户准备一个 EASYCODE_HOME。
+def _cfg_stride(base, key, val, table="[features]"):
+    """在指定表里把 key 设成 val（幂等；已有就改，没有就插）。"""
+    lines = base.splitlines()
+    if table in lines:
+        at = lines.index(table)
+        # 找到该表的范围（下一个 [ 开头的行为止）
+        stop = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+        for i in range(at + 1, stop):
+            k = lines[i].split("=", 1)[0].strip()
+            if k == key:
+                lines[i] = "%s = %s" % (key, val)
+                return "\n".join(lines) + "\n"
+        lines.insert(at + 1, "%s = %s" % (key, val))
+        return "\n".join(lines) + "\n"
+    return base.rstrip() + "\n\n%s\n%s = %s\n" % (table, key, val)
 
-    引擎的记忆根是 $EASYCODE_HOME/memories（memories/read/src/lib.rs:13），
-    所以「一个用户一个家目录」= 记忆、会话、技能天然隔离，
-    不用自己写一套隔离逻辑（也就不会写错）。
+
+def ensure_home(user_id):
+    """给每个用户准备 EASYCODE_HOME（配置**原子写**，且记忆默认关）。
+
+    两道决策约束（写在 BACKLOG 里，代码必须遵守）：
+      D-记忆-04  引擎记忆关闭自动注入；MEMORY.md/summary 只作候选与审计
+      D-记忆-07  记忆唯一写者 = memory 表；引擎只做抽取器
+    所以 memories 特性默认 false；确需打开时显式设 JL_ENGINE_MEMORY=1。
     """
     home = os.path.join(HOMES_ROOT, str(user_id))
     cfg = os.path.join(home, "config.toml")
+    mem_on = os.environ.get("JL_ENGINE_MEMORY", "0") == "1"
+
     try:
         os.makedirs(home, exist_ok=True)
-        # 注意：不能只在"文件不存在"时写。已有家目录会永远缺 keys
-        #（实测 950 的 memories 就是关的，因为 ensure_home 只在创建时写一次）
-        if os.path.exists(cfg) or True:
-            base = ""
-            if os.path.exists(cfg):
-                try:
-                    with open(cfg, encoding="utf-8") as f:
-                        base = f.read()
-                except OSError:
-                    base = ""
-            if not base:
-                try:
-                    with open(_MAIN_CONFIG, encoding="utf-8") as f:
-                        base = f.read()
-                except Exception:
-                    base = ""
-            # 注意：必须插在 [features] 表**里面**。
-            # 追加到文件末尾的话，会变成最后一个表的键（之前就踩了：
-            # memories 落进 [agent_roles.reviewer]，引擎根本没启用记忆）。
+        base = ""
+        if os.path.exists(cfg):
+            try:
+                with open(cfg, encoding="utf-8") as f:
+                    base = f.read()
+            except OSError:
+                base = ""
+        if not base:
+            try:
+                with open(_MAIN_CONFIG, encoding="utf-8") as f:
+                    base = f.read()
+            except Exception:
+                base = ""
+
+        # 记忆特性：默认关；开了也只是"抽取/审计"，不进提示（D-记忆-04）
+        base = _cfg_stride(base, "memories", "true" if mem_on else "false")
+        # MCP 工具别被"推迟"，否则模型改用 shell 调 jl-tool（每次 2~4 秒）
+        base = _cfg_stride(base, "tool_search_always_defer_mcp_tools", "false")
+        # 联网搜索工具：不开这个键，web_search 根本不出现
+        if not any(l.strip().startswith("web_search") for l in base.splitlines()):
+            first_table = next((i for i, l in enumerate(base.splitlines()) if l.startswith("[")), 0)
             lines = base.splitlines()
-            if "[features]" in lines:
-                at = lines.index("[features]")
-                if not any(l.strip().startswith("memories") for l in lines[at:]):
-                    lines.insert(at + 1, "memories = true")
-                # 关键：不加这两行的话，MCP 工具会被"推迟"而模型看不见，
-                # 于是它改用 shell 调 jl-tool CLI —— 每次调用都要起一个容器（2~4 秒）。
-                # 实测：一次出稿 13~17 次 shell 调用，时间全耗在这。
-                # 联网搜索：不开这个键，引擎的 resolve_web_search_mode 返回 None，
-                # web_search 工具根本不出现（不是线路不支持，实测百炼能用）
-                if not any(l.strip().startswith("web_search") for l in lines):
-                    first_table = next((i for i, l in enumerate(lines) if l.startswith("[")), len(lines))
-                    lines.insert(first_table, 'web_search = "live"')
-                if not any(l.strip().startswith("tool_search_always_defer_mcp_tools") for l in lines):
-                    lines.insert(at + 1, "tool_search_always_defer_mcp_tools = false")
-                base = "\n".join(lines) + "\n"
-            else:
-                base = base.rstrip() + "\n\n[features]\nmemories = true\n"
-            # 记忆整理用它自己的模型（memories.extract_model / consolidation_model）。
-            # 不配的话回落到 provider 的"首选抽取模型"，我们的 dashscope 不支持，
-            # 日志里就是 "Phase 1 job failed ... stream disconnected before completion"
-            #（实测 980 有 157 条可整理 rollout，raw 一直是 "No raw memories yet"）。
+            lines.insert(first_table, 'web_search = "live"')
+            base = "\n".join(lines) + "\n"
+
+        # 只有显式开启引擎记忆时才写 [memories]（否则别给后来人误会的配置）
+        if mem_on:
             try:
                 from .core import LLM_MODEL as _mem_model, ENV as _env
             except Exception:
                 _mem_model = os.environ.get("LLM_MODEL") or "qwen3.7-plus"
                 _env = os.environ
-            # 两个阶段用不同模型（实测出来的组合）：
-            # · 抽取（phase1）：主模型即可，产出 raw_memories
-            # · 合并（phase2）：要按 apply_patch 写 MEMORY.md，主模型写不出合法补丁
-            #   （报 "apply_patch verification failed: invalid hunk"），
-            #   复核那个 flash 模型反而守格式 —— 实测换过去就产出了 22KB MEMORY.md
-            # 只能用复核模型，不能回落到 LLM_FALLBACK_MODEL（那就是主模型，
-            # 写不出合法 apply_patch，phase2 会一直失败）
-            _cons_model = _env.get("REVIEW_MODEL") or "qwen3.8-flash"
-            want = {
-                "max_rollouts_per_startup": "20",
-                "extract_model": _mem_model,
-                "consolidation_model": _cons_model,
-            }
-            if "[memories]" not in base:
-                base = base.rstrip() + "\n\n[memories]\n" + "".join(
-                    '%s = "%s"\n' % (k, v) for k, v in want.items())
-            else:
-                head, tail = base.split("[memories]", 1)
-                # 只补缺的键，不覆盖人改过的值
-                add = "".join('%s = "%s"\n' % (k, v) for k, v in want.items()
-                              if ("\n%s " % k) not in ("\n" + tail) and
-                              ("\n%s=" % k) not in ("\n" + tail))
-                base = head + "[memories]\n" + add + tail.lstrip("\n")
-            with open(cfg, "w", encoding="utf-8") as f:
-                f.write(base)
+            _cons = _env.get("REVIEW_MODEL") or "qwen3.8-flash"
+            for k, v in (("max_rollouts_per_startup", "20"),
+                         ("extract_model", _mem_model),
+                         ("consolidation_model", _cons)):
+                base = _cfg_stride(base, k, '"%s"' % v, table="[memories]")
+
+        # 原子写 + 备份 + 校验：写一半崩掉会把整份配置废掉（出过一次事故）
+        import tempfile
+        fd, tmp = tempfile.mkstemp(dir=home, prefix=".config.", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(base)
+        try:
+            import tomllib
+            with open(tmp, "rb") as f:
+                tomllib.load(f)
+        except Exception as e:
+            os.remove(tmp)
+            sys.stderr.write("[home] 生成配置不合法，放弃写入 %s: %r\n" % (cfg, e))
+            return home
+        if os.path.exists(cfg):
+            with contextlib.suppress(OSError):
+                shutil.copyfile(cfg, cfg + ".bak")
+        os.replace(tmp, cfg)
     except Exception as exc:
         sys.stderr.write("[home] 准备 %s 失败：%s\n" % (home, exc))
     return home

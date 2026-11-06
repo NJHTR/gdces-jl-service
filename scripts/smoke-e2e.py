@@ -32,6 +32,10 @@ import uuid
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.environ.get("BFF_URL") or "http://127.0.0.1:8081"
 PROJECT = "test-sandbox"
+# 硬守卫：这个脚本会删测试数据，绝不能对着生产项目跑
+if PROJECT != "test-sandbox":
+    print("拒绝运行：PROJECT=%r，必须是 test-sandbox" % PROJECT)
+    sys.exit(2)
 KEEP = "--keep" in sys.argv
 
 fails = []
