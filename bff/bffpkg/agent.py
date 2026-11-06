@@ -715,6 +715,14 @@ def _cites_from_output(label, output):
     return out
 
 
+# ---------------------------------------------------------------- _plain_trace
+def _plain_trace(t):
+    """过程面板里的文字：去掉 markdown 记号（**、反引号、井号），不做排版。"""
+    t = (t or "").replace("**", "").replace("`", "")
+    t = t.replace("### ", "").replace("## ", "").replace("# ", "")
+    return t.strip()
+
+
 # ---------------------------------------------------------------- _cite_from_entry
 CITE_KIND_PREFIX = (
     ("standard://", "standard"),
@@ -837,7 +845,8 @@ def _parse_cli_jsonl(stdout, ctx=None):
             txt = (it.get("text") or "").strip()
             if txt:
                 texts.append(txt)
-                timeline.append({"kind": "note", "icon": "think", "text": txt[:400],
+                timeline.append({"kind": "note", "icon": "think",
+                                 "text": _plain_trace(txt)[:400],
                                  "output": txt[:2000]})
             # 引擎已把 <oai-mem-citation> 从正文剥掉，结构化放在这里
             mc = it.get("memoryCitation") or it.get("memory_citation") or {}
@@ -1232,6 +1241,13 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         _set_progress(task_id, steps)
 
         thread_id, final_text, trace, cites = _parse_cli_jsonl("".join(lines), ctx={"ws": ws})
+
+        # 过程面板不该重复一遍最终回复：最后一条 note 和 final 一样就去掉
+        if trace and final_text:
+            last = trace[-1]
+            if last.get("kind") == "note" and \
+                    _plain_trace(last.get("text") or "")[:80] == _plain_trace(final_text)[:80]:
+                trace.pop()
 
         # 工具侧落盘的引用（命令输出不回传，只能这么取）
         def _ck(c):
