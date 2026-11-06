@@ -84,6 +84,49 @@ tmp/
 
 
 def ensure_ws_gitignore(project_id):
+    """给工作区补 .gitignore，并把已经提交过的 .agent/ 从索引里移除（幂等）。
+
+    两个坑：
+    · .gitignore 只影响未跟踪文件——以前提交过的 .agent/*.json 仍在索引里
+    · 不能"文件内容一样就早退"：那样永远走不到取消跟踪那一步（实测踩过）
+    """
+    ws = f"{WS_ROOT}/{project_id}"
+    path = os.path.join(ws, ".gitignore")
+    try:
+        os.makedirs(ws, exist_ok=True)
+        old = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                old = f.read()
+        if old != WS_GITIGNORE:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(WS_GITIGNORE)
+    except OSError as e:
+        sys.stderr.write("[ws] 写 .gitignore 失败 %s: %r\n" % (ws, e))
+        return None
+    try:
+        # 无论 .gitignore 有没有变，都确保索引里没有 .agent/
+        subprocess.run(["git", "rm", "-r", "--cached", "--quiet", ".agent"],
+                       cwd=ws, capture_output=True, text=True, timeout=30)
+        subprocess.run(["git", "add", "--", ".gitignore"], cwd=ws,
+                       capture_output=True, text=True, timeout=30)
+        subprocess.run(["git", "commit", "-m",
+                        "chore(工作区): 忽略并取消跟踪每轮临时产物"],
+                       cwd=ws, capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        sys.stderr.write("[ws] 提交 .gitignore 失败: %r\n" % (e,))
+    return ".gitignore"
+
+
+# ---------------------------------------------------------------- render_project_memory
+WS_GITIGNORE = """# 每轮临时产物：引用账本、轮次标记、最后输出、临时文件
+.agent/
+*.tmp
+tmp/
+"""
+
+
+def ensure_ws_gitignore(project_id):
     """给工作区补 .gitignore（幂等）。
 
     每轮都会在 .agent/ 下写 cites.jsonl、turn-*.json、last-*.md；
