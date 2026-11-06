@@ -12,7 +12,8 @@
   3. PUT 补剩下字段（断言：状态变待签、missing 为空）
   4. PUT 只改状态=已签（断言：200 且状态已签）
   5. 反向用例：新建一份缺字段的，PUT state=已签（断言：400 被拒）
-  6. 清理：删掉本次产生的文书（库 + 文件），不留垃圾
+  6. 巡视记录导出：断言与省统表模板同结构（表数/行列/合并/固定标签/值已填）
+  7. 清理：按 task_id 删掉本次产生的文书（库 + 文件），不留垃圾
 
 用法：
   python3 scripts/smoke-e2e.py           # 跑一遍
@@ -34,6 +35,7 @@ PROJECT = "test-sandbox"
 KEEP = "--keep" in sys.argv
 
 fails = []
+SMOKE_TASKS = []
 
 
 def call(method, path, body=None, timeout=60):
@@ -68,9 +70,13 @@ def sql(query):
         if line.startswith("MYSQL_PASSWORD="):
             pw = line.split("=", 1)[1].strip()
             break
-    subprocess.run(["docker", "exec", "jl-mysql", "mysql", "-ujl", "-p" + pw,
-                    "--default-character-set=utf8mb4", "-N", "-e", query, "jl"],
-                   capture_output=True, text=True, timeout=60)
+    # 必须返回 stdout：清理要按返回的行删文件（以前忘了 return，读到的永远是 None）
+    r = subprocess.run(["docker", "exec", "jl-mysql", "mysql", "-ujl", "-p" + pw,
+                        "--default-character-set=utf8mb4", "-N", "-e", query, "jl"],
+                       capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError("mysql 失败: %s" % (r.stderr or "")[:200])
+    return r.stdout
 
 
 def doc_row(doc_id):
@@ -92,6 +98,79 @@ def doc_row(doc_id):
     except Exception:
         fields = {}
     return {"id": int(parts[0]), "state": parts[1], "fields": fields}
+
+
+def get_bytes(path, timeout=60):
+    req = urllib.request.Request(BASE + path)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.status, r.read()
+
+
+def check_patrol_report():
+    """B5：巡视记录必须与省统表 GD-B-214 模板同结构。
+
+    以前报告接口没有任何断言：两次 500（"施工单位右边没有可填的单元格"、
+    "缺 import io"）都是人工测出来的。
+    """
+    from datetime import date, timedelta
+
+    from docx import Document
+
+    end = date.today().isoformat()
+    start = (date.today() - timedelta(days=6)).isoformat()
+    st, b = call("POST", "/api/v1/reports/patrol",
+                 {"projectId": PROJECT, "from": start, "to": end, "inspector": "smoke"})
+    data = b.get("data") or {}
+    check("巡视记录生成", st == 200 and bool(data.get("url")),
+          "HTTP %s %s" % (st, b.get("message") or ""))
+    if not (st == 200 and data.get("url")):
+        return
+
+    try:
+        code, raw = get_bytes(data["url"])
+    except Exception as exc:
+        check("巡视记录下载", False, repr(exc))
+        return
+    check("巡视记录下载", code == 200 and raw[:2] == b"PK", "%d 字节" % len(raw))
+
+    fp = os.path.join(ROOT, "runtime", "smoke-patrol.docx")
+    os.makedirs(os.path.dirname(fp), exist_ok=True)
+    with open(fp, "wb") as f:
+        f.write(raw)
+    try:
+        doc = Document(fp)
+        check("表数 = 天数", len(doc.tables) == int(data.get("days") or 0),
+              "表 %d / 天数 %s" % (len(doc.tables), data.get("days")))
+
+        shapes = sorted((len(t.rows), len(t.columns)) for t in doc.tables)
+        check("每张表 4 行 × 4 列", set(shapes) == {(4, 4)}, str(shapes))
+
+        sigs = [[len(set(c._tc for c in r.cells)) for r in t.rows] for t in doc.tables]
+        check("合并结构 4/2/1/1", all(sg == [4, 2, 1, 1] for sg in sigs), str(sigs))
+
+        text = "\n".join(p.text for p in doc.paragraphs) + "\n" + "\n".join(
+            c.text for t in doc.tables for r in t.rows for c in r.cells)
+        for lb in ("巡视的工程部位", "施工单位", "巡视时间", "巡视内容",
+                   "巡视发现的问题及处理情况", "巡视监理人员（签名）",
+                   "注：本表一式一份"):
+            check("固定标签保留：%s" % lb, lb in text)
+
+        check("巡视内容清单未动", "□1." in text and "□4." in text)
+        check("部位已填写（不是空模板）",
+              all((t.rows[0].cells[1].text or "").strip() for t in doc.tables))
+    finally:
+        try:
+            os.remove(fp)
+        except OSError:
+            pass
+        name = os.path.basename(data["url"])
+        for pat in (os.path.join(ROOT, "data", "exports", "*", name),
+                    os.path.join(ROOT, "data", "exports", "*", name + ".meta.json")):
+            for cand in glob.glob(pat):
+                try:
+                    os.remove(cand)
+                except OSError:
+                    pass
 
 
 def wait_done(task_id, limit=300):
@@ -126,6 +205,8 @@ def main():
     })
     tid = (body.get("data") or {}).get("taskId")
     check("发起任务", st in (200, 202) and bool(tid), "task=%s" % tid)
+    if tid:
+        SMOKE_TASKS.append(tid)
     if not tid:
         return finish(created)
 
@@ -207,6 +288,8 @@ def main():
                 "parts": [{"type": "image", "blob": sha}],
             })
             tid2 = (body.get("data") or {}).get("taskId")
+        if tid2:
+            SMOKE_TASKS.append(tid2)
             d2, seen2, total2 = wait_done(tid2) if tid2 else ({}, None, 0)
             art2 = d2.get("artifact") or {}
             msgs2 = [m for m in (d2.get("messages") or []) if m.get("role") == "assistant"]
@@ -291,14 +374,37 @@ def main():
     else:
         check("缺字段标已签被拒", False, "反向用例没建起来")
 
+    check_patrol_report()
+
     return finish(created)
 
 
 def finish(created):
+    # 先按 task_id 删：文书现在挂在任务上，比"按标题前缀"可靠
+    # （实测：模型有时不写 obj，obj=NULL 就让前缀判断失效，垃圾越攒越多）
+    removed = set()
+    if not KEEP:
+        for tid in SMOKE_TASKS:
+            out = sql("SELECT id, COALESCE(path,'') FROM doc WHERE task_id=%s" % int(tid))
+            for line in (out or "").splitlines():
+                cols = line.split("\t")
+                if not cols or not cols[0].strip().isdigit():
+                    continue
+                did, rel = int(cols[0]), (cols[1].strip() if len(cols) > 1 else "")
+                sql("DELETE FROM doc WHERE id=%s" % did)
+                removed.add(did)
+                if rel:
+                    fp = os.path.join(ROOT, "data", "workspaces", PROJECT, rel)
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+                print("  按任务删除 doc %s（task %s）" % (did, tid))
+
     if KEEP:
         print("  保留测试文书: %s" % created)
     else:
         for did in created:
+            if did in removed:
+                continue          # 已经按任务删过，不再重复提示
             try:
                 _obj = sql("SELECT COALESCE(obj,'') FROM doc WHERE id=%s" % did).strip()
             except Exception:
