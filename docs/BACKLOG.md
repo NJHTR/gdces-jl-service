@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C3  memory:// 引用（回答里标「依据你上次说的…」+ 命中 hits+1）
+next = Wave3 / C4  「我的记忆」页补：来源 / 使用次数 / 撤销 / 删除
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -64,6 +64,8 @@ next = Wave3 / C3  memory:// 引用（回答里标「依据你上次说的…」
   B5 已把报告接口纳入 smoke（现在这类问题部署时就会红）。
 · smoke 的 sql() 只执行不返回 → 清理读不到行；已改成 return stdout 并在失败时抛错。
 · /docs/register 的返回键是 docId（不是 id）；测试脚本里写 id 会拿到 None → 400。
+· API 路由顺序：`/api/v1/memories/recall` 必须排在 `startswith("/api/v1/memories")` 之前，
+  否则会被列表接口截走（这次就踩了，返回「ownerId 必填」）。
 · smoke 不能依赖"模型这次缺几项"：模型只缺 1 项时"补一半仍待补"会假失败。
   状态机改用 register 的受控文书（字段集合固定）。
 ```
@@ -183,7 +185,12 @@ next = Wave3 / C3  memory:// 引用（回答里标「依据你上次说的…」
           （1265 Data truncated）→ 线上 ALTER + schema 同步
       没复用 observation 表：它是「同类复核问题计数」聚合表（project+doc_kind+tag 唯一），
       和「一条候选规矩」不是一回事
-[ ] C3 memory:// 引用：回答里标「依据你上次说的…」+ 命中时 hits+1
+[x] C3 记忆引用可见：[m:<id>] 标记 + 检索命中记次数
+      jl-tool recall_memory → GET /api/v1/memories/recall（项目规矩/我的记忆/我在本项目的习惯）
+      模型用到哪条就标 [m:<id>]；BFF 机械解析：去标记 + 加一条「你记过的」引用 + hits+1
+      没标就当没用过（不虚报"依据你的习惯"）
+      实测：同一查询召回两次 → hits 1 → 2
+      smoke：strip_mem_refs 解析（去标记、保序去重）+ 召回命中且 hits>=1
 [ ] C4 「我的记忆」页补：来源、使用次数、撤销、删除（现在只有真写）
 [ ] C5 待确认列表（与 observation 同一套 UI）
 [ ] C6 指标可查：每人每周主动写记忆次数、记忆复用次数、撤销率、确认率
