@@ -588,6 +588,19 @@ def main():
     if rid5:
         sql("DELETE FROM rule_proposal WHERE id=%s" % int(rid5))
 
+    # 4.995) C6 指标：记忆用起来没有（主动写/复用/撤销率/确认率）
+    st, b = call("GET", "/api/v1/metrics/memory?projectId=" + PROJECT)
+    d = b.get("data") or {}
+    tot = d.get("totals") or {}
+    pr = d.get("proposals") or {}
+    check("指标可查", st == 200 and "revokeRate" in tot and "acceptRate" in pr,
+          "entries=%s revoke=%s accept=%s" % (tot.get("entries"),
+                                             tot.get("revokeRate"), pr.get("acceptRate")))
+    check("指标口径齐全",
+          all(k in tot for k in ("entries", "active", "disabled", "recallUses", "humanWrites"))
+          and isinstance(d.get("byWeek"), list),
+          "keys=%s" % sorted(tot.keys()))
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

@@ -552,6 +552,56 @@ def handle_asr(body, user=None):
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
                                      "saved": saved}}
 
+# ---------------------------------------------------------------- 记忆指标（C6）
+def handle_memory_metrics(params, user=None):
+    """记忆用起来没有：主动写 / 复用 / 撤销率 / 提案确认率。
+
+    口径写在这（免得以后各说各话）：
+    · 主动写 = source in ('manual','confirmed')（人写的、人确认的）
+    · 复用 = SUM(hits)（检索命中与被引用都记 hits）
+    · 撤销率 = 停用条数 / 总条数
+    · 确认率 = accepted / (accepted + rejected)；没有已决提案时返回 null
+    """
+    pid = q1(params, "projectId")
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+
+    t = q("SELECT COUNT(*) AS n, COALESCE(SUM(status=1),0) AS active, "
+          "COALESCE(SUM(hits),0) AS uses, "
+          "COALESCE(SUM(source IN ('manual','confirmed')),0) AS human "
+          "FROM memory WHERE scope='project' AND owner_id=%s", (pid,))[0]
+    n = int(t["n"] or 0)
+    active = int(t["active"] or 0)
+    by_week = q("SELECT YEARWEEK(created_at,3) AS yw, COUNT(*) AS entries, "
+                "COALESCE(SUM(source IN ('manual','confirmed')),0) AS human, "
+                "COALESCE(SUM(hits),0) AS uses "
+                "FROM memory WHERE scope='project' AND owner_id=%s "
+                "AND created_at >= DATE_SUB(NOW(), INTERVAL 8 WEEK) "
+                "GROUP BY yw ORDER BY yw", (pid,))
+    pr = q("SELECT COALESCE(SUM(status='accepted'),0) AS a, "
+           "COALESCE(SUM(status='rejected'),0) AS r, "
+           "COALESCE(SUM(status='pending'),0) AS p "
+           "FROM rule_proposal WHERE project_id=%s", (pid,))[0]
+    a, r, p = int(pr["a"] or 0), int(pr["r"] or 0), int(pr["p"] or 0)
+    return 200, {"code": 0, "data": {
+        "projectId": pid,
+        "totals": {
+            "entries": n, "active": active, "disabled": n - active,
+            "revokeRate": round((n - active) / n, 3) if n else 0.0,
+            "recallUses": int(t["uses"] or 0),
+            "humanWrites": int(t["human"] or 0),
+        },
+        "byWeek": [{"week": str(w["yw"]), "entries": int(w["entries"]),
+                    "humanWrites": int(w["human"]), "uses": int(w["uses"])}
+                   for w in by_week],
+        "proposals": {"pending": p, "accepted": a, "rejected": r,
+                      "acceptRate": round(a / (a + r), 3) if (a + r) else None},
+    }}
+
+
 # ---------------------------------------------------------------- 规矩提案（C2）
 def handle_rule_propose(body, user=None):
     """收下一条候选规矩。**不写 memory、不动 rules.md** —— 只是排队等人确认。"""
