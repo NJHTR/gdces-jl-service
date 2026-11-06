@@ -104,13 +104,29 @@ def ensure_home(user_id):
                 base = "\n".join(lines) + "\n"
             else:
                 base = base.rstrip() + "\n\n[features]\nmemories = true\n"
-            # 一次启动多领几条，否则积压的 rollout 永远整理不完
+            # 记忆整理用它自己的模型（memories.extract_model / consolidation_model）。
+            # 不配的话回落到 provider 的"首选抽取模型"，我们的 dashscope 不支持，
+            # 日志里就是 "Phase 1 job failed ... stream disconnected before completion"
+            #（实测 980 有 157 条可整理 rollout，raw 一直是 "No raw memories yet"）。
+            try:
+                from .core import LLM_MODEL as _mem_model
+            except Exception:
+                _mem_model = os.environ.get("LLM_MODEL") or "qwen3.7-plus"
+            want = {
+                "max_rollouts_per_startup": "20",
+                "extract_model": _mem_model,
+                "consolidation_model": _mem_model,
+            }
             if "[memories]" not in base:
-                base = base.rstrip() + ("\n\n[memories]\n"
-                                        "max_rollouts_per_startup = 20\n")
-            elif "max_rollouts_per_startup" not in base.split("[memories]", 1)[1]:
+                base = base.rstrip() + "\n\n[memories]\n" + "".join(
+                    "%s = %s\n" % (k, v) for k, v in want.items())
+            else:
                 head, tail = base.split("[memories]", 1)
-                base = head + "[memories]\nmax_rollouts_per_startup = 20" + tail
+                # 只补缺的键，不覆盖人改过的值
+                add = "".join("%s = %s\n" % (k, v) for k, v in want.items()
+                              if ("\n%s " % k) not in ("\n" + tail) and
+                              ("\n%s=" % k) not in ("\n" + tail))
+                base = head + "[memories]\n" + add + tail.lstrip("\n")
             with open(cfg, "w", encoding="utf-8") as f:
                 f.write(base)
     except Exception as exc:
