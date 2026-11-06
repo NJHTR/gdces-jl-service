@@ -119,28 +119,42 @@ authoritative  verified_count ≥ 5 且 used_count ≥ 10 且 disputed=0
 
 ---
 
-## 五、联网取用（决定：做取用，不做伪搜索）
+## 五、联网：引擎自带 web_search，已实测可用
 
-核实结果：
+**先纠正我自己上一版的错误结论。** 之前写"百炼用不了 web_search"是错的。
 
-- 引擎有 `ToolSpec::WebSearch`（`tools/src/tool_spec.rs:39`），但那是 **OpenAI 托管工具**，
-  需要 `wire_api="responses"` 且服务端支持；我们现在走百炼，**用不了**。
-- 线上 config 与用户 home 的 `config.toml` 里都没有 `web_search` 配置。
-- 引擎没有 `fetch_url` 这类自建工具。
-
-所以：
+实测（2026-11-06）：
 
 ```
-做：jl-tool fetch_url <url>
-    stdlib HTTP → 正文抽取 → 落 webcache/<sha>.md → 引用该文件的行号
-不做：自己拼一个"搜索引擎"（没有搜索 API，拼出来就是假的）
+给 config 加 web_search = "live"
+→ 模型调了 web_search（item.type=webSearch，带 query）
+→ 结果按 m.nmc.cn / trip.com 引用回答
+→ 走服务也通：task 292，12 秒，trace 显示「联网搜索：深圳天气 2026年11月6日」
 ```
 
-有了 `fetch_url`，"模型可以上网读"这句话才成立：它读的是**我们抓下来、可复核的快照**，
-不是它记在参数里的印象。等公司有了搜索 API（Bing/Google/博查等），再接
-`jl-tool web_search`，接口形状与 `fetch_url` 对齐即可。
+真实原因：`core/src/config/mod.rs:2741 resolve_web_search_mode`
+—— 没有 `web_search` 键、也没开 `WebSearchCached` / `WebSearchRequest` 时返回 `None`，
+**工具根本不出现**。我们线上 config 从来没写过这个键。
 
----
+配置（已应用到主配置 + 52 个 home）：
+
+```toml
+web_search = "live"              # 顶层键，必须在第一个 [table] 之前
+
+[tools.web_search]
+search_context_size = "low"      # 一次搜索实测 22k input tokens，压小控成本
+```
+
+**已知限制**：`webSearch` item 的 `results` 为 `null` —— 搜索结果只给了模型，
+**不回传客户端**（和命令输出同一个毛病）。所以：
+
+```
+网络来源的 URL 只能由模型自己写进引用块
+我们无法核验它引的 URL 是否真在结果里 → 这类引用先标 raw，靠人工确认升级
+```
+
+不做的事：自己拼一个"搜索引擎"（没有搜索 API，拼出来是假搜索）；
+也不抓全网站做爬虫（越界且不可维护）。
 
 ## 六、四个工作包（一次到位，不分期重写）
 

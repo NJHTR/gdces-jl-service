@@ -168,6 +168,34 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 联网搜索：我上一轮说错了（2026-11-06 11:30）
+
+**错误结论**：我说「百炼用不了 web_search」——不对。
+**真实原因**：`resolve_web_search_mode`（core/src/config/mod.rs:2741）在没有 `web_search`
+配置键时返回 `None`，工具根本不出现。我们线上从来没写过这个键。
+
+**实测证据**（两条都跑过）：
+
+```
+① 直接用引擎 exec：模型调 web_search 查「深圳天气 2026年11月6日」
+   → 按 m.nmc.cn / trip.com 引用回答
+② 走服务：task 292，12 秒
+   trace: 联网搜索：深圳天气 2026年11月6日
+   回复：中国气象局（m.nmc.cn）晴转多云 24–29°C；Trip.com 雨势轻微 24–30°C
+```
+
+**已做**：
+
+```
+- 主配置 + 52 个用户 home 加 web_search = "live"
+- [tools.web_search] search_context_size = "low"（一次搜索实测 22k input tokens）
+- ensure_home 新用户自动带
+- appserver 补 webSearch → web_search 映射；agent 把搜索写进 trace
+```
+
+**限制**：搜索结果不回传客户端（`results: null`），所以网络来源的 URL 只能由模型自己标注，
+我们无法核验 → 这类引用先记 raw，靠人工确认升级。
+
 ## 规范条文与引用（2026-11-06 11:05）
 
 ### 调研结论：工程建设标准没有官方免费全文
