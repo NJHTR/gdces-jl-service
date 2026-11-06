@@ -77,14 +77,12 @@ export async function searchStandards({ query: text, limit = 5 }) {
 }
 
 /* ---------------- create_doc_draft ---------------- */
-const TEMPLATES = {
-  旁站记录: ["部位", "时间", "施工内容", "结论"],
-  监理通知单: ["受检单位", "部位", "事由", "整改期限", "签发人"],
-  监理日志: ["日期", "天气", "部位", "施工内容", "结论"],
-};
+// 不再在这里写字段表：字段规则只有一个出处 —— 服务端 schemas/<类型>.json。
+// 以前这里有一份 TEMPLATES，加字段时两边不同步，算出的状态和数据库对不上。
 
-function renderDoc({ kind, obj, fields, bases }) {
-  const req = TEMPLATES[kind] || Object.keys(fields || {});
+function renderDoc({ kind, obj, fields, bases, missingKeys = [] }) {
+  // required 由调用方从服务端 validate 拿到，这里只负责排版
+  const req = missingKeys.concat(Object.keys(fields || {}));
   const lines = [
     `# ${kind}${obj ? " · " + obj : ""}`,
     "",
@@ -92,18 +90,13 @@ function renderDoc({ kind, obj, fields, bases }) {
     "",
   ];
 
-  const missing = [];
-  for (const k of req) {
-    const v = fields?.[k];
-    if (v === undefined || v === null || String(v).trim() === "") {
-      missing.push(k);
-      lines.push(`- **${k}**：待补`);
-    } else {
-      lines.push(`- **${k}**：${v}`);
-    }
+  const missing = missingKeys.slice();
+  for (const k of missingKeys) {
+    lines.push(`- **${k}**：待补`);
   }
   for (const [k, v] of Object.entries(fields || {})) {
-    if (!req.includes(k)) lines.push(`- **${k}**：${v}`);
+    if (v === undefined || v === null || String(v).trim() === "") continue;
+    lines.push(`- **${k}**：${v}`);
   }
 
   if (bases && bases.length) {
@@ -118,7 +111,18 @@ function renderDoc({ kind, obj, fields, bases }) {
 
 export async function createDocDraft({ projectId, kind, obj, fields, bases = [], body }) {
   if (!kind) throw new Error("缺 kind");
-  const { md, missing } = renderDoc({ kind, obj, fields, bases });
+
+  // 先问服务端缺什么（schema 是唯一出处），再排版 —— 工具不自己判
+  let missingKeys = [];
+  try {
+    const chk = await validateDoc({ kind, fields: fields || {} });
+    missingKeys = (chk.missing || []).concat(chk.placeholder || []);
+  } catch (err) {
+    // 问不到就按「不知道」处理，绝不自己编缺项
+    console.error("[create_doc_draft] validate 失败，按无缺项排版:", err && err.message);
+  }
+  const { md } = renderDoc({ kind, obj, fields, bases, missingKeys });
+  const missing = missingKeys;
 
   const stamp = new Date().toISOString().slice(0, 10);
   const base = `${safeName(kind)}-${safeName(obj, 24)}`;
@@ -137,6 +141,7 @@ export async function createDocDraft({ projectId, kind, obj, fields, bases = [],
     `项目: ${projectId}`;
 
   const commit = gitCommit(projectId, message, [relPath]);
+  // state 由服务端按 schema 决定；这里只在服务端没给时兜底
   const state = missing.length ? "待补" : "待签";
 
   // 数据库这一行交给 biz 服务登记，工具自己只写文件和提交 —— doc 表只有一个写者
@@ -145,7 +150,7 @@ export async function createDocDraft({ projectId, kind, obj, fields, bases = [],
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      projectId, kind, obj: obj || "", state,
+      projectId, kind, obj: obj || "",
       fields: fields || {}, bases, path: relPath, commit,
     }),
   });

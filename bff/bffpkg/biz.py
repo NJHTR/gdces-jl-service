@@ -536,10 +536,10 @@ def handle_doc_register(body, user=None):
     # 齐不齐由 schema 说了算（占位词「待补」也算缺）
     check = validate_fields(kind, fields)
     missing = list(check["missing"]) + list(check["placeholder"])
-    state = body.get("state") or ("待补" if missing else "待签")
-    # 模型说"待签"但字段还缺 —— 以 schema 为准，别让不齐的文书冒充可签
-    if missing and state == "待签":
-        state = "待补"
+    # 状态只由 schema 决定，不接受客户端传的 state。
+    # 以前工具自己算缺项、把自己的判断传上来，两边不同步就会出现
+    # 「字段齐了但状态还是待补」（实测 doc 173）。
+    state = "待补" if missing else "待签"
 
     exec_sql(
         "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "

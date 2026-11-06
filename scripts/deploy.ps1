@@ -29,7 +29,7 @@ $subject = (git log -1 --pretty=%s).Trim()
 Write-Host "  提交 $hash  $subject"
 
 Write-Host "=== 2) 传代码 ===" -ForegroundColor Cyan
-$dirs = @("bff", "scripts", "schemas", "data/knowledge")
+$dirs = @("bff", "scripts", "schemas", "tools", "data/knowledge")
 foreach ($d in $dirs) {
   for ($i = 1; $i -le 6; $i++) {
     scp -r -o ConnectTimeout=30 "$Local\$($d -replace '/','\')" "${Remote}:$RemoteDir/$(Split-Path $d -Parent)/" 2>$null
