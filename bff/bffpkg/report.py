@@ -56,6 +56,7 @@ def _docs_between(project_id, start, end):
         r = dict(r)
         r["fields"] = _loads(r.get("fields"))
         r["date"] = str(r.get("created_at") or "")[:10]
+        r["time"] = str(r.get("created_at") or "")[11:16]
         obj = (r.get("obj") or "")
         # 自测/压测产物不是现场记录，不进巡视记录
         if any(w in obj for w in NOISE_WORDS):
@@ -70,7 +71,13 @@ def _photos_between(project_id, start, end):
         "FROM photo WHERE project_id=%s "
         "AND DATE(COALESCE(shot_at, created_at)) BETWEEN %s AND %s ORDER BY id",
         (project_id, start, end))
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        r = dict(r)
+        stamp = str(r.get("shot_at") or r.get("created_at") or "")
+        r["date"], r["time"] = stamp[:10], stamp[11:16]
+        out.append(r)
+    return out
 
 
 def _day_block(day, docs, photos):
@@ -108,11 +115,16 @@ def _day_block(day, docs, photos):
         if weather:
             break
 
+    times = sorted([d.get("time") for d in docs if d.get("time")] +
+                   [p.get("time") for p in photos if p.get("time")])
     signed = sum(1 for d in docs if d.get("state") == "已签")
     todo = sum(1 for d in docs if d.get("state") == "待补")
     return {
         "date": day,
         "weather": weather,
+        "parts": objs,
+        "start": times[0] if times else "",
+        "end": times[-1] if times else "",
         "objs": objs,
         "issues": issues,
         "quality": quality,
@@ -124,175 +136,120 @@ def _day_block(day, docs, photos):
     }
 
 
-# ---------------------------------------------------------------- docx 排版
-def _cn(run, font, size, bold=False, color=None):
-    from docx.oxml.ns import qn
-    from docx.shared import Pt, RGBColor
-
-    run.font.name = font
-    run.font.size = Pt(size)
-    run.bold = bold
-    if color:
-        run.font.color.rgb = RGBColor(*color)
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), font)
-
-
-def _para(doc, text="", size=10.5, bold=False, font="宋体", space_after=4, align=None):
-    from docx.shared import Pt
-
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = Pt(space_after)
-    p.paragraph_format.line_spacing = 1.35
-    if align is not None:
-        p.alignment = align
-    if text:
-        _cn(p.add_run(text), font, size, bold)
-    return p
-
-
-def _cell(cell, text, bold=False, size=9.5):
-    from docx.shared import Pt
-
-    cell.text = ""
-    p = cell.paragraphs[0]
-    p.paragraph_format.space_after = Pt(2)
-    p.paragraph_format.line_spacing = 1.25
-    _cn(p.add_run(str(text or "")), "宋体", size, bold)
-
-
-def _table(doc, rows, widths=None, header=False):
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.shared import Cm
-
-    t = doc.add_table(rows=0, cols=len(rows[0]))
-    t.style = "Table Grid"
-    t.alignment = WD_TABLE_ALIGNMENT.CENTER
-    for ri, row in enumerate(rows):
-        cells = t.add_row().cells
-        for ci, val in enumerate(row):
-            _cell(cells[ci], val, bold=(header and ri == 0) or (ci == 0 and not header))
-    if widths:
-        for ci, w in enumerate(widths):
-            for row in t.rows:
-                row.cells[ci].width = Cm(w)
-    return t
-
-
-def build_patrol_docx(project_id, start, end, inspector="", org="广东建设工程监理有限公司"):
-    """生成巡视记录 docx，返回 {path, name, bytes}。"""
-    from docx import Document
-    from docx.enum.section import WD_ORIENT
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Cm, Pt
-
-    proj = (q("SELECT id, name, code, addr FROM project WHERE id=%s", (project_id,)) or [{}])[0]
+# ---------------------------------------------------------------- collect
+def collect(project_id, start, end):
+    """按天汇总：返回 (项目, 每天一块, 全部文书, 全部影像)。"""
+    proj_rows = q("SELECT id, name, code, addr FROM project WHERE id=%s", (project_id,))
+    proj = (dict(proj_rows[0]) if proj_rows else {}) or {"id": project_id}
     docs = _docs_between(project_id, start, end)
     photos = _photos_between(project_id, start, end)
+    days = sorted({d["date"] for d in docs if d.get("date")} |
+                  {p["date"] for p in photos if p.get("date")})
+    blocks = []
+    for day in days:
+        blocks.append(_day_block(
+            day,
+            [d for d in docs if d.get("date") == day],
+            [p for p in photos if p.get("date") == day],
+        ))
+    return proj, blocks, docs, photos
 
-    days = sorted({d["date"] for d in docs} | {str(p.get("shot_at") or p.get("created_at") or "")[:10]
-                                               for p in photos})
-    blocks = [_day_block(day, [d for d in docs if d["date"] == day],
-                         [p for p in photos
-                          if str(p.get("shot_at") or p.get("created_at") or "")[:10] == day])
-              for day in days]
 
-    doc = Document()
-    sec = doc.sections[0]
-    sec.orientation = WD_ORIENT.PORTRAIT
-    sec.page_width, sec.page_height = Cm(21.0), Cm(29.7)
-    sec.left_margin = sec.right_margin = Cm(2.0)
-    sec.top_margin = sec.bottom_margin = Cm(2.0)
+# ---------------------------------------------------------------- 生成（模板填充）
+def _org_of(docs, default="中建八局华南公司"):
+    """施工单位：优先取文书里的「受检单位 / 施工单位」，取不到用默认。"""
+    counts = {}
+    for d in docs:
+        f = d.get("fields") or {}
+        for k in ("受检单位", "施工单位"):
+            v = (f.get(k) or "").strip()
+            if v and "待补" not in v:
+                counts[v] = counts.get(v, 0) + 1
+    if not counts:
+        return default
+    return max(counts.items(), key=lambda kv: kv[1])[0][:40]
 
-    _para(doc, "监 理 巡 视 记 录", size=20, bold=True, font="黑体",
-          align=WD_ALIGN_PARAGRAPH.CENTER, space_after=2)
-    _para(doc, org, size=10.5, align=WD_ALIGN_PARAGRAPH.CENTER, space_after=2)
-    _para(doc, "记录期间：%s — %s      编号：JL-XS-%s" % (start, end, start.replace("-", "")),
-          size=9, align=WD_ALIGN_PARAGRAPH.CENTER, space_after=10)
 
-    _table(doc, [
-        ["工程名称", "%s（%s）" % (proj.get("name") or project_id, proj.get("code") or "—"),
-         "监理单位", org],
-        ["项目编号", proj.get("code") or "—", "记录人", inspector or "—"],
-        ["记录日期", "%s 至 %s" % (start, end), "数据来源", "本项目已出具的文书与现场影像"],
-        ["表式依据", "《建设工程监理规范》GB/T 50319 巡视要求；常用《巡视记录》表式（监表 37）", "", ""],
-    ], widths=[2.4, 6.4, 2.2, 5.6])
+def _period(b):
+    span = "%s %s 至 %s" % (b["date"], b["start"] or "—", b["end"] or "—")
+    if b.get("weather"):
+        span += "（天气：%s）" % b["weather"]
+    return span
 
-    if not blocks:
-        _para(doc, "", space_after=8)
-        _para(doc, "本期间内没有可用于巡视记录的文书或影像。", size=11, bold=True)
-        _para(doc, "说明：生成器只汇总已存在的记录，不会凭空补写现场情况。"
-                   "请先在小程序里出稿或拍照，再重新生成。", size=9.5, color=(0x66, 0x66, 0x66))
 
-    for idx, b in enumerate(blocks, 1):
-        _para(doc, "", space_after=6)
-        _para(doc, "%s、%s" % ("一二三四五六七八九十"[idx - 1] if idx <= 10 else idx,
-                               b["date"]), size=12, bold=True, font="黑体")
-        _para(doc, "天气：%s　|　当日文书 %d 份（已签 %d、待补 %d）　|　现场影像 %d 张"
-              % (b["weather"] or "未记录", len(b["docs"]), b["signed"], b["todo"], len(b["photos"])),
-              size=9, space_after=4)
+def _issue_lines(b):
+    lines = []
+    for i, it in enumerate((b.get("issues") or [])[:12], 1):
+        lines.append("%d. %s" % (i, str(it)[:180]))
+    if b.get("deadlines"):
+        lines.append("整改期限：%s。" % "、".join(b["deadlines"][:5]))
+    if b.get("docs"):
+        lines.append("以上问题已向施工单位指出，并下发《监理通知单》%d 份；"
+                     "整改完成后报监理复查，整改回复须附整改前后对比影像。" % len(b["docs"]))
+    elif lines:
+        lines.append("以上问题已向施工单位指出，整改完成后报监理复查。")
+    else:
+        lines.append("本日巡视记录中未发现需下发《监理通知单》的问题。")
+    return lines
 
-        objs = b["objs"]
-        issues = b["issues"]
-        quality = b["quality"]
-        _table(doc, [
-            ["巡视范围\n及主要部位",
-             "、".join(objs[:14]) + ("等" if len(objs) > 14 else "") if objs else "—"],
-            ["主要施工情况",
-             "当日依据项目记录：%s" % ("；".join(objs[:8]) if objs else "无新增文书")],
-            ["质量、安全\n等情况",
-             "质量：%s\n安全及其他问题：%s" % (
-                 "；".join(quality[:6]) if quality else "未记录质量检查结论",
-                 "；".join(issues[:10]) if issues else "未记录问题")],
-            ["发现问题及\n处理情况",
-             "共记录问题 %d 项。%s%s" % (
-                 len(issues),
-                 ("已下发文书 %d 份（已签 %d 份）。" % (len(b["docs"]), b["signed"])) if b["docs"] else "",
-                 ("整改期限：%s。" % "、".join(b["deadlines"][:5])) if b["deadlines"] else "")],
-            ["巡视人", inspector or "—"],
-        ], widths=[3.0, 13.4])
 
-    # 汇总
-    if blocks:
-        _para(doc, "", space_after=8)
-        _para(doc, "%s、本期汇总" % ("一二三四五六七八九十"[len(blocks)] if len(blocks) <= 10 else ""),
-              size=12, bold=True, font="黑体")
-        rows = [["日期", "巡视部位", "问题数", "文书数", "状态"]]
-        for b in blocks:
-            rows.append([b["date"],
-                         "、".join(b["objs"][:4]) + ("等" if len(b["objs"]) > 4 else ""),
-                         str(len(b["issues"])), str(len(b["docs"])),
-                         "已签 %d / 待补 %d" % (b["signed"], b["todo"])])
-        _table(doc, rows, widths=[2.6, 7.6, 2.0, 2.0, 3.0], header=True)
+def _date_text(day):
+    y, m, d = day.split("-")
+    return "%s 年 %s 月 %s 日" % (y, m.lstrip("0"), d.lstrip("0"))
 
-    # 附表
-    if docs:
-        _para(doc, "", space_after=6)
-        _para(doc, "附表　本期文书索引", size=11, bold=True, font="黑体")
-        rows = [["文书号", "类型", "对象", "状态"]]
-        for d in docs[:40]:
-            rows.append([str(d["id"]), d.get("kind") or "", (d.get("obj") or "—")[:28],
-                         d.get("state") or ""])
-        _table(doc, rows, widths=[2.2, 3.6, 9.0, 2.4], header=True)
 
-    _para(doc, "", space_after=4)
-    for line in [
-        "说明：",
-        "1. 本表依据 GB/T 50319 巡视要求编制；记录内容取自本项目当日已出具的文书与现场影像，可逐条追溯。",
-        "2. 天气、实测值、签发人等现场未取得的数据按“未记录 / 待补”保留，不回填补写。",
-        "3. 整改要求以已下发《监理通知单》为准，整改回复须附整改前后对比影像。",
-    ]:
-        _para(doc, line, size=9, space_after=2)
+def build_patrol_docx(project_id, start, end, inspector="", org=None,
+                      operator="广东建设工程监理有限公司"):
+    """按省统表 GD-B-214 生成巡视记录：一条记录一张表（模板原件填充）。
 
-    # 中文显示名放进 Content-Disposition；URL 与磁盘名只用 ASCII，
-    # 否则 wx.downloadFile 里带中文会让请求行编码失败（实测 URLError）
-    display = "%s-巡视记录-%s_%s.docx" % (proj.get("name") or project_id, start, end)
+    格式由 data/knowledge/templates/docx/16巡视记录.docx 保证；
+    这里只负责把数据整理成 slots 需要的字段（project/serial/parts/org/period/
+    lines/inspector/date_text），不参与排版。
+    """
+    from .formfill import build as fill_forms
+
+    proj, blocks, docs, photos = collect(project_id, start, end)
+    proj_name = proj.get("name") or project_id
+
+    records = []
+    for i, b in enumerate(blocks, 1):
+        records.append({
+            "project": proj_name,
+            "serial": "GD-B-214 %04d" % i,
+            "parts": "、".join(b["parts"][:10]) or "（本日无新增文书）",
+            "org": org or _org_of(b["docs"]),
+            "period": _period(b),
+            "lines": _issue_lines(b),
+            "inspector": inspector or "",
+            "date_text": _date_text(b["date"]),
+        })
+
+    if not records:
+        # 没有记录也要出一张表，并如实写明"本期间没有记录"，不编内容
+        records = [{
+            "project": proj_name,
+            "serial": "GD-B-214 0001",
+            "parts": "（本期间没有可用于巡视记录的文书或影像）",
+            "org": org or "—",
+            "period": "%s 至 %s" % (start, end),
+            "lines": ["本期间没有可汇总的现场记录；出稿或拍照后重新生成。"],
+            "inspector": inspector or "",
+            "date_text": "—",
+        }]
+
+    display = "%s-巡视记录-%s_%s.docx" % (proj_name, start, end)
     url_name = "patrol-%s_%s.docx" % (start.replace("-", ""), end.replace("-", ""))
     dest = os.path.join(EXPORT_ROOT, _safe_name(project_id))
     os.makedirs(dest, exist_ok=True)
     path = os.path.join(dest, url_name)
-    doc.save(path)
-    with open(path + ".meta.json", "w", encoding="utf-8") as f:
-        json.dump({"name": display, "from": start, "to": end}, f, ensure_ascii=False)
+
+    got = fill_forms("巡视记录", records, path)
+    if not got.get("labels_ok"):
+        raise RuntimeError("模板校验未通过，拒绝交付")
+
+    with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
+        json.dump({"name": display, "from": start, "to": end,
+                   "forms": len(records), "operator": operator}, f, ensure_ascii=False)
     return {"path": path, "name": display, "url_name": url_name,
-            "bytes": os.path.getsize(path),
-            "days": len(blocks), "docs": len(docs), "photos": len(photos)}
+            "bytes": os.path.getsize(path), "days": len(records),
+            "docs": len(docs), "photos": len(photos)}
