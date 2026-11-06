@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave5 / E4  tools/workspace.js readMemories 改读 records/rules.md
+next = Wave5 / E5  工作区 .gitignore（test-sandbox 缺，防 .agent/ 进仓库）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -357,7 +357,13 @@ next = Wave5 / E4  tools/workspace.js readMemories 改读 records/rules.md
               「已出稿 /home/x/a.md，。 请查收。」→「已出稿，请查收。」
       · 线上复核：重复常量 0、STD_RE 残留 0
       门禁：preflight 新增「常量不许重复定义」；smoke 新增「清洗后无残句标点」
-[ ] E4 tools/workspace.js readMemories 改读 records/rules.md
+[x] E4 tools/workspace.js readMemories 改读 records/rules.md
+      旧路径 memories/project.md 早就不写了 → get_context 的记忆永远是空
+      现在先读 records/rules.md，旧文件若还在也带上（逐步淘汰）
+      实测（在工作区里直接调 jl-tool get_context）：
+        memoriesFile 返回「# 项目规矩 … - 整改回复必须附整改前后对比图…」✓
+        wsPath=/ws/test-sandbox
+      preflight 新增：readMemories 必须读 records/rules.md
 [ ] E5 test-sandbox 补 .gitignore
 [ ] E6 preflight 加：模板签名、记忆唯一写者、data/exports 存在
 ```
