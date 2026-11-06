@@ -168,6 +168,72 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 拆掉并行记忆：AGENTS.md 从「规则清单」变回「事实 + 指针」（2026-11-06 10:20）
+
+**起因**：我说清楚了三层知识该在文件里、不在提示词里；而我的实现是 MySQL 表 + 字面相似度挑 6 条 + 拼成
+`【项目规矩】` 整块塞进 AGENTS.md。同一个项目里能同时看到：
+
+```
+- 本单位体积一律写 m³，禁止写「方」
+- 本单位体积写 m³，不写「方」        ← 同一句话两条，字面相似度去重失效
+```
+
+### 改了什么
+
+| 位置 | 之前 | 现在 |
+|---|---|---|
+`build_context` | 查 MySQL 记忆 30 条 → 挑 6 条 → 拼成规矩块 | 只写事实（项目/概况/参建/规范条数）+ 指针 |
+`pick_memories` | 用 `relevance()` 字面相似度替模型挑 | **删除**（死代码） |
+`render_agents_md` | 每次全量重写 | 生成区 + `<!-- human:start/end -->` 人写区 |
+`biz.render_project_memory` | 把 DB 渲染成 `memories/project.md`（第三份副本） | 改为刷新 AGENTS.md，并删掉旧副本 |
+`POST /memories` | 只写 DB | 知识写文件（项目→`records/rules.md`；个人→引擎 `notes/`），DB 只做索引 |
+
+### 实测对照
+
+```
+AGENTS.md 字节数：yun-gu-3qi 1658 → 1025；test-sandbox 1189 → 718；baiyun-a2 932 → 627
+【项目规矩】/【我的书写习惯】块：不再出现
+【在哪找】指针：项目规矩 records/rules.md · 项目技能 .easycode/skills/
+人写区：写入一行 → 重写后仍在（标记外内容会被覆盖，这是设计）
+第三份副本 memories/project.md：已删除（render-memory 返回 removed 字段）
+```
+
+### 顺带修掉的一次真实事故
+
+删 `pick_memories` 时忘了改 `api.py` 的 import 列表 →
+语法检查过、未定义检查过，但 **服务起不来**（`ImportError: cannot import name`）。
+已给 preflight 加「真 import 一次 `bffpkg.api`」的检查（服务器上生效），
+并用反向用例确认它现在能抓到这类错误。
+
+---
+
+# D30 · 记忆单一来源：文件是知识，数据库是索引
+
+**决定**：三类知识只有文件是权威来源；MySQL `memory` 表降级为索引（谁在什么时候说过这条）。
+
+```
+组织知识   data/knowledge/**           只读，git
+项目规矩   <ws>/records/rules.md       人写，git
+项目证据   <ws>/records/photos.md      看图后追加一句描述，git
+项目流程   <ws>/.easycode/skills/**    Repo scope，引擎自动列目录
+个人知识   $EASYCODE_HOME/memories/**  引擎整理；人只能追加 notes/
+```
+
+**推翻条件**：如果需要跨项目检索个人记忆（"我以前在哪个项目见过这种问题"），
+再考虑给文件加索引；不许先上向量库。
+
+---
+
+# D31 · preflight 增加「真 import」检查
+
+**为什么**：删函数忘改 import 这类错误，语法检查和「未定义调用」检查都抓不到，
+但会让服务完全起不来（今天发生过一次）。
+
+**做法**：`python3 -c "import bffpkg.api"`；本机没装 pymysql 时插桩模块；
+不在服务器上时跳过（`core.ROOT` 是服务器路径，本机 import 必然失败）。
+
+**代价**：这条检查只在服务器上真正生效 —— devloop 每天 09:00 会跑它。
+
 ## 小程序侧：核心链路今天才真正接通（2026-11-06 12:20）
 
 后端修完后去对小程序，发现三处让它"用不起来"的东西。

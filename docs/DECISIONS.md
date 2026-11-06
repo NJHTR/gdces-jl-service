@@ -603,3 +603,30 @@ POST   /api/v1/auth/logout               handle_logout           （可放行：
 **顺带记**：审这个的第一版脚本用「全局扫 handler 名再和路由 zip」对齐，
 结果只匹配到 1 条就宣称「全部做了校验」——**假阴性**。
 重写成「从路由行往后找处理函数」才拿到真数据。教训：审计脚本自己也要验证。
+
+# D30 · 记忆单一来源：文件是知识，数据库是索引
+
+**决定**：三类知识只有文件是权威来源；MySQL `memory` 表降级为索引（谁在什么时候说过这条）。
+
+```
+组织知识   data/knowledge/**           只读，git
+项目规矩   <ws>/records/rules.md       人写，git
+项目证据   <ws>/records/photos.md      看图后追加一句描述，git
+项目流程   <ws>/.easycode/skills/**    Repo scope，引擎自动列目录
+个人知识   $EASYCODE_HOME/memories/**  引擎整理；人只能追加 notes/
+```
+
+**推翻条件**：如果需要跨项目检索个人记忆（"我以前在哪个项目见过这种问题"），
+再考虑给文件加索引；不许先上向量库。
+
+---
+
+# D31 · preflight 增加「真 import」检查
+
+**为什么**：删函数忘改 import 这类错误，语法检查和「未定义调用」检查都抓不到，
+但会让服务完全起不来（今天发生过一次）。
+
+**做法**：`python3 -c "import bffpkg.api"`；本机没装 pymysql 时插桩模块；
+不在服务器上时跳过（`core.ROOT` 是服务器路径，本机 import 必然失败）。
+
+**代价**：这条检查只在服务器上真正生效 —— devloop 每天 09:00 会跑它。
