@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave2 / B6.6  smoke 覆盖单表接口（/reports/form）与按天接口（/reports/daily）
+next = Wave3 / C0  记忆条目元数据（source / hits / status / applies_to）+ 引擎整理现状核实
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -128,7 +128,10 @@ next = Wave2 / B6.6  smoke 覆盖单表接口（/reports/form）与按天接口�
       回复单原样未动
       新增 cell_para 槽（rewrite / block_after / last_rewrite）+ 双表模板校验修正
 [?] B6.5 监理检查记录 —— 缺原件模板（省统表 1~25 里没有这张），待拍板用哪个模板
-[ ] B6.6 smoke 覆盖单表/按天接口
+[x] B6.6 smoke 覆盖单表/按天接口（已进门禁）
+      /reports/form：双表 (1×1)+(8×2)、致/事由/内容/项目章/总监都在、回复单未被代填
+      /reports/daily：表数=天数、每张 11×9、四块内容 + 记录人 + 审阅日期都在
+      导出文件用完即删
 [ ] B6.6 smoke 覆盖单表接口（用一张 smoke 造的文书生成并校验结构）
 ```
 
