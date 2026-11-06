@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave5 / E1  删死代码（run_cli_turn / _parse_jsonl / parse_multipart / relevance / get_or_create_thread）
+next = Wave5 / E2  删死端点（/members、/render-memory）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -334,7 +334,13 @@ next = Wave5 / E1  删死代码（run_cli_turn / _parse_jsonl / parse_multipart 
 ## Wave 5 · 清理与防回归（1 天）
 
 ```
-[ ] E1 删死代码：run_cli_turn / _parse_jsonl / parse_multipart / relevance / get_or_create_thread
+[x] E1 删死代码：run_cli_turn / _parse_jsonl / parse_multipart / relevance / get_or_create_thread
+      删 195 行（agent 114 / biz 46 / core 35），import 名单同步清理
+      五个函数在线上已确认 0 处残留；preflight 硬编码 11→8、静默失败 13→11
+      踩坑两个（都已修）：
+      ① api.py 的 import 名单里漏删 run_cli_turn → 服务起不来（ImportError）
+      ② 删 parse_multipart 时把 parse_multipart_full 一起删了（前者只是后者的死包装），
+         而上传路由用的是 full 那个 → 又 ImportError；已恢复 full，只删包装
 [ ] E2 删死端点：/members、/render-memory
 [ ] E3 core.py 7 个重复常量、STD_RE、clean_reply 残句
 [ ] E4 tools/workspace.js readMemories 改读 records/rules.md
