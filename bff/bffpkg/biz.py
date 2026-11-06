@@ -431,7 +431,25 @@ def handle_doc_create(body):
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ws,
                                 capture_output=True, text=True).stdout.strip()
 
+    # 记账：出稿即引用一次（used_count+1）
+    record_citations(bases)
+
+    # 「依据」字段由 bases 派生：模型不用自己拼，也不会忘
+    if bases and isinstance(fields, dict) and not str(fields.get("依据") or "").strip():
+        refs = []
+        for _b in bases:
+            _k, _r = _base_ref(_b)
+            _p = _parse_ref(_k, _r)
+            if _p:
+                refs.append(_p[0])
+            elif isinstance(_b, dict) and (_b.get("ref") or _b.get("text")):
+                refs.append((_b.get("ref") or _b.get("text"))[:60])
+        if refs:
+            fields["依据"] = "；".join(refs)[:200]
+    check2 = validate_fields(kind, fields)
+    missing = list(check2["missing"]) + list(check2["placeholder"])
     state = "待补" if missing else "待签"
+
     doc_id = exec_sql(
         "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
