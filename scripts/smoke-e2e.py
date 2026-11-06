@@ -224,36 +224,53 @@ def main():
     row = doc_row(doc_id)
     check("出稿后状态=待补", row and row["state"] == "待补", str(row and row["state"]))
 
-    # 2) 补一半
-    st, b = call("PUT", "/api/v1/docs/%s" % doc_id,
-                 {"fields": {"受检单位": "中建八局华南公司",
-                             "依据": "JGJ 130-2011 第 6.4.3 条"}})
+    # 2) 状态机用「受控文书」：只给 1 个字段，保证后面一定还有缺项。
+    #    以前直接拿模型出的稿：模型偶尔只缺 1 项，补一项就变待签，
+    #    "补一半仍待补" 变成假失败（实测 task 433 / doc 315）。
+    st, b = call("POST", "/api/v1/docs/register", {
+        "projectId": PROJECT, "kind": "监理通知单", "obj": "smoke-受控状态机",
+        "fields": {"事由": "smoke 状态机"}, "bases": ["JGJ 130-2011 第 6.4.3 条"],
+    })
+    ctl = (b.get("data") or {}).get("docId")
+    check("受控文书已建", st == 200 and bool(ctl),
+          "doc=%s state=%s" % (ctl, (b.get("data") or {}).get("state")))
+    if not ctl:
+        return finish(created)
+    created.append(ctl)
+    check("受控文书初始=待补", (doc_row(ctl) or {}).get("state") == "待补")
+
+    # 3) 补一个字段 → 仍待补（回归点：缺字段不能被标待签/已签）
+    st, b = call("PUT", "/api/v1/docs/%s" % ctl,
+                 {"fields": {"受检单位": "中建八局华南公司"}})
     data = b.get("data") or {}
     check("PUT 一个字段 200", st == 200, "state=%s" % data.get("state"))
-    check("字段真的存进去了", (doc_row(doc_id) or {}).get("fields", {}).get("受检单位") == "中建八局华南公司")
-    check("仍缺项 → 状态还是待补", (doc_row(doc_id) or {}).get("state") == "待补")
+    check("字段真的存进去了",
+          (doc_row(ctl) or {}).get("fields", {}).get("受检单位") == "中建八局华南公司")
+    check("仍缺项 → 状态还是待补", (doc_row(ctl) or {}).get("state") == "待补",
+          "state=%s missing=%s" % ((doc_row(ctl) or {}).get("state"), data.get("missing")))
 
-    # 3) 补全部缺项
+    # 4) 补齐 → 待签
     need = {
         # 依据现在是 schema 必填（文书必须写清依据），这里一起补上
         "依据": "JGJ 130-2011 第 6.4.3 条",
         "事由": "外架连墙件缺失",
+        "部位": "smoke-受控部位",
         "整改要求": "补齐连墙件并复验",
         "整改期限": "2026-11-20",
         "检查结论": "存在安全隐患，限期整改",
         "签发人": "张工",
     }
-    st, b = call("PUT", "/api/v1/docs/%s" % doc_id, {"fields": need})
+    st, b = call("PUT", "/api/v1/docs/%s" % ctl, {"fields": need})
     data = b.get("data") or {}
     check("补齐后 state=待签", st == 200 and data.get("state") == "待签",
           "missing=%s" % (data.get("missing"),))
     check("missing 为空", not data.get("missing"))
 
-    # 4) 只改状态 → 已签
-    st, b = call("PUT", "/api/v1/docs/%s" % doc_id, {"state": "已签"})
+    # 5) 只改状态 → 已签
+    st, b = call("PUT", "/api/v1/docs/%s" % ctl, {"state": "已签"})
     data = b.get("data") or {}
     check("只改状态可签发", st == 200 and data.get("state") == "已签", "state=%s" % data.get("state"))
-    check("库里是已签", (doc_row(doc_id) or {}).get("state") == "已签")
+    check("库里是已签", (doc_row(ctl) or {}).get("state") == "已签")
 
     # 4.5) 带图链路：上传 → parts 带 image → 出稿（这是相机按钮走的路）
     try:
