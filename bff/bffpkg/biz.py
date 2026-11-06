@@ -174,21 +174,44 @@ def handle_upload(project_id, params, data, user=None):
     weather = q1(params, "weather")
     shot_at = q1(params, "shotAt")
     src = q1(params, "src", "camera")
+    # 证据来源：谁拍的、在哪、地址怎么来的、天气怎么来的、哪些字段是人工改的
+    lat = q1(params, "lat")
+    lng = q1(params, "lng")
+    address = q1(params, "address")
+    address_source = q1(params, "addressSource", "gps")
+    weather_source = q1(params, "weatherSource", "api")
+    note = q1(params, "note")
+    work = q1(params, "work")
+    edited = q1(params, "edited")
+    captured_by = (user or {}).get("id") or q1(params, "capturedBy")
+    device_time = q1(params, "deviceTime")
 
     exists = q("SELECT id, blob_path FROM photo WHERE project_id=%s AND sha256=%s", (project_id, sha))
     if exists:
         return 200, {"code": 0, "data": {"duplicated": True, "photoId": exists[0]["id"],
                                         "sha256": sha, "size": size}}
 
+    def _num(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
     photo_id = exec_sql(
-        "INSERT INTO photo (project_id, sha256, blob_path, place, weather, shot_at, src) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-        (project_id, sha, blob_path, place, weather, shot_at, src),
-    )
+        "INSERT INTO photo (project_id, sha256, blob_path, place, weather, shot_at, src, "
+        "lat, lng, address, address_source, weather_source, note, work, edited, "
+        "captured_by, device_time) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (project_id, sha, blob_path, place, weather, shot_at, src,
+         _num(lat), _num(lng), address, address_source, weather_source, note, work,
+         edited, captured_by, device_time))
 
     entry = {"sha256": sha, "path": f"blobs/{sha[:2]}/{sha}", "size": size,
              "takenAt": shot_at or str(time.strftime("%Y-%m-%d %H:%M:%S")),
-             "place": place, "weather": weather, "src": src}
+             "place": place, "weather": weather, "src": src,
+             "address": address, "addressSource": address_source,
+             "weatherSource": weather_source, "note": note, "work": work,
+             "edited": edited, "capturedBy": captured_by}
     commit = append_manifest(project_id, entry)
     if commit:
         exec_sql("UPDATE photo SET git_commit=%s WHERE id=%s", (commit, photo_id))
@@ -394,62 +417,6 @@ def handle_docs_list(project_id, user=None):
     for r in rows:
         r["createdAt"] = str(r.pop("created_at", ""))
     return 200, {"code": 0, "data": {"list": rows, "total": len(rows)}}
-
-
-# ---------------------------------------------------------------- handle_doc_create
-def handle_doc_create(body):
-    """小程序详情页点「生成文书」→ 写文件 + 提交 + 落库"""
-    pid = body.get("projectId") or default_project_id()
-    kind = body.get("kind") or "文书"
-    obj = body.get("obj") or ""
-    fields = body.get("fields") or {}
-    bases = body.get("bases") or []
-    if not pid:
-        return 404, {"code": 404, "message": "还没有项目"}
-
-    missing = [k for k, v in fields.items() if v in (None, "", "待补")]
-    stamp = time.strftime("%Y-%m-%d")
-    safe = "".join(ch for ch in f"{kind}-{obj}" if ch not in '\\/:*?"<>|').replace(" ", "")[:40]
-    seq = 1
-    import pathlib
-    d = pathlib.Path(f"{WS_ROOT}/{pid}/docs/{stamp}")
-    d.mkdir(parents=True, exist_ok=True)
-    while (d / f"{safe}-{seq:02d}.md").exists():
-        seq += 1
-    rel = f"docs/{stamp}/{safe}-{seq:02d}.md"
-
-    lines = [f"# {kind}" + (f" · {obj}" if obj else ""), "",
-             f"> 生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}", ""]
-    for k, v in fields.items():
-        lines.append(f"- **{k}**：{v if v not in (None, '', '待补') else '待补'}")
-    if bases:
-        lines += ["", "## 依据", ""]
-        lines += [f"- {b.get('text') or b.get('kind')}（{b.get('ref')}）" for b in bases]
-    (d / f"{safe}-{seq:02d}.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    ws = f"{WS_ROOT}/{pid}"
-    refs = ", ".join([b.get("ref") for b in bases if b.get("ref")]) or "无"
-    subprocess.run(["git", "add", "--", rel], cwd=ws, capture_output=True)
-    r = subprocess.run(["git", "commit", "-m",
-                        f"doc({kind[:6]}): {obj or '未命名'}\n\n依据: {refs}\n项目: {pid}"],
-                       cwd=ws, capture_output=True, text=True)
-    commit = None
-    if r.returncode == 0:
-        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ws,
-                                capture_output=True, text=True).stdout.strip()
-
-    fields, bases = prepare_bases(fields, bases)
-    check2 = validate_fields(kind, fields)
-    missing = list(check2["missing"]) + list(check2["placeholder"])
-    state = "待补" if missing else "待签"
-
-    doc_id = exec_sql(
-        "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-        (pid, kind, obj, state, json.dumps(fields, ensure_ascii=False),
-         json.dumps(bases, ensure_ascii=False), rel, commit))
-    return 200, {"code": 0, "data": {"id": doc_id, "path": rel, "commit": commit,
-                                    "state": state, "missing": missing}}
 
 
 # ---------------------------------------------------------------- handle_geo_reverse
@@ -1080,7 +1047,7 @@ def handle_doc_patch(doc_id, body, user=None):
 
     # 写回工作区并提交，保证"文档=仓库里的文件"
     try:
-        commit_doc(d["project_id"], doc_id, d["kind"], d["obj"], fields, d.get("bases"))
+        update_doc_file(d["project_id"], doc_id, d["kind"], d["obj"], fields, d.get("bases"))
     except Exception as e:
         sys.stderr.write(f"[doc] 回写失败 {doc_id}: {e}\n")
 
@@ -1091,53 +1058,104 @@ def handle_doc_patch(doc_id, body, user=None):
                                      "fields": fields}}
 
 
-# ---------------------------------------------------------------- commit_doc
-def commit_doc(project_id, doc_id, kind, obj, fields, bases=None):
-    """把字段渲染成 md 写进工作区并 git 提交"""
-    ws = f"{WS_ROOT}/{project_id}"
+# ---------------------------------------------------------------- 文书渲染（唯一实现）
+GEN_TIME_RE = re.compile(r"^> 生成时间：(.*)$", re.M)
+
+
+def render_doc_md(kind, obj, fields, bases, missing=None, gen_time=None):
+    """文书 md 的唯一渲染器 —— 版式必须与 tools/src/tools.js renderDoc 一致。
+
+    以前有两份：工具的（有生成时间+待补+依据段）和 commit_doc 的（都没有）。
+    补一次字段就多一个文件、还把"待补"抹掉 —— 归档看不出当时缺什么。
+    """
+    plac = set(schema_placeholders(kind))
+    lines = [
+        "# " + str(kind) + (" · " + str(obj) if obj else ""),
+        "",
+        "> 生成时间：" + (gen_time or time.strftime("%Y-%m-%d %H:%M:%S")),
+        "",
+    ]
+    miss = list(missing or [])
+    for k in miss:
+        lines.append("- **%s**：待补" % k)
+    for k, v in (fields or {}).items():
+        txt = "" if v is None else str(v).strip()
+        if not txt or txt in plac or k in miss:
+            continue
+        lines.append("- **%s**：%s" % (k, txt))
+    if bases:
+        lines += ["", "## 依据", ""]
+        for b in bases:
+            _k, ref = _base_ref(b)
+            text = (b.get("text") or "") if isinstance(b, dict) else ""
+            lines.append("- %s（%s）" % (text or _k or "依据", ref))
+    return "\n".join(lines) + "\n"
+
+
+def schema_placeholders(kind):
+    sch = load_schema(kind) or {}
+    return sch.get("placeholders") or []
+
+
+def _doc_rel_path(project_id, kind, obj, doc_id):
+    """沿用工具的文件名规则：docs/<date>/<kind>-<obj>-NN.md；不换新名字。"""
+    import pathlib
+    stamp = time.strftime("%Y-%m-%d")
+    safe = "".join(ch for ch in ("%s-%s" % (kind, obj or "")) if ch not in '\\/:*?"<>|')
+    safe = safe.replace(" ", "")[:40] or "doc"
+    d = pathlib.Path("%s/%s/docs/%s" % (WS_ROOT, project_id, stamp))
+    d.mkdir(parents=True, exist_ok=True)
+    seq = 1
+    while (d / ("%s-%02d.md" % (safe, seq))).exists():
+        seq += 1
+    return "docs/%s/%s-%02d.md" % (stamp, safe, seq)
+
+
+def update_doc_file(project_id, doc_id, kind, obj, fields, bases=None):
+    """把字段回写进**同一个文件**并提交。
+
+    档案要求：文件跟着字段走，历史里只有一条线。
+    - 文件已存在 → 就地重写（保留原「生成时间」）
+    - 文件不存在 → 按工具同一命名规则新建
+    """
+    ws = "%s/%s" % (WS_ROOT, project_id)
     if not os.path.isdir(ws):
         return None
-    import datetime
-    day = datetime.date.today().isoformat()
-    name = f"{kind}" + (f"-{obj}" if obj else "") + f"-{doc_id}.md"
-    rel = f"docs/{day}/{name}"
+    rows = q("SELECT path FROM doc WHERE id=%s", (doc_id,))
+    rel = (rows[0].get("path") if rows else "") or ""
+    if not rel:
+        rel = _doc_rel_path(project_id, kind, obj, doc_id)
+
     full = os.path.join(ws, rel)
     os.makedirs(os.path.dirname(full), exist_ok=True)
 
-    lines = [f"# {kind}" + (f"（{obj}）" if obj else ""), ""]
-    for k, v in (fields or {}).items():
-        lines.append(f"- **{k}**：{v or '待补'}")
-    io_open = open
-    with io_open(full, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    gen_time = None
+    try:
+        with open(full, encoding="utf-8") as f:
+            m = GEN_TIME_RE.search(f.read())
+        if m:
+            gen_time = m.group(1).strip()
+    except OSError as exc:
+        sys.stderr.write("[doc] 读不到原文件（按新建处理）%s: %r\n" % (full, exc))
 
-    subprocess.run(["/usr/bin/git", "-C", ws, "add", rel], check=False)
-    # 仓库钩子要求提交信息里必须有「依据:」行，这是产品规则，照做
-    basis = ""
-    if bases:
-        if isinstance(bases, str):
-            try:
-                bases = json.loads(bases)
-            except Exception:
-                bases = []
-        items = []
-        for b in bases:
-            if isinstance(b, str):
-                items.append(b)
-            elif isinstance(b, dict):
-                code, clause = b.get("code"), b.get("clause")
-                if code and clause:
-                    items.append(f"{code}#{clause}")
-                elif code:
-                    items.append(code)
-        basis = "、".join(items[:5])
-    if not basis:
-        basis = f"doc:{doc_id}"
+    chk = validate_fields(kind, fields)
+    missing = list(chk.get("missing") or [])
+    md = render_doc_md(kind, obj, fields, bases, missing=missing, gen_time=gen_time)
+    with open(full, "w", encoding="utf-8") as f:
+        f.write(md)
 
-    msg = f"doc({kind}): {obj or doc_id} 更新字段\n\n依据: {basis}"
+    refs = []
+    for b in (bases or []):
+        _k, ref = _base_ref(b)
+        if ref:
+            refs.append(ref)
+    basis = "、".join(refs[:5]) or ("doc:%s" % doc_id)
+    subprocess.run(["/usr/bin/git", "-C", ws, "add", "--", rel], check=False)
     subprocess.run(["/usr/bin/git", "-C", ws,
                     "-c", "user.name=jl-service", "-c", "user.email=jl@local",
-                    "commit", "-m", msg], check=False)
+                    "commit", "-m",
+                    "doc(%s): %s 更新字段\n\n依据: %s\n项目: %s"
+                    % (kind[:8], obj or doc_id, basis, project_id)], check=False)
     commit = subprocess.run(["/usr/bin/git", "-C", ws, "rev-parse", "--short", "HEAD"],
                             capture_output=True, text=True).stdout.strip()
     exec_sql("UPDATE doc SET path=%s, git_commit=%s WHERE id=%s", (rel, commit, doc_id))
