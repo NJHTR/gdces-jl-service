@@ -98,6 +98,12 @@ def main():
                "params": {"name": tool, "arguments": args}}
 
     out, err = call(req)
+    # 容器里的 stderr 不能丢：工具内部写引用失败之类只会打到 stderr
+    if err and err.strip():
+        keep = [ln for ln in err.strip().splitlines()
+                if ln.strip() and "已启动" not in ln]
+        if keep:
+            sys.stderr.write("[jl-tool stderr] " + " | ".join(keep)[:800] + "\n")
 
     # 只输出 tools/call 或 tools/list 那一条结果，别把 initialize 也吐出来
     picked = None

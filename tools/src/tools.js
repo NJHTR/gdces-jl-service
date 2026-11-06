@@ -1,6 +1,7 @@
 // 四个工具的实际实现
 import { q, one } from "./db.js";
 import fs from "node:fs";
+import path from "node:path";
 import {
   readProject, readMemories, safeName, writeWorkspaceFile, gitCommit, excerpt, wsPath, listFiles,
 } from "./workspace.js";
@@ -77,8 +78,10 @@ export async function searchStandards({ query: text, limit = 5 }) {
   // 记一笔「这一轮查过什么」：引擎的命令输出不回传给客户端，
   // 所以引用只能在工具侧落盘，由 BFF 在一轮结束时取走（见 agent._drain_cites）。
   try {
-    const ws = process.env.JL_WS || "";
-    if (!ws) throw new Error("没有 JL_WS");
+    // 容器里只有 /ws（= 宿主 data/workspaces），所以用 basename 拼容器内路径
+    const hostWs = process.env.JL_WS || "";
+    if (!hostWs) throw new Error("没有 JL_WS");
+    const ws = path.join("/ws", path.basename(hostWs));
     const dir = path.join(ws, ".agent");
     fs.mkdirSync(dir, { recursive: true });
     const fp = path.join(dir, "cites.jsonl");
