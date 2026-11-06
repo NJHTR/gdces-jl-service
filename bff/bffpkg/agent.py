@@ -275,6 +275,18 @@ def handle_memory_create(body):
     if scope not in ("user", "project") or not owner or not text:
         return 400, {"code": 400, "message": "scope/ownerId/text 必填"}
     kept = text[:512]
+    # 完全相同的条目只加使用次数，不新增行（近义合并交给整理/人工，不在这里猜）
+    try:
+        dup = q("SELECT id FROM memory WHERE scope=%s AND owner_id=%s AND text=%s LIMIT 1",
+                (scope, str(owner), kept))
+        if dup:
+            exec_sql("UPDATE memory SET hits=hits+1, status=1 WHERE id=%s", (dup[0]["id"],))
+            _rerender_if_project(scope, str(owner))
+            return 200, {"code": 0, "data": {"id": dup[0]["id"], "duplicated": True,
+                                             "saved_to": "", "rendered": None}}
+    except Exception as e:
+        sys.stderr.write("[memory] 查重失败: %r\n" % (e,))
+
     # 记忆只有一个写者：memory 表。
     # 项目规矩的 records/rules.md 是**渲染视图**（像 AGENTS.md），由 render_rules_md 生成；
     # 个人笔记写进引擎的 notes 通道（整理时消费）。
