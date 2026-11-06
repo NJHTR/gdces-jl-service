@@ -25,7 +25,7 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
-from .core import exec_sql, q
+from .core import ROOT, exec_sql, q
 
 # ---------------------------------------------------------------- cron 解析
 
@@ -175,6 +175,84 @@ def cleanup_temp(payload):
     return removed
 
 
+@handler("export_authoritative")
+def export_authoritative(payload):
+    """把账本里够权威的条目导出成知识文件（幂等：内容没变就不重写）。
+
+    判定「够权威」只看账本，不看我们的主观：verified_count 与 used_count 达标、
+    且 disputed=0 —— 也就是「被反复引用、且经人确认、摘录前后一致」。
+    """
+    import hashlib
+    import os as _os
+
+    dest = _os.path.join(ROOT, "data", "knowledge", "kb", "authoritative")
+    _os.makedirs(dest, exist_ok=True)
+
+    rows = q("SELECT ref, quote, used_count, verified_count, disputed, status, "
+             "created_at, last_used_at FROM citation "
+             "WHERE status='authoritative' ORDER BY verified_count DESC, used_count DESC")
+    written, skipped, errors = [], 0, []
+
+    for r in rows:
+        ref = r.get("ref") or ""
+        if not ref.startswith("standard://"):
+            continue
+        code, _, clause = ref[len("standard://"):].partition("#")
+        code, clause = code.strip(), clause.strip()
+        try:
+            srows = q("SELECT title, std_title, body FROM standard WHERE "
+                      "REPLACE(code,' ','')=REPLACE(%s,' ','') AND clause=%s",
+                      (code, clause))
+        except Exception as exc:
+            errors.append("%s: %r" % (ref, exc))
+            continue
+        if not srows:
+            errors.append("%s: 库里查不到条文" % ref)
+            continue
+        std = srows[0]
+        body = (std.get("body") or "").strip()
+        std_title = (std.get("std_title") or "").strip()
+        slug = ("%s-%s" % (code, clause)).replace(" ", "-").replace("/", "-")
+        fp = _os.path.join(dest, slug + ".md")
+
+        text = "\n".join([
+            "# %s 第 %s 条 · %s" % (code, clause, (std.get("title") or "").strip()),
+            "",
+            "> 标准：%s（%s）" % (std_title or "（标准名缺失）", code),
+            "> 出处：条文库 standard %s#%s" % (code, clause),
+            "> 确认：被引用 %s 次，经确认 %s 次%s" % (
+                r.get("used_count"), r.get("verified_count"),
+                "；**存在摘录不一致，待人工核对**" if r.get("disputed") else ""),
+            "> 首次：%s；最近：%s" % (str(r.get("created_at") or "")[:10],
+                                      str(r.get("last_used_at") or "")[:10]),
+            "> 状态：authoritative（账本自动导出，勿手改；与原文不符以库为准）",
+            "",
+            "## 条文摘录",
+            "",
+            body or "（库里没有正文，只有条号）",
+            "",
+        ])
+        digest = hashlib.md5(text.encode("utf-8")).hexdigest()
+        try:
+            if _os.path.exists(fp):
+                old = io.open(fp, encoding="utf-8").read()
+                if hashlib.md5(old.encode("utf-8")).hexdigest() == digest:
+                    skipped += 1
+                    continue
+            io.open(fp, "w", encoding="utf-8", newline="\n").write(text)
+            written.append(slug + ".md")
+        except OSError as exc:
+            errors.append("%s: %r" % (fp, exc))
+
+    if written or skipped or errors:
+        sys.stderr.write("[job] 权威依据导出：写 %d / 未变 %d / 失败 %d\n"
+                         % (len(written), skipped, len(errors)))
+    for e in errors[:5]:
+        sys.stderr.write("[job] 导出失败 %s\n" % e)
+    return {"authoritative": len(rows), "written": written, "skipped": skipped,
+            "errors": errors[:5]}
+
+
 # ---------------------------------------------------------------- 表与调度
 
 DDL = """
@@ -199,6 +277,8 @@ DEFAULTS = [
      "每天 18:00 统计待补文书并留痕"),
     ("cleanup_temp", "0 4 * * *", "cleanup_temp", {},
      "每天 04:00 清掉超过 1 天的临时产物（复核目录、语音 wav、出稿临时文件）"),
+    ("export_authoritative", "40 3 * * 1", "export_authoritative", {},
+     "每周一 03:40 把被反复确认的依据导出到 knowledge/kb/authoritative/"),
 ]
 
 
