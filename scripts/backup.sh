@@ -13,6 +13,7 @@
 #   3) tar -xzf blobs-*.tar.gz -C data/        # 照片/语音
 #   4) tar -xzf mem-*.tar.gz  -C data/         # homes 里的记忆与配置
 #   5) tar -xzf know-*.tar.gz -C data/         # 规范/模板/技能
+#   6) tar -xzf exports-*.tar.gz -C data/      # 已生成的巡视记录/表式 docx
 set -uo pipefail
 
 R=/home/baize/jl-service
@@ -64,7 +65,14 @@ else
   say "知识备份失败"
 fi
 
-# 6) 只留 7 天
+# 6) 导出产物（生成的巡视记录/表式 docx：丢了要重新跑，且当时的字段可能已变）
+if [ -d "$R/data/exports" ] && tar -czf "$B/exports-$STAMP.tar.gz" -C "$R/data" exports 2>/dev/null; then
+  say "导出备份 $(du -h "$B/exports-$STAMP.tar.gz" | cut -f1)"
+else
+  say "导出备份失败（或目录不存在）"
+fi
+
+# 7) 只留 7 天
 find "$B" -name '*.gz' -type f -mtime +7 -delete
 
 say "完成，当前备份 $(ls -1 "$B" | wc -l) 个"
