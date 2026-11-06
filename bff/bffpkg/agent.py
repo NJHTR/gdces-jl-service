@@ -666,7 +666,8 @@ def _drain_cites(ws, since):
             continue
         seen.add(key)
         out.append({
-            "kind": "rule",
+            "kind": "standard",
+            "ref": "standard://%s#%s" % (d.get("code"), d.get("clause")),
             "std": (d.get("std") or "").strip(),
             "code": d.get("code"),
             "clause": d.get("clause"),
@@ -771,9 +772,10 @@ def _cite_from_entry(ws, e):
             "source": "模型声明"}
 
     if kind == "standard":
-        # ref 形如 JGJ 130-2011#6.4.3
+        # ref 形如 JGJ 130-2011#6.4.3 → 统一成 standard://CODE#CLAUSE
         code, _, clause = ref.partition("#")
         item["code"], item["clause"] = code.strip(), clause.strip()
+        item["ref"] = "standard://%s#%s" % (item["code"], item["clause"])
         item["std"], item["quote"] = "", ""
         try:
             rows = q("SELECT title, std_title, body FROM standard WHERE code=%s AND clause=%s",
@@ -1225,9 +1227,15 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         thread_id, final_text, trace, cites = _parse_cli_jsonl("".join(lines), ctx={"ws": ws})
 
         # 工具侧落盘的引用（命令输出不回传，只能这么取）
+        def _ck(c):
+            """去重键：文件类用 ref，规范类用 standard://CODE#CLAUSE"""
+            r = c.get("ref")
+            if not r and c.get("code") and c.get("clause"):
+                r = "standard://%s#%s" % (c["code"], c["clause"])
+            return (c.get("kind"), r)
+
         for _ci in _drain_cites(ws, started):
-            if not any((x.get("kind"), x.get("ref")) == (_ci["kind"], _ci["ref"])
-                       for x in cites if x.get("ref")):
+            if not any(_ck(x) == _ck(_ci) for x in cites):
                 cites.append(_ci)
         # 统一编号：模型声明在前、工具实测在后，编号从 1 连续
         for _i, _c in enumerate(cites, 1):
