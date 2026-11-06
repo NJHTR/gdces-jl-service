@@ -331,8 +331,13 @@ B6.5 监理检查记录：省统表里没有这张，A 复用平行检查 / B �
         /photos/search?q=连墙件 能取回对应原图
       · **数据缺口**：yun-gu 的 14 张历史照片 place 和 caption 都是空（早期上传没走描述链路）
         → 索引里查不到它们，需要补描述（见待拍板）
-[ ] D2 真机验收（相机/定位/水印/下载）—— **需你配合**：得在微信里真机打开
-      暂不阻塞其它项，先跳过
+[~] D2 真机验收 —— **需你配合**（在微信里点）
+      [x] 准备：scripts/check-miniapp.py 静态自检（不开微信就能跑）
+          实测：7 个页面文件齐、requiredPrivateInfos 含 getLocation/chooseLocation、
+          upload 带 projectId、report 页有 patrol+downloadFile+openDocument、全过
+          唯一未达标：API_BASE 还是 http://127.0.0.1:8081（真机需 https 域名）
+      [x] 准备：docs/CHECKLIST-DEVICE.md（前置/逐项验收/常见故障对照表）
+      [ ] 真机点一遍（等你）
 [ ] D2 真机验证：camera+cover-view 层级、chooseLocation、取景与出图一致
 ```
 
