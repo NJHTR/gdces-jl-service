@@ -119,11 +119,11 @@ def ensure_home(user_id):
             }
             if "[memories]" not in base:
                 base = base.rstrip() + "\n\n[memories]\n" + "".join(
-                    "%s = %s\n" % (k, v) for k, v in want.items())
+                    '%s = "%s"\n' % (k, v) for k, v in want.items())
             else:
                 head, tail = base.split("[memories]", 1)
                 # 只补缺的键，不覆盖人改过的值
-                add = "".join("%s = %s\n" % (k, v) for k, v in want.items()
+                add = "".join('%s = "%s"\n' % (k, v) for k, v in want.items()
                               if ("\n%s " % k) not in ("\n" + tail) and
                               ("\n%s=" % k) not in ("\n" + tail))
                 base = head + "[memories]\n" + add + tail.lstrip("\n")
