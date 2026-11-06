@@ -242,6 +242,8 @@ def build_context(project_id, user_id, query=None):
     except OSError as e:
         sys.stderr.write("[ctx] 引用技能检查失败: %r\n" % (e,))
 
+    if os.path.isfile(f"{ws}/records/rules.md"):
+        here.insert(0, "项目规矩 `records/rules.md`（这个项目约定怎么写、怎么签；按需读）")
     if os.path.isdir(f"{ws}/knowledge"):
         here.insert(0, "组织知识 `knowledge/`（模板、填写示例、验收要点；只读）")
     if here:
