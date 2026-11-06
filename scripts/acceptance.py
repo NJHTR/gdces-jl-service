@@ -60,15 +60,17 @@ def main():
     item("服务健康", st == 200 and (b.get("ok") or b.get("engine")),
          "engine=%s" % b.get("engine"))
 
-    n_doc = sql("SELECT COUNT(*) FROM doc")
-    n_todo = sql("SELECT COUNT(*) FROM doc WHERE state='待补'")
-    n_mem = sql("SELECT COUNT(*) FROM memory WHERE status=1")
+    n_doc = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s'" % PROJECT)
+    n_todo = sql("SELECT COUNT(*) FROM doc WHERE state='待补' AND project_id='%s'" % PROJECT)
+    n_mem = sql("SELECT COUNT(*) FROM memory WHERE status=1 AND "
+                "(owner_id='%s' OR scope='user')" % PROJECT)
     item("数据可读", n_doc.isdigit(), "文书 %s（待补 %s）· 记忆 %s" % (n_doc, n_todo, n_mem))
 
     st, b = call("GET", "/api/v1/metrics/memory?projectId=" + PROJECT)
     tot = ((b.get("data") or {}).get("totals") or {})
-    item("记忆指标可用", st == 200 and "revokeRate" in tot,
-         "条目 %s · 复用 %s" % (tot.get("entries"), tot.get("recallUses")))
+    # C6 v1 已 deprecated（hits 不是复用）→ 只作信息，不参与通过判定
+    print("  · 记忆指标(v1,仅供参考) 条目 %s · hits 累计 %s —— 不作为验收项"
+          % (tot.get("entries"), tot.get("recallUses")))
 
     st, b = call("GET", "/api/v1/photos/index?projectId=" + PROJECT)
     d = b.get("data") or {}
@@ -112,6 +114,15 @@ def main():
         except Exception as e:
             ok_form, detail = False, repr(e)
     item("省统表出表（巡视记录）", ok_form, detail)
+
+    # 引擎记忆：[memories] 段必须为 0（只留 feature flag 不够，段里还有模型与配额）
+    import glob as _glob
+    seg = []
+    for cf in _glob.glob(os.path.join(ROOT, "data", "homes", "*", "config.toml")):
+        txt = io.open(cf, encoding="utf-8").read()
+        if "[memories]" in txt:
+            seg.append(cf)
+    item("[memories] 配置段已清零", not seg, "%d 份还留着" % len(seg))
 
     # 备份
     bdir = os.path.join(ROOT, "backups")

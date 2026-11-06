@@ -31,10 +31,11 @@ import uuid
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE = os.environ.get("BFF_URL") or "http://127.0.0.1:8081"
-PROJECT = "test-sandbox"
-# 硬守卫：这个脚本会删测试数据，绝不能对着生产项目跑
+PROJECT = os.environ.get("JL_SMOKE_PROJECT") or "test-sandbox"
+# 真守卫（原来写成 if PROJECT != "test-sandbox" 是同义反复，永远不会触发）：
+# 允许环境变量切换项目，但只允许 test-sandbox，且库里必须真有这个项目
 if PROJECT != "test-sandbox":
-    print("拒绝运行：PROJECT=%r，必须是 test-sandbox" % PROJECT)
+    print("拒绝运行：JL_SMOKE_PROJECT=%r，只允许 test-sandbox" % PROJECT)
     sys.exit(2)
 KEEP = "--keep" in sys.argv
 
@@ -279,8 +280,17 @@ def wait_done(task_id, limit=300):
     return {}, seen, time.time() - t0
 
 
+def assert_test_project():
+    """真守卫：库里必须存在 test-sandbox，且不是看起来像生产的项目。"""
+    out = sql("SELECT COUNT(*) FROM project WHERE id='test-sandbox'")
+    if out.strip() != "1":
+        print("拒绝运行：库里没有 test-sandbox 项目（预期 1，实际 %r）" % out.strip())
+        sys.exit(2)
+
+
 def main():
     print("=== smoke-e2e 核心链路 ===")
+    assert_test_project()
     created = []
 
     # 1) 出稿

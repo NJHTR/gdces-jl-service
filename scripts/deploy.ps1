@@ -56,18 +56,8 @@ sleep 2
 scripts/start-bff.sh | tail -2
 sleep 3
 curl -s -m 5 http://127.0.0.1:8081/healthz; echo
-# 关键断言：进程必须比代码新（踩过“文件更新了但服务没重启”，只查 healthz 看不出来）
-PID=$(pgrep -f 'runtime/entry.py' | head -1)
-if [ -z "$PID" ]; then echo "  STALE: 没有 entry.py 进程"; exit 3; fi
-LS=$(ps -o lstart= -p "$PID")
-SE=$(date -d "$LS" +%s 2>/dev/null || echo 0)
-UA=$(cat runtime/UPLOADED_AT 2>/dev/null || echo 0)
-echo "  进程 $PID 启动于 $LS"
-if [ "$SE" -lt "$UA" ]; then
-  echo "  STALE: 进程启动时间早于代码上传时间（服务没真的重启）"
-  exit 3
-fi
-echo "  进程比代码新（OK）"
+# 关键断言：进程必须比代码新（locale 无关，见脚本头注释）
+bash scripts/check-process-fresh.sh
 '@
 $cmd = $cmd -replace '__DIR__', $RemoteDir
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cmd -replace "`r`n", "`n")))

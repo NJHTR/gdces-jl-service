@@ -58,6 +58,17 @@ HOMES_ROOT = os.environ.get("JL_HOMES_ROOT", "/home/baize/jl-service/data/homes"
 _MAIN_CONFIG = "/home/baize/.easycode/config.toml"
 
 
+def _strip_table(base, table):
+    """删掉一个 TOML 表（表头到下一个表头之前），用于"彻底关掉"而不是留配置。"""
+    lines = base.splitlines()
+    if table not in lines:
+        return base
+    at = lines.index(table)
+    stop = next((i for i in range(at + 1, len(lines)) if lines[i].startswith("[")), len(lines))
+    del lines[at:stop]
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def _cfg_stride(base, key, val, table="[features]"):
     """在指定表里把 key 设成 val（幂等；已有就改，没有就插）。"""
     lines = base.splitlines()
@@ -114,7 +125,12 @@ def ensure_home(user_id):
             lines.insert(first_table, 'web_search = "live"')
             base = "\n".join(lines) + "\n"
 
-        # 只有显式开启引擎记忆时才写 [memories]（否则别给后来人误会的配置）
+        # 关闭时把整个 [memories] 段删掉：只留 feature flag 不够，
+        # 77 份家目录里留着 extract_model/max_rollouts=20，谁把开关一开就集体复活
+        if not mem_on:
+            base = _strip_table(base, "[memories]")
+
+        # 只有显式开启引擎记忆时才写 [memories]
         if mem_on:
             try:
                 from .core import LLM_MODEL as _mem_model, ENV as _env
