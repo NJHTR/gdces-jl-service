@@ -704,13 +704,6 @@ def finish(created):
                         os.remove(fp)
                 print("  按任务删除 doc %s（task %s）" % (did, tid))
 
-    # 清理是否干净：smoke 造的东西不许留在库里
-    # （这句必须放在清理之后 —— 之前放在前面，永远看到本次自己的 3 份）
-    got = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s' AND "
-              "(obj LIKE 'smoke%%' OR obj LIKE 'F4 自测%%' OR obj LIKE '%%受控状态机%%')"
-              % PROJECT)
-    check("测试文书已清干净", got.strip() == "0", "残留 %s" % got.strip())
-
     if KEEP:
         print("  保留测试文书: %s" % created)
     else:
@@ -738,6 +731,12 @@ def finish(created):
                     os.remove(p)
         if created:
             print("  已清理 %d 份测试文书" % len(created))
+    # 清理是否干净：smoke 造的东西不许留在库里（两轮删除之后才查）
+    got = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s' AND "
+              "(obj LIKE 'smoke%%' OR obj LIKE 'F4 自测%%' OR obj LIKE '%%受控状态机%%')"
+              % PROJECT)
+    check("测试文书已清干净", got.strip() == "0", "残留 %s" % got.strip())
+
 
     print()
     if fails:
