@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C2  项目规矩提案 + 一键确认（复用 observation 队列）
+next = Wave3 / C3  memory:// 引用（回答里标「依据你上次说的…」+ 命中 hits+1）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -159,7 +159,14 @@ next = Wave3 / C2  项目规矩提案 + 一键确认（复用 observation 队列
       memory 表加 project_id；applies_to=user:<uid>@project:<pid>；list 支持按项目过滤
       顺带修：agent.py 用了 HOMES_ROOT 却没导入（用户级记忆一写就 500）；
              create 先渲染后插入 → 文件写成（空）；delete 没重渲染 → 文件留着条目
-[ ] C2 项目规矩提案：从“人改字段/否定结论/重复要求”捕捉 → 观察队列 → 确认写库
+[x] C2 项目规矩提案 + 一键确认（rule_proposal 表 + 4 个接口 + jl-tool propose_rule）
+      实测：提案 pending → rules.md 里没有；accept → 写 memory(source=confirmed)
+      并渲染进 rules.md；reject 始终不写；清理后文件也不留
+      smoke：确认前/确认后/否决后 三个时点都断言规矩文件内容
+      坑：memory.source 是 ENUM('manual','auto','learned')，写 confirmed 直接 500
+          （1265 Data truncated）→ 线上 ALTER + schema 同步
+      没复用 observation 表：它是「同类复核问题计数」聚合表（project+doc_kind+tag 唯一），
+      和「一条候选规矩」不是一回事
 [ ] C3 memory:// 引用：回答里标「依据你上次说的…」+ 命中时 hits+1
 [ ] C4 「我的记忆」页补：来源、使用次数、撤销、删除（现在只有真写）
 [ ] C5 待确认列表（与 observation 同一套 UI）
