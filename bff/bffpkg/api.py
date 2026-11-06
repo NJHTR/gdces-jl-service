@@ -102,8 +102,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_project_list({}))
             if path == "/api/v1/observations":
                 usr = resolve_token(bearer(self.headers))
-                pid = (qs.get("projectId") or [""])[0] or default_project_id()
-                status = (qs.get("status") or ["open"])[0]
+                qs2 = parse_qs(urlparse(self.path).query)
+                pid = q1(qs2, "projectId") or default_project_id()
+                status = q1(qs2, "status") or "open"
                 return self._send(*handle_observations(pid, status, usr))
             if path == "/api/v1/tasks":
                 return self._send(*handle_task_list(parse_qs(urlparse(self.path).query)))
