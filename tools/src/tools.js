@@ -280,3 +280,24 @@ export async function searchPhotos({ projectId, q, place, dateFrom, dateTo, limi
   }
   return { total: payload.total, items: payload.data || [] };
 }
+
+/* ---------------- record_review ---------------- */
+/**
+ * 复核判定落库。
+ *
+ * 为什么做成工具而不是让模型输出 JSON：文本要后端解析（禁止）；
+ * 工具是声明式的、可校验的，而且判定直接进账本，成为「核验」信号。
+ */
+export async function recordReview({ docId, verdict, findings = [], counter = [], alternatives = [], uncertainty = "", taskId }) {
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}/api/v1/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ docId, taskId, verdict, findings, counter, alternatives, uncertainty }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`登记复核失败: ${resp.status} ${JSON.stringify(payload).slice(0, 300)}`);
+  }
+  return payload.data;
+}

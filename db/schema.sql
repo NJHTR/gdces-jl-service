@@ -183,3 +183,36 @@ CREATE TABLE IF NOT EXISTS standard (
 
 -- ============ 种子：一个租户 ============
 INSERT IGNORE INTO tenant (id, name) VALUES (1, '广东建设工程监理有限公司');
+
+-- ============ 复核判定（对抗性复核的落库） ============
+CREATE TABLE IF NOT EXISTS review (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  doc_id       BIGINT UNSIGNED NOT NULL,
+  task_id      BIGINT UNSIGNED NULL,
+  project_id   VARCHAR(64) NOT NULL,
+  verdict      VARCHAR(16) NOT NULL COMMENT 'must_fix / suggest / ok',
+  findings     JSON NULL COMMENT '[{why, locator}]',
+  counter      JSON NULL COMMENT '替代解释/反证',
+  alternatives JSON NULL COMMENT '被排除的解释',
+  uncertainty  VARCHAR(512) NULL,
+  model        VARCHAR(64) NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_doc (doc_id), KEY idx_project (project_id), KEY idx_verdict (verdict)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='复核判定';
+
+-- ============ 引用账本（用得越久越权威） ============
+CREATE TABLE IF NOT EXISTS citation (
+  id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  source_kind    VARCHAR(16) NOT NULL COMMENT 'standard / file / photo / memory / thread / web',
+  ref            VARCHAR(512) NOT NULL,
+  quote          VARCHAR(600) NULL,
+  digest         CHAR(32) NOT NULL COMMENT 'md5(kind+ref+quote)',
+  used_count     INT NOT NULL DEFAULT 0,
+  verified_count INT NOT NULL DEFAULT 0,
+  disputed       TINYINT NOT NULL DEFAULT 0,
+  status         VARCHAR(16) NOT NULL DEFAULT 'raw' COMMENT 'raw / trusted / authoritative',
+  last_used_at   DATETIME NULL,
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_digest (digest),
+  KEY idx_kind (source_kind), KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='引用账本';

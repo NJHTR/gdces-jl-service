@@ -501,6 +501,132 @@ def handle_asr(body, user=None):
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
                                      "saved": saved}}
 
+# ---------------------------------------------------------------- 引用账本
+def _cite_digest(kind, ref, quote=""):
+    import hashlib
+    return hashlib.md5(("%s|%s|%s" % (kind, ref, (quote or "")[:120])).encode("utf-8")).hexdigest()
+
+
+def record_citations(bases):
+    """出稿时：把 rule 类依据记进账本（used_count+1）。不判断对错，只记账。"""
+    n = 0
+    for b in (bases or []):
+        if not isinstance(b, dict) or b.get("kind") != "rule":
+            continue
+        ref = (b.get("ref") or "").strip()
+        if not ref or "#" not in ref:
+            continue
+        code, _, clause = ref.partition("#")
+        canon = "standard://%s#%s" % (code.strip(), clause.strip())
+        quote = (b.get("quote") or b.get("text") or "")[:120]
+        dg = _cite_digest("standard", canon, quote)
+        try:
+            exec_sql(
+                "INSERT INTO citation (source_kind, ref, quote, digest, used_count, last_used_at) "
+                "VALUES ('standard', %s, %s, %s, 1, NOW()) "
+                "ON DUPLICATE KEY UPDATE used_count=used_count+1, last_used_at=NOW()",
+                (canon, quote, dg))
+            n += 1
+        except Exception as exc:
+            sys.stderr.write("[cite] 记账失败 %s: %r\n" % (canon, exc))
+    return n
+
+
+def verify_citations_for_doc(doc_id):
+    """签发 / 复核通过：把这份文书依据过的条各 +1 verified（同一份文书只算一次）。"""
+    try:
+        rows = q("SELECT bases FROM doc WHERE id=%s", (doc_id,))
+        if not rows:
+            return 0
+        bases = rows[0].get("bases")
+        if isinstance(bases, str):
+            bases = json.loads(bases or "[]")
+    except Exception as exc:
+        sys.stderr.write("[cite] 取依据失败 doc=%s: %r\n" % (doc_id, exc))
+        return 0
+    n = 0
+    for b in (bases or []):
+        if not isinstance(b, dict) or b.get("kind") != "rule":
+            continue
+        ref = (b.get("ref") or "").strip()
+        if not ref or "#" not in ref:
+            continue
+        code, _, clause = ref.partition("#")
+        canon = "standard://%s#%s" % (code.strip(), clause.strip())
+        try:
+            # 只更新已存在的账本行（不凭空造）
+            exec_sql("UPDATE citation SET verified_count=verified_count+1 "
+                     "WHERE ref=%s AND verified_count < 999", (canon,))
+            n += 1
+        except Exception as exc:
+            sys.stderr.write("[cite] 核验失败 %s: %r\n" % (canon, exc))
+    if n:
+        try:
+            exec_sql("UPDATE citation SET status = CASE "
+                     "WHEN disputed=1 THEN 'raw' "
+                     "WHEN verified_count>=5 AND used_count>=10 THEN 'authoritative' "
+                     "WHEN verified_count>=2 AND used_count>=3 THEN 'trusted' "
+                     "ELSE 'raw' END")
+        except Exception as exc:
+            sys.stderr.write("[cite] 升级状态失败: %r\n" % (exc,))
+    return n
+
+
+def handle_review_record(body, user=None):
+    """复核判定落库。verdict 只能是枚举；findings/counter 每条必须带 locator。"""
+    doc_id = body.get("docId") or body.get("doc_id")
+    verdict = (body.get("verdict") or "").strip()
+    if not doc_id:
+        return 400, {"code": 400, "message": "docId 必填"}
+    if verdict not in ("must_fix", "suggest", "ok"):
+        return 400, {"code": 400,
+                     "message": "verdict 只能是 must_fix / suggest / ok，收到：%r" % (verdict,)}
+
+    rows = q("SELECT project_id FROM doc WHERE id=%s", (doc_id,))
+    if not rows:
+        return 404, {"code": 404, "message": "文书不存在"}
+    pid = rows[0]["project_id"]
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+
+    def _clean(items, name):
+        out = []
+        for it in (items or []):
+            if not isinstance(it, dict):
+                continue
+            loc = (it.get("locator") or "").strip()
+            if not loc:
+                # 没有出处的意见不算数：拒收，让复核员补 locator
+                return None, "%s 里有一条没有 locator：%r" % (name, (it.get("why") or it.get("reading") or "")[:40])
+            out.append({"why": (it.get("why") or "").strip()[:300],
+                        "locator": loc[:400]})
+        return out, None
+
+    findings, err = _clean(body.get("findings"), "findings")
+    if err:
+        return 400, {"code": 400, "message": err}
+    counter, err = _clean(body.get("counter"), "counter")
+    if err:
+        return 400, {"code": 400, "message": err}
+
+    rid = exec_sql(
+        "INSERT INTO review (doc_id, task_id, project_id, verdict, findings, counter, "
+        "alternatives, uncertainty, model) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (doc_id, body.get("taskId"), pid, verdict,
+         json.dumps(findings or [], ensure_ascii=False),
+         json.dumps(counter or [], ensure_ascii=False),
+         json.dumps(body.get("alternatives") or [], ensure_ascii=False),
+         (body.get("uncertainty") or "")[:512],
+         (body.get("model") or "")[:64]))
+
+    bumped = verify_citations_for_doc(doc_id) if verdict == "ok" else 0
+    return 200, {"code": 0, "data": {"id": rid, "verdict": verdict,
+                                     "findings": len(findings or []),
+                                     "counter": len(counter or []),
+                                     "verifiedBumped": bumped}}
+
+
 # ---------------------------------------------------------------- handle_doc_register
 def handle_doc_validate(body, user=None):
     """只校验，不落库。agent 出稿前自己先查一遍，别等 register 被打回。"""
@@ -680,6 +806,9 @@ def handle_doc_patch(doc_id, body, user=None):
 
     exec_sql("UPDATE doc SET fields=%s, state=%s, updated_at=NOW(3) WHERE id=%s",
              (json.dumps(fields, ensure_ascii=False), state, doc_id))
+    # 人签发 = 依据被确认：引用账本 verified +1
+    if state == "已签":
+        verify_citations_for_doc(doc_id)
 
     # 写回工作区并提交，保证"文档=仓库里的文件"
     try:

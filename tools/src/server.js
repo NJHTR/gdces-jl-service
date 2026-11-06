@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto, searchPhotos } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto, searchPhotos, recordReview } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -125,6 +125,43 @@ const TOOLS = [
     },
   },
   {
+    name: "record_review",
+    description: "复核判定落库（verdict: must_fix/suggest/ok）。findings 与 counter 每条必须带 locator（出处定位符），没有 locator 的意见会被拒收。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        docId: { type: "number", description: "被复核的文书 id" },
+        verdict: { type: "string", enum: ["must_fix", "suggest", "ok"] },
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              why: { type: "string", description: "哪一句站不住、为什么" },
+              locator: { type: "string", description: "出处定位符，如 standard://JGJ 130-2011#6.4.3:1-1 或 knowledge/...:12-12" },
+            },
+            required: ["why", "locator"],
+          },
+        },
+        counter: {
+          type: "array",
+          description: "替代解释/反证（可能还有别的读法）",
+          items: {
+            type: "object",
+            properties: {
+              reading: { type: "string" },
+              locator: { type: "string" },
+            },
+            required: ["reading", "locator"],
+          },
+        },
+        alternatives: { type: "array", items: { type: "string" }, description: "被排除的解释" },
+        uncertainty: { type: "string", description: "还有哪些不确定" },
+      },
+      required: ["docId", "verdict"],
+    },
+  },
+  {
     name: "get_context",
     description: "一次性拿到项目信息 + 项目记忆 + 工作区路径。会话开始时用，省得连调几个工具。",
     inputSchema: {
@@ -144,6 +181,7 @@ const HANDLERS = {
   get_context: getContext,
   caption_photo: captionPhoto,
   search_photos: searchPhotos,
+  record_review: recordReview,
 };
 
 function send(msg) {

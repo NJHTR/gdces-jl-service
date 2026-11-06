@@ -1073,10 +1073,21 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
         "怎么审（只用 1 次工具）：\n"
         "1. 读上面这个「文件」路径（它一定存在；不要凭目录列表猜测）；\n"
         "2. 不要跑 validate_doc、也不要检索规范 —— 缺项已给你，依据按文书内容判断。\n"
-        "审的重点：结论有没有事实依据、有没有自相矛盾、条号是否与内容对得上。\n"
-        "输出格式：直接写审查意见本身，逐条列问题，每条标「必须改 / 建议改 / 可忽略」；"
-        "没有问题就写「无需修改」。\n"
-        "不要写 FINAL_ANSWER / Sender / Payload 这类信封，也不要描述你是怎么审的。"
+        "你要做的不只是挑毛病，还要反驳它。必须回答三个问题：\n"
+        "  ① 还有别的解释吗？（例：构件缺失 —— 是没装、拆了没恢复，还是设计变更后取消？）\n"
+        "  ② 依据条文的适用边界在哪？（例：JGJ 130 是扣件式钢管脚手架；本项目若是盘扣式，这条不能直接引）\n"
+        "  ③ 反过来读成立吗？（例：结论写「必须停工」—— 现有证据支持停工，还是只支持「限期整改」？）\n"
+        "每条意见都必须带 locator（出处定位符），没有出处的意见不算数。locator 形如：\n"
+        "  standard://JGJ 130-2011#6.4.3:1-1\n"
+        "  knowledge/<文件>:<起>-<止>\n"
+        "  records/photos.md:<行>-<行>\n\n"
+        "最后必须调用工具把判定落库，这是唯一有效的交付方式：\n"
+        "  jl-tool record_review '{\"docId\": <本单id>, \"verdict\": \"must_fix|suggest|ok\", "
+        "\"findings\": [{\"why\": \"...\", \"locator\": \"...\"}], "
+        "\"counter\": [{\"reading\": \"...\", \"locator\": \"...\"}], "
+        "\"alternatives\": [\"...\"], \"uncertainty\": \"...\"}'\n"
+        "verdict 只能是 must_fix（不改不能签）/ suggest（建议改）/ ok（可签）。\n"
+        "工具返回成功后，再用两三句话说明最要紧的一两条；不要复述整份文书。"
     )
     steps = []
     try:
@@ -1087,9 +1098,10 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
             cwd=clean_cwd,
             images=images,
             developer_instructions=(
-                "你是监理文书复核员，只挑毛病，不重写文书，也不改文件。"
-                "说话要短、要具体，指出哪一句站不住、缺什么。"
-                "这个会话不需要派子 agent。"
+                "你是监理文书复核员：既要挑毛病，也要反驳。"
+                "必须给出替代解释、条文适用边界与反向读法，每条意见都要带 locator。"
+                "最后必须调用 record_review 把判定落库（不调用等于没交）。"
+                "不重写文书，也不改文件；说话要短、要具体。这个会话不需要派 sub-agent。"
             ),
         )
     except Exception as exc:
