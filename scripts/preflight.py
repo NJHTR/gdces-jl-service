@@ -283,6 +283,17 @@ def check_imports():
     return 0
 
 
+def check_ws_gitignore_code():
+    """工作区 .gitignore 必须由代码保证（不是手工在服务器上加的）。"""
+    fp = os.path.join(ROOT, "bff", "bffpkg", "biz.py")
+    if not os.path.isfile(fp):
+        return []
+    src = io.open(fp, encoding="utf-8").read()
+    if "def ensure_ws_gitignore(" in src and "ensure_ws_gitignore(project_id)" in src:
+        return []
+    return [("工作区 .gitignore 没有代码保证", "biz.py")]
+
+
 def check_memories_path():
     """readMemories 不能只读旧的 memories/project.md（那个文件早就不写了）。"""
     fp = os.path.join(ROOT, "tools", "src", "workspace.js")

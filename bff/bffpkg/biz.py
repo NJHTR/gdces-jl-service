@@ -76,6 +76,44 @@ def handle_admin():
 
 
 # ---------------------------------------------------------------- render_project_memory
+WS_GITIGNORE = """# 每轮临时产物：引用账本、轮次标记、最后输出、临时文件
+.agent/
+*.tmp
+tmp/
+"""
+
+
+def ensure_ws_gitignore(project_id):
+    """给工作区补 .gitignore（幂等）。
+
+    每轮都会在 .agent/ 下写 cites.jsonl、turn-*.json、last-*.md；
+    没有 ignore 时 `git add -A` 会把这些每轮都变的临时文件提交进去。
+    """
+    ws = f"{WS_ROOT}/{project_id}"
+    path = os.path.join(ws, ".gitignore")
+    try:
+        os.makedirs(ws, exist_ok=True)
+        old = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                old = f.read()
+        if old == WS_GITIGNORE:
+            return ".gitignore"
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(WS_GITIGNORE)
+    except OSError as e:
+        sys.stderr.write("[ws] 写 .gitignore 失败 %s: %r\n" % (ws, e))
+        return None
+    try:
+        subprocess.run(["git", "add", "--", ".gitignore"], cwd=ws,
+                       capture_output=True, text=True, timeout=30)
+        subprocess.run(["git", "commit", "-m", "chore(工作区): 忽略每轮临时产物"],
+                       cwd=ws, capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        sys.stderr.write("[ws] 提交 .gitignore 失败: %r\n" % (e,))
+    return ".gitignore"
+
+
 def render_project_memory(project_id):
     """重刷项目工作区的 AGENTS.md（项目规矩只有一个文件：records/rules.md）。
 
@@ -85,6 +123,7 @@ def render_project_memory(project_id):
     from .agent import render_agents_md          # biz ← agent 只在调用时导入，避免环
 
     ws = f"{WS_ROOT}/{project_id}"
+    ensure_ws_gitignore(project_id)
     removed = None
     stale = f"{ws}/memories/project.md"
     if os.path.exists(stale):
