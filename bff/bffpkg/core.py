@@ -835,6 +835,9 @@ def rich_reply(text, gap_items):
         for g in gaps:
             for m in re.finditer(re.escape(g), s):
                 events.append((m.start(), m.end(), "g", g, None))
+        # 引用角标 [n]：模型自己写的序号（顺序 = 引用块 entries 顺序）
+        for m in CITE_MARK_RE.finditer(s):
+            events.append((m.start(), m.end(), "c", m.group(0), None))
         events.sort()
 
         for start, end, kind, val, clause in events:
@@ -844,6 +847,11 @@ def rich_reply(text, gap_items):
                 out.extend(_split_num(s[pos:start]))
             if kind == "r":
                 out.append({"s": "r", "v": val, "code": val.split("第")[0].strip(), "clause": clause or ""})
+            elif kind == "c":
+                try:
+                    out.append({"s": "c", "v": val, "n": int(val.strip("[]"))})
+                except ValueError:
+                    out.append({"s": "t", "v": val})
             else:
                 out.append({"s": "g", "v": val, "gap": val})
             pos = end
