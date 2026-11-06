@@ -59,6 +59,19 @@ $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cmd -replace "
 $out = ssh -o ConnectTimeout=200 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
 $out.Trim().Split("`n") | ForEach-Object { "  $_" }
 
+# 4.5) 删除清单：scp 只覆盖不删除，删掉的文件必须显式清理
+if (Test-Path "$Local\scripts\deploy-clean.txt") {
+  Write-Host "=== 4.5) 清理已删除的文件 ===" -ForegroundColor Cyan
+  $list = (Get-Content "$Local\scripts\deploy-clean.txt" -Encoding UTF8 |
+            Where-Object { $_.Trim() -and -not $_.StartsWith("#") }) -join "`n"
+  if ($list.Trim()) {
+    $cmd = "cd $RemoteDir && while read -r f; do [ -n `"`$f`" ] && rm -f -- `"`$f`" && echo `"  removed `$f`"; done <<'JL_EOF'" + "`n" + $list + "`nJL_EOF"
+    $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
+    $out = ssh -o ConnectTimeout=120 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
+    $out.Trim().Split("`n") | ForEach-Object { "  $_" }
+  }
+}
+
 Write-Host "=== 5) preflight ===" -ForegroundColor Cyan
 $cmd = "cd $RemoteDir && python3 scripts/preflight.py 2>&1 | tail -8"
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
