@@ -57,6 +57,7 @@ def main():
 
     # 拍照页
     cap = read("pages/capture/capture.wxml")
+    cap_js = read("pages/capture/capture.js")
     need("<camera" in cap, "拍照页没有 <camera>")
 
     # 报告页：调后端 + 打开 docx
@@ -68,6 +69,13 @@ def main():
     # 上传字段：后端要 projectId
     up = read("utils/upload.js")
     need("projectId" in up, "上传没有带 projectId（后端会 400）")
+
+    # 离线拍照队列（F5）：失败要入队、回到页面要补传
+    need(os.path.isfile(os.path.join(MP, "utils", "offline.js")),
+         "缺 utils/offline.js（离线拍照队列）")
+    need("offline.enqueue" in cap_js, "拍照失败没有入队（断网=照片丢失）")
+    need("offline.drain" in cap_js, "回到拍照页没有补传")
+    need("pending" in cap, "取景页没有待传提示")
 
     # API 地址：本机隧道只适合开发者工具
     cfg = read("utils/config.js")
