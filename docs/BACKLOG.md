@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave5 / E6  preflight 补三项检查（模板结构签名 / 记忆唯一写者 / data/exports 存在）
+next = Wave6 / F2  备份加 data/exports（现在只备 workspaces/blobs/memories/knowledge）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -370,7 +370,16 @@ next = Wave5 / E6  preflight 补三项检查（模板结构签名 / 记忆唯一
       实测：三个工作区都补上；被跟踪 .agent 文件 0 个；.agent/ 新临时文件不进 git status
       两个坑：① .gitignore 只管未跟踪文件，已提交的要 git rm --cached
               ② 第一版"内容一样就早退"，永远走不到取消跟踪那步
-[ ] E6 preflight 加：模板签名、记忆唯一写者、data/exports 存在
+[x] E6 preflight 补三项检查 + 把"写了却没挂进 main"的检查全部挂上
+      新增：模板自洽（fields.json 的 template/fixed_labels/槽位 label 都能在 docx 里找到）、
+            记忆唯一写者（biz 里不许再"往 rules.md 追加"）、
+            data/exports 存在且可写（只在有工作区的环境检查）
+      修三个真问题：
+      ① main 只调了 check_architecture —— 之前加的 5 项检查写了但从来没跑过（等于白写）
+      ② tools 接线检查拿"工具名"比"函数名"，永远误报（应比 HANDLERS 的值）
+      ③ preflight 没导入 json → check_templates 一跑就 NameError
+      负向验证：临时放一个 fixed_labels 写错的映射 → 报红；删掉 → 恢复绿
+      服务器上复核：五项检查逐个调用都返回 OK，preflight 全部通过
 ```
 
 ---
