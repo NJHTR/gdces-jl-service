@@ -86,3 +86,73 @@ def sync_standards(dry_run=False, verbose=True):
         sys.stderr.write("[knowledge] 规范同步：新增 %d、更新 %d、跳过 %d，库里共 %s 条\n"
                          % (new, upd, skip, total))
     return new, upd, skip
+
+
+# ---------------------------------------------------------------- install_skills
+SKILLS_SRC = os.path.join(ROOT, "data", "knowledge", "skills")
+HOMES_ROOT = os.environ.get("JL_HOMES_ROOT", os.path.join(ROOT, "data", "homes"))
+
+
+def skill_names():
+    """组织技能有哪些（data/knowledge/skills/<name>/SKILL.md）"""
+    out = []
+    try:
+        entries = sorted(os.listdir(SKILLS_SRC))
+    except FileNotFoundError:
+        return out          # 没有技能目录就是没有，调用方会看到空列表
+    for name in entries:
+        if os.path.isfile(os.path.join(SKILLS_SRC, name, "SKILL.md")):
+            out.append(name)
+    return out
+
+
+def install_skills(project_ids=None, user_ids=None, verbose=False):
+    """把组织技能装到引擎真正会扫的两个作用域。
+
+    组织技能（data/knowledge/skills）是唯一源；这里只是安装，不是写知识。
+      Repo scope: <ws>/.easycode/skills/<name>/SKILL.md
+      User scope: <homes>/<uid>/skills/<name>/SKILL.md
+
+    为什么必须装：引擎只在上述目录里找 SKILL.md（ext/skills/src/host_roots.rs）。
+    文件放在 data/knowledge 下它是看不到的。
+    """
+    names = skill_names()
+    if not names:
+        return {"installed": 0, "names": [], "note": "组织技能目录为空"}
+
+    targets = []
+    for pid in (project_ids or []):
+        targets.append(os.path.join(ROOT, "data", "workspaces", str(pid), ".easycode", "skills"))
+    for uid in (user_ids or []):
+        targets.append(os.path.join(HOMES_ROOT, str(uid), "skills"))
+
+    changed = 0
+    for root in targets:
+        for name in names:
+            src = os.path.join(SKILLS_SRC, name, "SKILL.md")
+            dst_dir = os.path.join(root, name)
+            dst = os.path.join(dst_dir, "SKILL.md")
+            try:
+                with io.open(src, encoding="utf-8") as f:
+                    want = f.read()
+            except OSError as e:
+                sys.stderr.write("[skills] 读源失败 %s: %s\n" % (src, e))
+                continue
+            have = ""
+            try:
+                with io.open(dst, encoding="utf-8") as f:
+                    have = f.read()
+            except OSError:
+                have = ""       # 目标不存在 = 需要安装
+            if have == want:
+                continue
+            try:
+                os.makedirs(dst_dir, exist_ok=True)
+                io.open(dst, "w", encoding="utf-8", newline="\n").write(want)
+                changed += 1
+                if verbose:
+                    print("  [skills] %s ← %s" % (dst.replace(ROOT + os.sep, ""), name))
+            except OSError as e:
+                sys.stderr.write("[skills] 写失败 %s: %s\n" % (dst, e))
+
+    return {"installed": changed, "names": names, "targets": len(targets)}
