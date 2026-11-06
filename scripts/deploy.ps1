@@ -79,8 +79,16 @@ $out = ssh -o ConnectTimeout=200 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 
 $ok = $out -match "全部通过"
 $out.Trim().Split("`n") | ForEach-Object { "  $_" }
 
+if ($Acceptance) {
+  Write-Host "=== 6) 验收报告（-Acceptance）===" -ForegroundColor Cyan
+  $cmd = "cd $RemoteDir && python3 scripts/acceptance.py 2>&1 | tail -14"
+  $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
+  $out = ssh -o ConnectTimeout=400 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
+  $out.Trim().Split("`n") | ForEach-Object { "  $_" }
+}
+
 if (-not $SkipSmoke) {
-  Write-Host "=== 6) 端到端 ===" -ForegroundColor Cyan
+  Write-Host "=== 7) 端到端 ===" -ForegroundColor Cyan
   $cmd = "cd $RemoteDir && python3 scripts/smoke-e2e.py 2>&1 | tail -6; echo EXIT=`${PIPESTATUS[0]}"
   $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
   $out = ssh -o ConnectTimeout=900 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String

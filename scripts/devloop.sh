@@ -102,6 +102,15 @@ else
   FAIL=1
 fi
 
+# 4) 运行数据体检（只读；完整输出进 runtime/health-<日期>.log）
+HL=$R/runtime/health-$(date '+%Y%m%d').log
+if python3 scripts/health-check.py > "$HL" 2>&1; then
+  say "[体检] 已写 $(basename "$HL")"
+  grep -E '待补|孤儿|丢失|无描述|完全重复|剩 ' "$HL" | sed 's/^/    /' | while read -r ln; do say "  $ln"; done
+else
+  say "[体检] 脚本执行失败，见 $(basename "$HL")"
+fi
+
 USE=$(df --output=pcent /home | tail -1 | tr -dc '0-9')
 say "[不变量] 磁盘使用 ${USE}% （应 < 85）"
 [ "$USE" -ge 85 ] && FAIL=1
