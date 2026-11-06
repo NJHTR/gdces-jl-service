@@ -344,6 +344,10 @@ def handle_memory_create(body):
         (scope, str(owner), pid or None, kept, body.get("source") or "manual",
          source_ref, applies_to))
     rendered = _rerender_if_project(scope, str(owner))
+    # 个人×项目：必须在 INSERT 之后再渲染（渲染是查表生成的，先渲染会写成"（空）"）
+    if scope == "user" and pid:
+        from .biz import render_user_project_md
+        note = render_user_project_md(owner, pid) or note
     return 200, {"code": 0, "data": {"id": mid, "saved_to": note, "rendered": rendered,
                                      "applies_to": applies_to}}
 
