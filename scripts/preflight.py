@@ -283,6 +283,24 @@ def check_imports():
     return 0
 
 
+def check_tools_wiring():
+    """server.js 的 import 名字必须覆盖 HANDLERS 用到的函数。
+
+    实测踩过：HANDLERS 加了 proposeRule，import 没加 → jl-tool 一调用就崩
+    "proposeRule is not defined"，模型只能空跑（出稿 doc=None）。
+    """
+    fp = os.path.join(ROOT, "tools", "src", "server.js")
+    if not os.path.isfile(fp):
+        return []
+    src = io.open(fp, encoding="utf-8").read()
+    m = re.search(r'import \{([^}]+)\} from "\./tools\.js"', src)
+    imported = {x.strip() for x in (m.group(1).split(",") if m else []) if x.strip()}
+    h = re.search(r"const HANDLERS = \{(.*?)\};", src, re.S)
+    used = set(re.findall(r"(\w+):\s*\w+", h.group(1))) if h else set()
+    missing = sorted(used - imported)
+    return [("tools 接线缺失: %s" % ", ".join(missing), "server.js")] if missing else []
+
+
 def check_architecture():
     """架构不变量（docs/ARCHITECTURE-FINAL.md）：一件事只能有一个实现。
 
