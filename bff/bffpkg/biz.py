@@ -77,39 +77,39 @@ def handle_admin():
 
 # ---------------------------------------------------------------- render_project_memory
 def render_project_memory(project_id):
-    """把库里的记忆渲染成工作区文件并提交（文件是产物，库是事实来源）"""
-    proj = get_project(project_id)
-    pm = q("SELECT text, source, hits FROM memory WHERE scope='project' AND owner_id=%s AND status=1 "
-           "ORDER BY hits DESC, id DESC", (project_id,))
+    """重刷项目工作区的 AGENTS.md（项目规矩只有一个文件：records/rules.md）。
 
-    lines = [f"# 项目记忆 · {proj['name']}", "",
-             "<!-- 由数据库渲染生成，勿手改。要改走管理接口。 -->", ""]
-    if pm:
-        for m in pm:
-            lines.append(f"- {m['text']}  <!-- {m['source']} · 用过 {m['hits']} 次 -->")
-    else:
-        lines.append("暂无。")
-
-    rel = "memories/project.md"
-    abs_path = f"{WS_ROOT}/{project_id}/{rel}"
-    # 目录可能不存在（项目从没渲染过记忆）—— 之前这里直接抛错，被上层吞成 500
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    with open(abs_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    以前这里把 DB 记忆渲染成 memories/project.md —— 那是同一批知识的第三份副本。
+    现在删掉那条路径：DB 只当索引（谁在什么时候说过），知识在文件里、由 git 版本化。
+    """
+    from .agent import render_agents_md          # biz ← agent 只在调用时导入，避免环
 
     ws = f"{WS_ROOT}/{project_id}"
-    subprocess.run(["git", "add", "--", rel], cwd=ws, check=True,
-                   capture_output=True, text=True)
-    msg = f"memory(render): 同步项目记忆（{len(pm)} 条）\n\n依据: memory_table\n项目: {project_id}"
+    removed = None
+    stale = f"{ws}/memories/project.md"
+    if os.path.exists(stale):
+        try:
+            os.remove(stale)
+            removed = "memories/project.md"
+        except OSError as e:
+            sys.stderr.write("[agents] 删旧副本失败 %s: %r\n" % (stale, e))
+
+    ctx = render_agents_md(project_id, 1)
+
+    subprocess.run(["git", "add", "--", "AGENTS.md", "records/rules.md"],
+                   cwd=ws, capture_output=True, text=True)
+    msg = "docs(项目): 刷新 AGENTS.md 与项目规矩\n\n来源: project 表（事实） + records/rules.md"
     r = subprocess.run(["git", "commit", "-m", msg], cwd=ws, capture_output=True, text=True)
     commit = None
     if r.returncode == 0:
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ws,
                                 capture_output=True, text=True).stdout.strip()
     elif "nothing to commit" not in (r.stdout + r.stderr):
-        raise RuntimeError(f"git 提交失败: {r.stderr[:300]}")
-    return {"path": rel, "count": len(pm), "commit": commit,
-            "changed": commit is not None}
+        sys.stderr.write("[agents] 提交失败 %s: %s\n"
+                         % (project_id, (r.stdout + r.stderr)[:200]))
+
+    return {"path": "AGENTS.md", "bytes": len(ctx.encode("utf-8")),
+            "commit": (commit or "")[:10], "removed": removed}
 
 
 # ---------------------------------------------------------------- store_blob

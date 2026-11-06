@@ -159,27 +159,17 @@ def sweeper():
             traceback.print_exc()
 
 
-# ---------------------------------------------------------------- pick_memories
-def pick_memories(rows, query, limit=6):
-    """按相关度挑记忆；都没相关时退回最常用的几条。
-
-    这样记忆攒到几百条也不会把上下文撑爆。
-    """
-    if not rows:
-        return []
-    if not query:
-        return rows[:limit]
-    scored = [(relevance(r["text"], query), r) for r in rows]
-    scored.sort(key=lambda x: (-x[0], -(x[1].get("hits") or 0)))
-    hit = [r for sc, r in scored if sc > 0][:limit]
-    if hit:
-        return hit
-    return rows[: min(3, len(rows))]
-
-
 # ---------------------------------------------------------------- build_context
 def build_context(project_id, user_id, query=None):
-    """拼出这一轮要注入的上下文：项目 + 项目规矩 + 个人习惯"""
+    """拼出这一轮的常驻上下文：只有项目事实 + 指针。
+
+    知识一律不进这里 —— 它们都在文件里，模型按需读：
+      项目规矩  <ws>/records/rules.md            （人写的，git 版本化）
+      影像索引  <ws>/records/photos.md           （看过现场图后追加一句描述）
+      流程技能  .easycode/skills/<name>/SKILL.md （引擎自动列目录，正文按需）
+      个人记忆  $EASYCODE_HOME/memories/         （引擎自动注入摘要，详情按需）
+    判断标准：这句话会不会因为加工具、换模型而失效？会 → 不许写。
+    """
     proj = get_project(project_id)
     meta = proj.get("meta") or {}
     if isinstance(meta, str):
@@ -190,11 +180,6 @@ def build_context(project_id, user_id, query=None):
     # 库里的 meta 可能是字符串 "null"（json.loads → None），不能直接 dict(None)
     if not isinstance(meta, dict):
         meta = {}
-
-    pm = q("SELECT id, text, hits FROM memory WHERE scope='project' AND owner_id=%s AND status=1 "
-           "ORDER BY hits DESC, id DESC LIMIT 30", (project_id,))
-    um = q("SELECT id, text, hits FROM memory WHERE scope='user' AND owner_id=%s AND status=1 "
-           "ORDER BY hits DESC, id DESC LIMIT 30", (str(user_id),))
 
     parts = [f"【项目】{proj['name']}" + (f"（{proj['code']}）" if proj.get("code") else "")]
     if meta:
@@ -220,20 +205,6 @@ def build_context(project_id, user_id, query=None):
                 who.append(f"{label} {meta[key]}")
         if who:
             parts.append("【参建】" + " · ".join(who))
-    pm_all, um_all = len(pm), len(um)
-    pm, um = pick_memories(pm, query), pick_memories(um, query)
-    sys.stderr.write(f"[ctx] 记忆候选 project={pm_all} user={um_all} → 注入 {len(pm)}+{len(um)}\n")
-    if pm:
-        parts.append("【项目规矩】（优先级高于个人习惯）\n" + "\n".join(f"- {m['text']}" for m in pm))
-    if um:
-        parts.append("【我的书写习惯】\n" + "\n".join(f"- {m['text']}" for m in um))
-    # 注入即计一次命中，供后台看"哪条记忆真在用"
-    try:
-        ids = [m["id"] for m in pm + um if m.get("id")]
-        if ids:
-            exec_sql("UPDATE memory SET hits = hits + 1 WHERE id IN (%s)" % ",".join(["%s"] * len(ids)), ids)
-    except Exception:
-        pass
 
     # 规范库有多大：这是事实，而且是每轮都变的事实，不能写死在提示词里。
     # 它决定了「搜一次没有就是没有」，省掉反复换关键词的空搜（实测能省 10~30 秒）。
@@ -244,16 +215,26 @@ def build_context(project_id, user_id, query=None):
         # 不许静默：这条事实缺失会让 agent 反复搜规范
         print("[ctx] 取规范条数失败: %r" % (e,), flush=True)
 
-    # ---- 以下三行是「指针」，不是行为规则 ----
+    # ---- 以下是事实与指针，不是行为规则 ----
     # 工具清单不写死：跑 `jl-tool list` 永远是最新的（以前写死过，加工具忘了改）。
-    parts.append(
-        "【交付】出文书必须用 `jl-tool create_doc_draft` —— 它写文件、提交、入库。\n"
-        "手写 md 不会出现在系统里，用户看不到（实测过）。工具报错要重试或明说，不许改成手写。\n"
-        "**缺的字段留空就行**（validate_doc 会标出来，人可以在手机上补），"
-        "不要为了凑齐而追问 —— 监理员在工地上没空回答五连问，先出稿。\n"
-        "工具直接可用（不需要先列清单或进 shell 查）；"
-        "出稿流程和说话风格见 `data/knowledge/skills/`，需要时再读。"
-    )
+    parts.append("【入库】文书只有经 `jl-tool create_doc_draft` 才会出现在系统里；"
+                 "手写 md 用户看不到。")
+
+    # 指针：只说「东西在哪」，不描述怎么做。文件不存在就不写，省得模型白找。
+    ws = f"{WS_ROOT}/{project_id}"
+    here = []
+    if os.path.exists(f"{ws}/records/rules.md"):
+        here.append("项目规矩 `records/rules.md`")
+    if os.path.exists(f"{ws}/records/photos.md"):
+        here.append("现场影像索引 `records/photos.md`")
+    try:
+        if os.path.isdir(f"{ws}/.easycode/skills") and os.listdir(f"{ws}/.easycode/skills"):
+            here.append("项目技能 `.easycode/skills/`（目录见系统技能清单，正文按需读）")
+    except OSError:
+        pass
+    if here:
+        parts.append("【在哪找】" + " · ".join(here))
+
     parts.append(f"【当前】项目 {project_id} · 用户 {user_id}")
     return "\n\n".join(parts)
 
@@ -281,10 +262,36 @@ def handle_memory_create(body):
     text = (body.get("text") or "").strip()
     if scope not in ("user", "project") or not owner or not text:
         return 400, {"code": 400, "message": "scope/ownerId/text 必填"}
+    kept = text[:512]
+    # 知识写文件，DB 只做索引（谁在什么时候说过这条）。
+    # 个人 → 引擎的 notes 通道（整理时会消费）；项目 → 项目工作区的规矩文件（git 版本化）。
+    note = ""
+    try:
+        if scope == "project":
+            ws = f"{WS_ROOT}/{owner}"
+            os.makedirs(f"{ws}/records", exist_ok=True)
+            path = f"{ws}/records/rules.md"
+            if not os.path.exists(path):
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write("# 项目规矩\n\n> 由人通过小程序/接口添加；引擎每轮读 AGENTS.md 时按需看这里。\n\n")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write("- %s\n" % kept)
+            note = path.replace(WS_ROOT + "/", "")
+        else:
+            d = os.path.join(HOMES_ROOT, str(owner), "memories", "extensions", "ad_hoc", "notes")
+            os.makedirs(d, exist_ok=True)
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            path = os.path.join(d, "%s-%s.md" % (stamp, uuid.uuid4().hex[:6]))
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("- %s\n" % kept)
+            note = path
+    except OSError as e:
+        sys.stderr.write("[memory] 写文件失败 scope=%s owner=%s: %r\n" % (scope, owner, e))
+
     mid = exec_sql("INSERT INTO memory (scope, owner_id, text, source) VALUES (%s,%s,%s,%s)",
-                   (scope, str(owner), text[:512], body.get("source") or "manual"))
+                   (scope, str(owner), kept, body.get("source") or "manual"))
     rendered = _rerender_if_project(scope, str(owner))
-    return 200, {"code": 0, "data": {"id": mid, "rendered": rendered}}
+    return 200, {"code": 0, "data": {"id": mid, "saved_to": note, "rendered": rendered}}
 
 
 # ---------------------------------------------------------------- handle_memory_patch
@@ -1158,16 +1165,43 @@ def run_turn(task_id, project_id, user_id, text, images=None):
 
 
 # ---------------------------------------------------------------- render_agents_md
+HUMAN_START = "<!-- human:start -->"
+HUMAN_END = "<!-- human:end -->"
+HUMAN_SEED = "\n（这个项目的人工约定写在这里，服务重写 AGENTS.md 时不会覆盖）\n"
+
+
 def render_agents_md(project_id, user_id):
     """把上下文写成项目工作区里的 AGENTS.md —— 引擎每次会自动读它。
 
-    比 additionalContext 更稳：CLI 路径没有那个参数，但 AGENTS.md 是原生机制。
+    分成两个区：
+      generated —— 服务生成，每次重写
+      human     —— 人写的，永不覆盖
+
+    这样 AGENTS.md 能进 git、能 diff、能 review；机器生成的部分不会被误当成人写的。
     """
     ctx = build_context(project_id, user_id)
     ws = f"{WS_ROOT}/{project_id}"
     os.makedirs(f"{ws}/.agent", exist_ok=True)
-    with open(f"{ws}/AGENTS.md", "w", encoding="utf-8") as f:
-        f.write("# 项目上下文（由服务自动生成，勿手改）\n\n" + ctx + "\n")
+    path = f"{ws}/AGENTS.md"
+
+    human = HUMAN_SEED
+    try:
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+        # 不用正则：拿标记前后切两刀就够了（也给硬编码基线省一条）
+        if HUMAN_START in old and HUMAN_END in old:
+            human = old.split(HUMAN_START, 1)[1].split(HUMAN_END, 1)[0] or HUMAN_SEED
+    except FileNotFoundError:
+        human = HUMAN_SEED   # 第一次生成：给人写区留个位
+
+    body = (
+        "<!-- generated:start 由服务生成，勿手改 -->\n"
+        "# 项目上下文\n\n" + ctx + "\n"
+        "<!-- generated:end -->\n\n"
+        + HUMAN_START + human + HUMAN_END + "\n"
+    )
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(body)
     return ctx
 
 
@@ -1189,6 +1223,11 @@ def refresh_all_agents(user_id=1):
             continue
         try:
             render_agents_md(pid, user_id)
+            try:
+                from .knowledge import install_skills
+                install_skills(project_ids=[pid], user_ids=[user_id])
+            except Exception as e:
+                print("[skills] 安装失败 %s: %r" % (pid, e), flush=True)
             done.append(pid)
         except Exception as e:
             print("[agents] %s 重写失败: %r" % (pid, e), flush=True)
