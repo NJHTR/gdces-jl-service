@@ -106,6 +106,94 @@ def get_bytes(path, timeout=60):
         return r.status, r.read()
 
 
+def _fetch_docx(url, name):
+    """下载 docx 到 runtime/ 下并打开；调用方负责删。"""
+    from docx import Document
+
+    code, raw = get_bytes(url)
+    if code != 200 or raw[:2] != b"PK":
+        raise RuntimeError("下载失败 HTTP %s" % code)
+    fp = os.path.join(ROOT, "runtime", name)
+    os.makedirs(os.path.dirname(fp), exist_ok=True)
+    with open(fp, "wb") as f:
+        f.write(raw)
+    return Document(fp), fp, len(raw)
+
+
+def _cleanup_export(url):
+    name = os.path.basename(url)
+    for pat in (os.path.join(ROOT, "data", "exports", "*", name),
+                os.path.join(ROOT, "data", "exports", "*", name + ".meta.json")):
+        for cand in glob.glob(pat):
+            try:
+                os.remove(cand)
+            except OSError:
+                pass
+
+
+def check_form_report(doc_id):
+    """B6.6：单表接口（/reports/form）—— 通知单是双表模板，回复单必须原样。"""
+    if not doc_id:
+        check("单表接口（跳过：没有受控文书）", False)
+        return
+    st, b = call("POST", "/api/v1/reports/form", {"projectId": PROJECT, "docId": doc_id})
+    data = b.get("data") or {}
+    check("单表生成（通知单）", st == 200 and bool(data.get("url")),
+          "HTTP %s %s" % (st, b.get("message") or ""))
+    if not (st == 200 and data.get("url")):
+        return
+    fp = None
+    try:
+        doc, fp, size = _fetch_docx(data["url"], "smoke-form.docx")
+        check("单表下载", size > 5000, "%d 字节" % size)
+        shapes = [(len(t.rows), len(t.columns)) for t in doc.tables]
+        check("双表结构 (1×1)+(8×2)", shapes == [(1, 1), (8, 2)], str(shapes))
+        notice = doc.tables[0].rows[0].cells[0].text
+        for lb in ("致：", "事由：", "内容：", "项目监理机构（项目章）", "总监理工程师"):
+            check("通知单保留：%s" % lb, lb in notice)
+        reply = doc.tables[1]
+        check("回复单未被代填",
+              "复查意见：" in reply.rows[7].cells[0].text
+              and "我方接到编号为" in reply.rows[1].cells[0].text)
+    finally:
+        if fp and os.path.isfile(fp):
+            os.remove(fp)
+        _cleanup_export(data["url"])
+
+
+def check_daily_report():
+    """B6.6：按天接口（/reports/daily）—— 监理日志 11 行 × 9 列。"""
+    from datetime import date, timedelta
+
+    end = date.today().isoformat()
+    start = (date.today() - timedelta(days=6)).isoformat()
+    st, b = call("POST", "/api/v1/reports/daily",
+                 {"projectId": PROJECT, "from": start, "to": end, "inspector": "smoke"})
+    data = b.get("data") or {}
+    check("按天生成（监理日志）", st == 200 and bool(data.get("url")),
+          "HTTP %s %s" % (st, b.get("message") or ""))
+    if not (st == 200 and data.get("url")):
+        return
+    fp = None
+    try:
+        doc, fp, size = _fetch_docx(data["url"], "smoke-daily.docx")
+        check("按天下载", size > 5000, "%d 字节" % size)
+        check("表数 = 天数", len(doc.tables) == int(data.get("days") or 0),
+              "表 %d / 天数 %s" % (len(doc.tables), data.get("days")))
+        shapes = sorted((len(t.rows), len(t.columns)) for t in doc.tables)
+        check("每张表 11×9", set(shapes) == {(11, 9)}, str(shapes))
+        text = "\n".join(p.text for p in doc.paragraphs) + "\n" + "\n".join(
+            c.text for t in doc.tables for r in t.rows for c in r.cells)
+        for lb in ("工程项目名称", "日期", "当日施工进展情况",
+                   "当日监理工作情况", "当日存在问题及处理情况",
+                   "记录人（签名）", "审阅日期"):
+            check("日志保留：%s" % lb, lb in text)
+    finally:
+        if fp and os.path.isfile(fp):
+            os.remove(fp)
+        _cleanup_export(data["url"])
+
+
 def check_patrol_report():
     """B5：巡视记录必须与省统表 GD-B-214 模板同结构。
 
@@ -392,6 +480,8 @@ def main():
         check("缺字段标已签被拒", False, "反向用例没建起来")
 
     check_patrol_report()
+    check_form_report(ctl)
+    check_daily_report()
 
     return finish(created)
 
