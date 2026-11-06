@@ -10,7 +10,7 @@
       "label": "工程项目名称：",
       "target": "para",
       "kind": "template",
-      "text": "工程项目名称：{project}\u3000\u3000编号：{serial}"
+      "text": "工程项目名称：{project}　　编号：{serial}"
     },
     {
       "key": "关键部位工序",
@@ -48,8 +48,10 @@
       "label": "旁站发现的问题及处理情况",
       "target": "cell",
       "kind": "block",
-      "lines_key": "问题lines",
-      "keep_tail": ["旁站监理人员（签名）"],
+      "lines_key": "发现问题及处理lines",
+      "keep_tail": [
+        "旁站监理人员（签名）"
+      ],
       "sig_label": "旁站监理人员（签名）：",
       "sig_key": "旁站人员",
       "date_key": "date_text"

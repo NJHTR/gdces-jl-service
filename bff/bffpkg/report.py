@@ -311,6 +311,29 @@ def _cn_date(v):
     return t or "—"
 
 
+def _hhmm(v, day):
+    """把「9:10」补成「2026-11-06 09:10」；已经带日期的原样返回。"""
+    t = str(v or "").strip()
+    if not t:
+        return ""
+    if len(t) >= 10 and t[4] == "-" and t[7] == "-":
+        return t
+    hh, _, rest = t.partition(":")
+    if hh.strip().isdigit():
+        return "%s %02d:%s" % (day or "", int(hh.strip()), (rest or "00").strip().zfill(2)[:2])
+    return t
+
+
+def _compose_part(*vals):
+    """把「部位」和「关键部位工序」拼起来（模板那一栏就叫"关键部位、关键工序"）。"""
+    out = []
+    for v in vals:
+        t = str(v or "").strip()
+        if t and "待补" not in t and t not in out:
+            out.append(t)
+    return " · ".join(out)
+
+
 def build_form_docx(project_id, doc_id):
     """把一份已入库的文书套进对应省统表模板，生成单份 docx。
 
@@ -320,7 +343,8 @@ def build_form_docx(project_id, doc_id):
     """
     from .formfill import build as fill_forms, load_spec
 
-    rows = q("SELECT id, kind, obj, fields, project_id FROM doc WHERE id=%s", (doc_id,))
+    rows = q("SELECT id, kind, obj, fields, project_id, created_at FROM doc WHERE id=%s",
+             (doc_id,))
     if not rows:
         raise RuntimeError("文书不存在: %s" % doc_id)
     d = dict(rows[0])
@@ -332,10 +356,22 @@ def build_form_docx(project_id, doc_id):
     proj_rows = q("SELECT name FROM project WHERE id=%s", (project_id,))
     proj_name = (proj_rows[0]["name"] if proj_rows else project_id)
 
+    created = str(d.get("created_at") or "")[:10]
     data = dict(fields)
     data["project"] = proj_name
     data["serial"] = "%s %04d" % (spec.get("code") or "", doc_id)
-    data["date_text"] = _cn_date(fields.get("开始时间") or fields.get("日期") or "")
+
+    # 部位 + 关键部位工序 拼成一栏（模板就叫"关键部位、关键工序"）
+    if "关键部位工序" in (fields or {}):
+        data["关键部位工序"] = _compose_part(fields.get("部位"), fields.get("关键部位工序"))
+
+    # 时间：字段里可能只有「9:10」，用文书创建日期补全
+    day = created or (_cn_date(fields.get("日期") or "") or "")
+    if fields.get("开始时间"):
+        data["开始时间"] = _hhmm(fields.get("开始时间"), created)
+    if fields.get("结束时间"):
+        data["结束时间"] = _hhmm(fields.get("结束时间"), created)
+    data["date_text"] = _cn_date(fields.get("日期") or created or fields.get("开始时间") or "")
 
     # block 槽：把对应字段折行
     for slot in spec.get("slots") or []:
