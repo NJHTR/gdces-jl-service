@@ -105,9 +105,13 @@ def ensure_ws_gitignore(project_id):
         sys.stderr.write("[ws] 写 .gitignore 失败 %s: %r\n" % (ws, e))
         return None
     try:
+        # 只加 .gitignore 还不够：以前已经提交过的 .agent/ 文件仍被跟踪
+        # （gitignore 只影响未跟踪文件），要显式从索引里移除
+        subprocess.run(["git", "rm", "-r", "--cached", "--quiet", ".agent"],
+                       cwd=ws, capture_output=True, text=True, timeout=30)
         subprocess.run(["git", "add", "--", ".gitignore"], cwd=ws,
                        capture_output=True, text=True, timeout=30)
-        subprocess.run(["git", "commit", "-m", "chore(工作区): 忽略每轮临时产物"],
+        subprocess.run(["git", "commit", "-m", "chore(工作区): 忽略并取消跟踪每轮临时产物"],
                        cwd=ws, capture_output=True, text=True, timeout=60)
     except Exception as e:
         sys.stderr.write("[ws] 提交 .gitignore 失败: %r\n" % (e,))
