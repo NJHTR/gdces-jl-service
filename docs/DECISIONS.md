@@ -630,3 +630,38 @@ POST   /api/v1/auth/logout               handle_logout           （可放行：
 不在服务器上时跳过（`core.ROOT` 是服务器路径，本机 import 必然失败）。
 
 **代价**：这条检查只在服务器上真正生效 —— devloop 每天 09:00 会跑它。
+
+
+---
+
+# D38 · 规范检索用 MySQL ngram 全文索引（不自己写分词）
+
+**事实**：`db/schema.sql:180` 里本来就写了
+
+```sql
+FULLTEXT KEY ft_body (title, body) WITH PARSER ngram
+```
+
+但线上库的索引是**没有 ngram 的最初版本**（schema 改了、库没迁移）——
+中文短语搜不到：`连墙件间距 → 0`、`外架连墙件 → 0`。
+
+**处理**：按 schema 重建索引（不自己写分词器）：
+
+```sql
+ALTER TABLE standard DROP INDEX ft_body;
+ALTER TABLE standard ADD FULLTEXT ft_body (title, body) WITH PARSER ngram;
+```
+
+**效果对比**（同一份数据）：
+
+| 查询 | 旧索引 | ngram |
+|---|---|---|
+连墙件 | 1 | 1 |
+连墙件间距 | 0 | **1** |
+连墙件 间距 | 0 | **1** |
+外架连墙件 | 0 | **1** |
+保护层厚度 | 1 | 1 |
+模板支撑（库里没有） | 0 | 0 |
+
+**教训**：`schema.sql` 是索引的出处；线上库与它漂移时，先对齐 schema，别另写一套检索。
+
