@@ -431,30 +431,7 @@ def handle_doc_create(body):
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ws,
                                 capture_output=True, text=True).stdout.strip()
 
-    # 模型有时不传 bases，而是把依据写进「依据」字段（实测 doc 214）。
-    # 字段是声明式数据，反哺成结构化依据，别让「写了依据却不记账」发生。
-    if not bases and isinstance(fields, dict) and str(fields.get("依据") or "").strip():
-        _items = [x.strip() for x in re.split(r"[；;、,，]", str(fields["依据"])) if x.strip()]
-        for _it in _items:
-            _p = _parse_ref("rule", _it)
-            if _p:
-                bases.append({"kind": "rule", "ref": _p[0], "text": _it[:120]})
-
-    # 记账：出稿即引用一次（used_count+1）
-    record_citations(bases)
-
-    # 「依据」字段由 bases 派生：模型不用自己拼，也不会忘
-    if bases and isinstance(fields, dict) and not str(fields.get("依据") or "").strip():
-        refs = []
-        for _b in bases:
-            _k, _r = _base_ref(_b)
-            _p = _parse_ref(_k, _r)
-            if _p:
-                refs.append(_p[0])
-            elif isinstance(_b, dict) and (_b.get("ref") or _b.get("text")):
-                refs.append((_b.get("ref") or _b.get("text"))[:60])
-        if refs:
-            fields["依据"] = "；".join(refs)[:200]
+    fields, bases = prepare_bases(fields, bases)
     check2 = validate_fields(kind, fields)
     missing = list(check2["missing"]) + list(check2["placeholder"])
     state = "待补" if missing else "待签"
@@ -660,6 +637,37 @@ def verify_citations_for_doc(doc_id):
     return n
 
 
+def prepare_bases(fields, bases):
+    """依据归一（两条创建路径共用，避免两份实现）：
+
+    ① 模型把依据写进「依据」字段、没传 bases → 反哺成结构化依据
+    ② bases 有值但字段空 → 由 bases 派生字段
+    ③ 记账（used_count+1）
+    返回 (fields, bases)。
+    """
+    bases = list(bases or [])
+    if not bases and isinstance(fields, dict) and str(fields.get("依据") or "").strip():
+        for _it in [x.strip() for x in re.split(r"[；;、,，]", str(fields["依据"])) if x.strip()]:
+            _p = _parse_ref("rule", _it)
+            if _p:
+                bases.append({"kind": "rule", "ref": _p[0], "text": _it[:120]})
+
+    if bases and isinstance(fields, dict) and not str(fields.get("依据") or "").strip():
+        _refs = []
+        for _b in bases:
+            _k, _r = _base_ref(_b)
+            _p = _parse_ref(_k, _r)
+            if _p:
+                _refs.append(_p[0])
+            elif isinstance(_b, dict) and (_b.get("ref") or _b.get("text")):
+                _refs.append((_b.get("ref") or _b.get("text"))[:60])
+        if _refs:
+            fields["依据"] = "；".join(_refs)[:200]
+
+    record_citations(bases)
+    return fields, bases
+
+
 def handle_review_record(body, user=None):
     """复核判定落库。verdict 只能是枚举；findings/counter 每条必须带 locator。"""
     doc_id = body.get("docId") or body.get("doc_id")
@@ -759,12 +767,12 @@ def handle_doc_register(body, user=None):
     path = (body.get("path") or "").strip()
     commit = (body.get("commit") or "").strip()
 
-    # 齐不齐由 schema 说了算（占位词「待补」也算缺）
+    fields, bases = prepare_bases(fields, bases)
+
+    # 齐不齐由 schema 说了算（依据也算必填；占位词「待补」也算缺）
     check = validate_fields(kind, fields)
     missing = list(check["missing"]) + list(check["placeholder"])
     # 状态只由 schema 决定，不接受客户端传的 state。
-    # 以前工具自己算缺项、把自己的判断传上来，两边不同步就会出现
-    # 「字段齐了但状态还是待补」（实测 doc 173）。
     state = "待补" if missing else "待签"
 
     exec_sql(
