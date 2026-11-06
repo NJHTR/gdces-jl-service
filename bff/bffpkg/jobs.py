@@ -18,6 +18,7 @@
   - 开发用的 loop（开工检查、收工归档）挂在开发环境，不在这里
 """
 import contextlib
+import io
 import json
 import sys
 import threading
