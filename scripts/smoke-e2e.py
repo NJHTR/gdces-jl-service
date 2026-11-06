@@ -606,6 +606,20 @@ def main():
           and isinstance(d.get("byWeek"), list),
           "keys=%s" % sorted(tot.keys()))
 
+    # 4.996) D1 影像索引：按部位分组可查，且文件里是一图一行
+    st, b = call("GET", "/api/v1/photos/index?projectId=" + PROJECT)
+    d = b.get("data") or {}
+    places = d.get("places") or []
+    check("影像索引可查", st == 200 and int(d.get("total") or 0) >= 1,
+          "部位 %d 个 / 照片 %s 张" % (len(places), d.get("total")))
+    one = next((x for x in places if x.get("count")), None)
+    check("索引带部位/时间/样例", bool(one) and bool(one.get("place"))
+          and bool(one.get("firstAt")) and isinstance(one.get("samples"), list),
+          str(one)[:90])
+    pfp = os.path.join(ROOT, "data", "workspaces", PROJECT, "records", "photos.md")
+    body = open(pfp, encoding="utf-8").read() if os.path.isfile(pfp) else ""
+    check("索引文件按部位分组", body.startswith("# 现场影像索引（按部位）") and "## " in body)
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

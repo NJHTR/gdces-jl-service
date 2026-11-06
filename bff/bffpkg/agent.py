@@ -254,6 +254,8 @@ def build_context(project_id, user_id, query=None):
     if mine:
         parts.append("【我的记忆】" + " · ".join(mine) + "（按需读，别全量复述）")
 
+    if os.path.isfile(f"{ws}/records/photos.md"):
+        here.append("影像索引 `records/photos.md`（按部位分组；问'这个部位以前查过什么'先看这里）")
     if os.path.isfile(f"{ws}/records/rules.md"):
         here.insert(0, "项目规矩 `records/rules.md`（这个项目约定怎么写、怎么签；按需读）")
     if os.path.isdir(f"{ws}/knowledge"):

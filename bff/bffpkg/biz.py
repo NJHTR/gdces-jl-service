@@ -298,54 +298,96 @@ def default_project_id():
     return rows[0]["id"] if rows else None
 
 
-def index_photo(project_id, sha, caption, place=None):
-    """把一张图的描述追加进 <ws>/records/photos.md（证据索引，git 版本化）。
+def render_photos_md(project_id):
+    """把影像索引渲染成 <ws>/records/photos.md —— 按部位分组，一图一行。
 
-    索引的意义：让"这个部位以前查过什么"变成一次 grep，而不是必须先想到调工具。
-    同一张图重复写同一句描述时不重复追加。
+    以前是"写完描述追加一行"：同一张图换个描述就多一行、部位没标的堆一堆，
+    根本没法回答"这个部位以前查过什么"。现在 DB 是账本，文件是视图（同 rules.md）。
     """
-    if not project_id or not sha or not (caption or "").strip():
-        return None
     ws = f"{WS_ROOT}/{project_id}"
+    rows = q("SELECT sha256, place, caption, shot_at, created_at FROM photo "
+             "WHERE project_id=%s AND COALESCE(caption,'')<>'' "
+             "ORDER BY COALESCE(shot_at, created_at)", (project_id,))
+    latest = {}
+    for r in rows:
+        latest[r["sha256"]] = r
+    groups = {}
+    for sha, r in latest.items():
+        place = (r.get("place") or "").strip() or "未标部位"
+        groups.setdefault(place, []).append((sha, r))
+    lines = ["# 现场影像索引（按部位）", "",
+             "> 一条一张图，按部位分组；原图取 /api/v1/blobs/<sha>。",
+             "> 由服务从数据库渲染，不要手改。", ""]
+    for place in sorted(groups):
+        items = sorted(groups[place],
+                       key=lambda x: str(x[1].get("shot_at") or x[1].get("created_at") or ""))
+        lines.append("## %s（%d 张）" % (place, len(items)))
+        for sha, r in items:
+            at = str(r.get("shot_at") or r.get("created_at") or "")[:16].replace("T", " ")
+            cap = (r.get("caption") or "").strip().replace("\n", " ")[:160]
+            lines.append("- %s · %s · sha %s" % (at, cap, sha[:12]))
+        lines.append("")
+    body = "\n".join(lines).rstrip() + "\n"
+    path = os.path.join(ws, "records", "photos.md")
     rel = "records/photos.md"
-    path = f"{ws}/{rel}"
-    head = "# 现场影像索引\n\n> 服务在写完描述后追加，一行一张图；大图取 /api/v1/blobs/<sha>\n"
-    line = "- %s · %s · %s%s · sha %s\n" % (
-        time.strftime("%Y-%m-%d %H:%M"),
-        ("部位 %s" % place) if place else "部位未标",
-        caption.strip()[:200],
-        "",
-        sha[:12],
-    )
     try:
-        os.makedirs(f"{ws}/records", exist_ok=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         old = ""
-        if os.path.exists(path):
+        if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
                 old = f.read()
-        else:
-            old = head + "\n"
-        if line in old:
+        if old == body:
             return rel
         with open(path, "w", encoding="utf-8") as f:
-            f.write(old.rstrip("\n") + "\n" + line)
+            f.write(body)
     except OSError as e:
         sys.stderr.write("[photos] 写索引失败 %s: %r\n" % (path, e))
         return None
-
-    # 进 git：证据索引要能 diff、能回滚
     try:
         subprocess.run(["git", "add", "--", rel], cwd=ws,
                        capture_output=True, text=True, timeout=30)
-        msg = "docs(证据): 追加影像索引（%s）" % sha[:12]
-        r = subprocess.run(["git", "commit", "-m", msg], cwd=ws,
-                           capture_output=True, text=True, timeout=30)
-        if r.returncode != 0 and "nothing to commit" not in (r.stdout + r.stderr):
-            sys.stderr.write("[photos] 提交失败 %s: %s\n"
-                             % (project_id, (r.stdout + r.stderr)[:160]))
-    except (OSError, subprocess.SubprocessError) as e:
-        sys.stderr.write("[photos] 提交异常 %s: %r\n" % (project_id, e))
+        subprocess.run(["git", "commit", "-m",
+                        "docs(证据): 重渲染影像索引（%d 张）" % len(latest)],
+                       cwd=ws, capture_output=True, text=True, timeout=60)
+    except Exception as e:
+        sys.stderr.write("[photos] git 提交失败: %r\n" % (e,))
     return rel
+
+
+def index_photo(project_id, sha, caption, place=None):
+    """兼容旧调用：写完描述后重渲染整份索引（不再逐行追加）。"""
+    if not project_id:
+        return None
+    return render_photos_md(project_id)
+
+
+def handle_photo_index(params, user=None):
+    """按部位分组的影像索引：这个部位拍过几张、最近一次、描述样例。"""
+    pid = q1(params, "projectId")
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+    rows = q("SELECT sha256, place, caption, shot_at, created_at FROM photo "
+             "WHERE project_id=%s AND (COALESCE(caption,'')<>'' OR COALESCE(place,'')<>'') "
+             "ORDER BY COALESCE(shot_at, created_at)", (pid,))
+    groups = {}
+    for r in rows:
+        place = (r.get("place") or "").strip() or "未标部位"
+        g = groups.setdefault(place, {"place": place, "count": 0,
+                                      "firstAt": None, "lastAt": None, "samples": []})
+        g["count"] += 1
+        at = str(r.get("shot_at") or r.get("created_at") or "")[:19].replace("T", " ")
+        if not g["firstAt"] or at < g["firstAt"]:
+            g["firstAt"] = at
+        if not g["lastAt"] or at > g["lastAt"]:
+            g["lastAt"] = at
+        if len(g["samples"]) < 3:
+            g["samples"].append({"sha": (r.get("sha256") or "")[:12], "at": at,
+                                 "caption": (r.get("caption") or "")[:120]})
+    out = sorted(groups.values(), key=lambda x: -x["count"])
+    return 200, {"code": 0, "data": {"places": out, "total": len(rows)}}
 
 
 # ---------------------------------------------------------------- handle_project_get
