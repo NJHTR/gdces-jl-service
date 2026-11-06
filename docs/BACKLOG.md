@@ -33,17 +33,42 @@
 ```
 [x] G1 项目规矩移出 AGENTS 后没指路 → 每轮上下文补 records/rules.md 指针（已修）
 [x] G2 任务 386/387 的 doc_id 指向已删的 264/265 → 回填 267/268，artifact 恢复（已修）
-[ ] G3 消息 756/758 正文仍写着 docId 264/265（历史记录，改不改要拍板）
-[ ] G4 110/198 个文书文件是孤儿（磁盘有、doc 表无）—— 补登记还是清理
-[ ] G5 近义规矩 6 条变体（整改回复附对比图）+ 2 条（依据留空）未归并
-[ ] G6 照片 sha-only 分支传空 pid：index_photo 返回 None，但响应仍说 indexed
-[ ] G7 handle_asr 没有 guard_project（能按 sha 跨项目转写）
-[ ] G8 noSource 与 cites 打架：有引用也可能被标「未溯源」
-[ ] G9 ENGINE_MODE 三处判断不一致（1201 / 1395 / 1440）—— 默认 cli 时复核静默关闭
-[ ] G10 scripts/make_patrol_docx.py 已过时（服务端可生成），留着会成为第二套渲染器
-[ ] G11 inspect_docx.py 与 dump_docx.py 功能重复，留一个
-[ ] G12 kb/templates/16巡视记录.md 仍是压平版，且无 docx 原件（Wave 2 B1 解决）
-[ ] G13 旧文档口径（“文件是唯一真相”）与 D-记忆-01（表是账本、文件是视图）冲突，要改注
+[x] G3 消息 756/758 的 docId 已改 267·重建 / 268·重建（库里已核对）
+[x] G4 110 份孤儿文书归档到 records/archive/2026-11-06/ + records/orphans.md（git 留痕）
+[x] G5 规矩归并：12 条 → 6 条（6 条「整改回复附对比图」合成 1 条，2 条「依据留空」合成 1 条）
+[x] G6 caption sha-only 补 project_id；索引没写成回 indexed=null
+[x] G7 handle_asr 补 guard_project（projectId 或按 sha 反查）
+[x] G8 noSource 遇 cites 非空不再报「未溯源」
+[x] G9 ENGINE_MODE 默认 appserver；复核开关去掉 mode 依赖
+[x] G10 删 scripts/make_patrol_docx.py
+[x] G11 删 scripts/inspect_docx.py（保留 dump_docx.py）
+[x] G12 kb 里两份巡视记录 md 已加注「表结构以 docx 原件为准」
+[x] G13 ARCHITECTURE-LEARNING 加口径更新
+```
+
+---
+
+## 当前指针（每轮开发从这里开始）
+
+```
+next = Wave2 / B1  模板原件入库 + fields.json
+```
+
+## 开发 loop 协议（每轮照做，不许跳步）
+
+```
+1. 读本文件「当前指针」，只做那一项（不顺手改别的）
+2. 实现 → 本地 preflight → deploy.ps1（含 smoke）
+3. 失败先修到绿，再继续；修不好就停下来写清楚卡在哪
+4. 把证据（实测输出/数字）写回本文件对应项，状态改 [x]
+5. 更新「当前指针」到下一项，commit（一项一提交）
+6. 需要人拍板的（策略/取舍）→ 停下，写进「待拍板」一节，不自己决定
+```
+
+## 待拍板
+
+```
+（暂无）
 ```
 
 ---
