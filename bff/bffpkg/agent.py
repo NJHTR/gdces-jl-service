@@ -1517,8 +1517,14 @@ def handle_task(task_id, user=None):
             if m.get("role") != "assistant":
                 continue
             texts.append(m.get("text") or "")
-            for it in (m.get("trace") or []):
-                if (it.get("tool") or "") == "search_standards":
+            trace = m.get("trace")
+            if isinstance(trace, str):
+                try:
+                    trace = json.loads(trace)
+                except (ValueError, TypeError):
+                    trace = []
+            for it in trace or []:
+                if isinstance(it, dict) and (it.get("tool") or "") == "search_standards":
                     called = True
         if called or not texts:
             return False
