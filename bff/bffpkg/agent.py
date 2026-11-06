@@ -634,9 +634,9 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
 def _drain_cites(ws, since):
     """把工具这一轮写下的引用取走（读 <ws>/.agent/cites.jsonl 然后删掉）。
 
-    为什么要这样：app-server 的 commandExecution item 里**没有输出字段**
-    （实测 keys 只有 type/id/command/cwd/processId/source），
-    所以引用不能在客户端解析命令输出，只能由工具侧落盘、这里取走。
+    为什么要这样：app-server 的 commandExecution item 里没有输出字段
+    （实测 keys 只有 type/id/pluginId/scriptPath/command/cwd/processId/source），
+    命令输出不回传给客户端，所以引用只能由工具侧落盘、这里取走。
     """
     fp = os.path.join(ws, ".agent", "cites.jsonl")
     out = []
@@ -821,12 +821,6 @@ def _parse_cli_jsonl(stdout):
 
     # 最终回复只取最后一条：前面那些是过程里的插话，拼起来会变成流水账
     final = texts[-1] if texts else ""
-
-    # 工具侧落盘的引用（命令输出拿不到，只能这么取）
-    for ci in _drain_cites(ws, started):
-        if not any((x["code"], x["clause"]) == (ci["code"], ci["clause"]) for x in cites):
-            ci["n"] = len(cites) + 1
-            cites.append(ci)
     return thread_id, final, timeline, cites
 
 
@@ -1120,6 +1114,12 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         _set_progress(task_id, steps)
 
         thread_id, final_text, trace, cites = _parse_cli_jsonl("".join(lines))
+
+        # 工具侧落盘的引用（命令输出不回传，只能这么取）
+        for _ci in _drain_cites(ws, started):
+            if not any((x["code"], x["clause"]) == (_ci["code"], _ci["clause"]) for x in cites):
+                _ci["n"] = len(cites) + 1
+                cites.append(_ci)
 
         # 耗时以运行时的 progress 为准（事件流里 completed 可能没有 in_progress 配对）
         cmd_items = [t for t in trace if t.get("kind") in ("cmd", "shell")]
