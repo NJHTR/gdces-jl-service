@@ -315,6 +315,25 @@ export async function searchPhotos({ projectId, q, place, dateFrom, dateTo, limi
  * 为什么做成工具而不是让模型输出 JSON：文本要后端解析（禁止）；
  * 工具是声明式的、可校验的，而且判定直接进账本，成为「核验」信号。
  */
+/**
+ * 提议一条项目规矩。**只是候选**：人确认后才会写进 records/rules.md。
+ * 为什么不让 agent 直接写规矩：规矩影响所有人的出稿，得有人拍板（C2 的设计）。
+ */
+export async function proposeRule({ projectId, text, source = "agent", sourceRef = "", evidence = "" }) {
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}/api/v1/rule-proposals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectId, text, source, sourceRef, evidence }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`提交规矩提案失败: ${resp.status} ${JSON.stringify(payload).slice(0, 300)}`);
+  }
+  return payload.data;
+}
+
+
 export async function recordReview({ docId, verdict, findings = [], counter = [], alternatives = [], uncertainty = "", taskId }) {
   // findings 里带 tag：同类问题反复出现时，观察队列靠它聚合（后端不解析文本）
   const bff = process.env.BFF_URL || "http://host.docker.internal:8081";

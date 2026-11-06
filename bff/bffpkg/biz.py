@@ -552,6 +552,86 @@ def handle_asr(body, user=None):
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
                                      "saved": saved}}
 
+# ---------------------------------------------------------------- 规矩提案（C2）
+def handle_rule_propose(body, user=None):
+    """收下一条候选规矩。**不写 memory、不动 rules.md** —— 只是排队等人确认。"""
+    pid = (body.get("projectId") or "").strip()
+    text = (body.get("text") or "").strip()
+    if not pid or not text:
+        return 400, {"code": 400, "message": "projectId 和 text 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+    kept = text[:512]
+    src = (body.get("source") or "agent").strip()[:32]
+    ref = (body.get("sourceRef") or "").strip()[:64] or None
+    ev = (body.get("evidence") or "").strip()[:4000] or None
+    dup = q("SELECT id, status FROM rule_proposal WHERE project_id=%s AND text=%s LIMIT 1",
+            (pid, kept))
+    if dup:
+        return 200, {"code": 0, "data": {"id": dup[0]["id"], "status": dup[0]["status"],
+                                        "duplicated": True}}
+    rid = exec_sql(
+        "INSERT INTO rule_proposal (project_id, user_id, text, source, source_ref, evidence) "
+        "VALUES (%s,%s,%s,%s,%s,%s)",
+        (pid, str((user or {}).get("id") or ""), kept, src, ref, ev))
+    return 200, {"code": 0, "data": {"id": rid, "status": "pending"}}
+
+
+def handle_rule_proposals(params, user=None):
+    pid = q1(params, "projectId")
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+    status = q1(params, "status", "pending")
+    rows = q("SELECT id, project_id, user_id, text, source, source_ref, evidence, "
+             "status, decided_by, decided_at, created_at FROM rule_proposal "
+             "WHERE project_id=%s AND status=%s ORDER BY id DESC", (pid, status))
+    return 200, {"code": 0, "data": rows}
+
+
+def handle_rule_decide(rid, body, user=None):
+    """确认或否决一条候选。确认 = 写 memory（scope=project）并渲染 rules.md。"""
+    rows = q("SELECT id, project_id, text, status FROM rule_proposal WHERE id=%s", (rid,))
+    if not rows:
+        return 404, {"code": 404, "message": "提案不存在"}
+    row = rows[0]
+    deny = guard_project(row["project_id"], user)
+    if deny:
+        return deny
+    if row["status"] != "pending":
+        return 409, {"code": 409, "message": "这条已经处理过了（%s）" % row["status"]}
+    action = (body.get("action") or "").strip()
+    if action not in ("accept", "reject"):
+        return 400, {"code": 400, "message": "action 只能是 accept / reject"}
+    who = str((user or {}).get("id") or "")
+
+    if action == "reject":
+        exec_sql("UPDATE rule_proposal SET status='rejected', decided_by=%s, decided_at=NOW(3) "
+                 "WHERE id=%s", (who, rid))
+        return 200, {"code": 0, "data": {"id": rid, "status": "rejected"}}
+
+    # 确认：同一个项目里已有同样内容的规矩就不重复写
+    dup = q("SELECT id FROM memory WHERE scope='project' AND owner_id=%s AND text=%s LIMIT 1",
+            (row["project_id"], row["text"]))
+    if dup:
+        mid = dup[0]["id"]
+        exec_sql("UPDATE memory SET status=1, updated_at=NOW(3) WHERE id=%s", (mid,))
+    else:
+        mid = exec_sql(
+            "INSERT INTO memory (scope, owner_id, text, source, source_ref, applies_to, updated_at) "
+            "VALUES ('project',%s,%s,'confirmed',%s,%s,NOW(3))",
+            (row["project_id"], row["text"], "proposal:%s" % rid,
+             "project:%s" % row["project_id"]))
+    exec_sql("UPDATE rule_proposal SET status='accepted', decided_by=%s, decided_at=NOW(3) "
+             "WHERE id=%s", (who, rid))
+    rel = render_rules_md(row["project_id"])
+    return 200, {"code": 0, "data": {"id": rid, "status": "accepted",
+                                     "memoryId": mid, "rendered": rel}}
+
+
 # ---------------------------------------------------------------- render_user_project_md
 def render_user_project_md(user_id, project_id):
     """个人 × 项目记忆：<homes>/<uid>/memories/projects/<pid>.md

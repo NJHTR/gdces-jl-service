@@ -494,6 +494,45 @@ def main():
         after = open(upath, encoding="utf-8").read() if os.path.isfile(upath) else ""
         check("删除后文件同步", uni not in after)
 
+    # 4.95) C2 规矩提案：确认前不进规矩文件，确认后才进
+    rule_text = "smoke 规矩提案 " + uuid.uuid4().hex[:6]
+    rules_fp = os.path.join(ROOT, "data", "workspaces", PROJECT, "records", "rules.md")
+
+    def _rules():
+        return open(rules_fp, encoding="utf-8").read() if os.path.isfile(rules_fp) else ""
+
+    st, b = call("POST", "/api/v1/rule-proposals", {
+        "projectId": PROJECT, "text": rule_text, "source": "agent",
+        "evidence": "smoke 自测：看一眼提案流"})
+    rid = (b.get("data") or {}).get("id")
+    check("规矩提案 已建", st == 200 and bool(rid), "id=%s" % rid)
+    check("确认前不在规矩文件", rule_text not in _rules())
+
+    st, b = call("POST", "/api/v1/rule-proposals/%s/accept" % rid, {})
+    data = b.get("data") or {}
+    check("确认提案", st == 200 and data.get("status") == "accepted",
+          "memoryId=%s" % data.get("memoryId"))
+    check("确认后才进规矩文件", rule_text in _rules())
+
+    # 清理：删记忆 + 删提案，再通过一次 patch 触发重渲染
+    if data.get("memoryId"):
+        sql("DELETE FROM memory WHERE id=%s" % int(data["memoryId"]))
+    sql("DELETE FROM rule_proposal WHERE id=%s" % int(rid))
+    any_mem = sql("SELECT id FROM memory WHERE scope='project' AND owner_id='%s' LIMIT 1" % PROJECT)
+    if any_mem.strip().isdigit():
+        call("PATCH", "/api/v1/memories/%s" % any_mem.strip(), {"status": 1})
+    check("清理后规矩文件里没有它", rule_text not in _rules())
+
+    # 否决路径：不写规矩文件
+    st, b = call("POST", "/api/v1/rule-proposals", {
+        "projectId": PROJECT, "text": rule_text + "（否决测试）"})
+    rid2 = (b.get("data") or {}).get("id")
+    st, b = call("POST", "/api/v1/rule-proposals/%s/reject" % rid2, {})
+    check("否决提案", st == 200 and (b.get("data") or {}).get("status") == "rejected",
+          "HTTP %s" % st)
+    check("否决后不进规矩文件", rule_text + "（否决测试）" not in _rules())
+    sql("DELETE FROM rule_proposal WHERE id=%s" % int(rid2))
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

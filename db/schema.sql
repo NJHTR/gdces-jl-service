@@ -231,3 +231,20 @@ CREATE TABLE IF NOT EXISTS observation (
   UNIQUE KEY uk_obs (project_id, doc_kind, tag),
   KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='观察队列：重复出现的问题';
+
+-- 项目规矩提案：模型/纠正只能"提议"，人确认后才进 memory（再渲染 rules.md）
+CREATE TABLE IF NOT EXISTS rule_proposal (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  project_id  VARCHAR(64) NOT NULL,
+  user_id     VARCHAR(32) NULL,
+  text        VARCHAR(512) NOT NULL,
+  source      VARCHAR(32) NOT NULL DEFAULT 'agent' COMMENT 'agent / correction / manual',
+  source_ref  VARCHAR(64) NULL COMMENT '哪次对话/哪个文书',
+  evidence    TEXT NULL COMMENT '为什么提这条（原文/字段改动）',
+  status      ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  decided_by  VARCHAR(32) NULL,
+  decided_at  DATETIME(3) NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_pending (project_id, status),
+  KEY idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目规矩提案（待确认）';
