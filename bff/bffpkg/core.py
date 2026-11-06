@@ -44,6 +44,8 @@ ENGINE = f"{ROOT}/repos/easycode/.target/release/easycode"
 
 # ---------------------------------------------------------------- WS_ROOT
 WS_ROOT = f"{ROOT}/data/workspaces"
+# 每个用户一个引擎家目录（记忆/配置/技能都在里面）
+HOMES_ROOT = f"{ROOT}/data/homes"
 
 
 # ---------------------------------------------------------------- PORT

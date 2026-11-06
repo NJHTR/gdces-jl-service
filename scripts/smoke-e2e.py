@@ -471,6 +471,29 @@ def main():
         st, b = call("DELETE", "/api/v1/memories/%s" % mid)
         check("删除记忆", st in (200, 204), "HTTP %s" % st)
 
+    # 4.9) 个人×项目记忆：写进 homes/<uid>/memories/projects/<pid>.md，只有本人能看到
+    uni = "smoke 个人项目记忆 " + uuid.uuid4().hex[:6]
+    st, b = call("POST", "/api/v1/memories", {
+        "scope": "user", "ownerId": 980, "projectId": PROJECT, "text": uni})
+    data = b.get("data") or {}
+    upath = os.path.join(ROOT, "data", "homes", "980", "memories", "projects",
+                         PROJECT + ".md")
+    check("个人×项目记忆 已建", st == 200 and os.path.isfile(upath),
+          (data.get("applies_to") or "") + " " + upath)
+    body = ""
+    if os.path.isfile(upath):
+        body = open(upath, encoding="utf-8").read()
+    check("写进自己的项目记忆文件", uni in body)
+    # 别人（另一个 uid）的项目记忆文件里不该有这条
+    other = os.path.join(ROOT, "data", "homes", "981", "memories", "projects",
+                         PROJECT + ".md")
+    other_body = open(other, encoding="utf-8").read() if os.path.isfile(other) else ""
+    check("不是别人的文件", uni not in other_body)
+    if data.get("id"):
+        call("DELETE", "/api/v1/memories/%s" % data.get("id"))
+        after = open(upath, encoding="utf-8").read() if os.path.isfile(upath) else ""
+        check("删除后文件同步", uni not in after)
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

@@ -19,7 +19,7 @@ import pymysql
 这一层是「真值和规则」：状态机、字段校验、权限。
 未来抽成 Java 服务时，把这里的实现换掉即可，接口不变。
 """
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, load_schema, list_schemas)
+from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, load_schema, list_schemas)
 
 
 # ---------------------------------------------------------------- handle_project_list
@@ -551,6 +551,45 @@ def handle_asr(body, user=None):
 
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
                                      "saved": saved}}
+
+# ---------------------------------------------------------------- render_user_project_md
+def render_user_project_md(user_id, project_id):
+    """个人 × 项目记忆：<homes>/<uid>/memories/projects/<pid>.md
+
+    引擎只有"个人跨项目"（MEMORY.md），缺"这个人在这一个项目里的习惯"。
+    文件是 memory 表的渲染视图；只有本人能看到（按家目录隔离）。
+    """
+    d = os.path.join(HOMES_ROOT, str(user_id), "memories", "projects")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError as e:
+        sys.stderr.write("[mem] 建目录失败 %s: %r\n" % (d, e))
+        return None
+    rows = q("SELECT text FROM memory WHERE scope='user' AND owner_id=%s "
+             "AND project_id=%s AND status=1 ORDER BY id", (str(user_id), project_id))
+    lines = ["# %s 在 %s 的项目记忆" % (user_id, project_id), "",
+             "> 只在这个项目生效的个人习惯；跨项目偏好见 ../MEMORY.md。", ""]
+    for r in rows:
+        t = (r.get("text") or "").strip()
+        if t:
+            lines.append("- %s" % t)
+    if len(lines) == 4:
+        lines.append("- （空）")
+    body = "\n".join(lines).rstrip() + "\n"
+    path = os.path.join(d, "%s.md" % project_id)
+    try:
+        old = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                old = f.read()
+        if old != body:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(body)
+    except OSError as e:
+        sys.stderr.write("[mem] 写文件失败 %s: %r\n" % (path, e))
+        return None
+    return path
+
 
 # ---------------------------------------------------------------- render_rules_md
 def render_rules_md(project_id):

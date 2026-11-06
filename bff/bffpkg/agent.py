@@ -20,7 +20,7 @@ import pymysql
 留 Python：它跟子进程、文件、git 打交道。
 """
 from .appserver import _client, run_isolated, run_stream
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
+from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
 
 
@@ -242,6 +242,18 @@ def build_context(project_id, user_id, query=None):
     except OSError as e:
         sys.stderr.write("[ctx] 引用技能检查失败: %r\n" % (e,))
 
+    mem_base = os.path.join(HOMES_ROOT, str(user_id), "memories")
+    mine = []
+    if os.path.isfile(os.path.join(mem_base, "memory_summary.md")):
+        mine.append("摘要 `%s`" % os.path.join(mem_base, "memory_summary.md"))
+    if os.path.isfile(os.path.join(mem_base, "MEMORY.md")):
+        mine.append("跨项目记忆 `%s`" % os.path.join(mem_base, "MEMORY.md"))
+    proj_mem = os.path.join(mem_base, "projects", "%s.md" % project_id)
+    if os.path.isfile(proj_mem):
+        mine.append("本项目个人记忆 `%s`" % proj_mem)
+    if mine:
+        parts.append("【我的记忆】" + " · ".join(mine) + "（按需读，别全量复述）")
+
     if os.path.isfile(f"{ws}/records/rules.md"):
         here.insert(0, "项目规矩 `records/rules.md`（这个项目约定怎么写、怎么签；按需读）")
     if os.path.isdir(f"{ws}/knowledge"):
@@ -263,10 +275,12 @@ def handle_memory_list(params, user=None):
         deny = guard_project(owner, user)
         if deny:
             return deny
-    rows = q("SELECT id, scope, owner_id, text, source, source_ref, applies_to, "
+    pid = q1(params, "projectId")
+    where = "scope=%s AND owner_id=%s" + (" AND project_id=%s" if pid else "")
+    args = (scope, owner, pid) if pid else (scope, owner)
+    rows = q("SELECT id, scope, owner_id, project_id, text, source, source_ref, applies_to, "
              "hits, status, created_at, updated_at FROM memory "
-             "WHERE scope=%s AND owner_id=%s ORDER BY status DESC, hits DESC, id DESC",
-             (scope, owner))
+             "WHERE " + where + " ORDER BY status DESC, hits DESC, id DESC", args)
     return 200, {"code": 0, "data": rows}
 
 
@@ -278,13 +292,20 @@ def handle_memory_create(body):
     if scope not in ("user", "project") or not owner or not text:
         return 400, {"code": 400, "message": "scope/ownerId/text 必填"}
     kept = text[:512]
-    # 这条规矩/偏好作用在哪：项目级还是个人级（以后 C1 的"个人×项目"也用它区分）
-    applies_to = "%s:%s" % (scope, owner)
+    # 作用域三档：项目级 / 个人×某项目 / 个人跨项目
+    pid = (body.get("projectId") or "").strip()
+    if scope == "project":
+        pid = str(owner)
+    if scope == "user" and pid:
+        applies_to = "user:%s@project:%s" % (owner, pid)
+    else:
+        applies_to = "%s:%s" % (scope, owner)
     source_ref = (body.get("sourceRef") or "").strip() or None
     # 完全相同的条目只加使用次数，不新增行（近义合并交给整理/人工，不在这里猜）
     try:
-        dup = q("SELECT id FROM memory WHERE scope=%s AND owner_id=%s AND text=%s LIMIT 1",
-                (scope, str(owner), kept))
+        dup = q("SELECT id FROM memory WHERE scope=%s AND owner_id=%s AND text=%s "
+                "AND COALESCE(project_id,'')=%s LIMIT 1",
+                (scope, str(owner), kept, pid))
         if dup:
             exec_sql("UPDATE memory SET hits=hits+1, status=1, updated_at=NOW(3) WHERE id=%s",
                      (dup[0]["id"],))
@@ -303,6 +324,9 @@ def handle_memory_create(body):
         if scope == "project":
             from .biz import render_rules_md
             note = render_rules_md(str(owner)) or ""
+        elif pid:                      # 个人 × 某个项目
+            from .biz import render_user_project_md
+            note = render_user_project_md(owner, pid) or ""
         else:
             d = os.path.join(HOMES_ROOT, str(owner), "memories", "extensions", "ad_hoc", "notes")
             os.makedirs(d, exist_ok=True)
@@ -315,9 +339,10 @@ def handle_memory_create(body):
         sys.stderr.write("[memory] 写文件失败 scope=%s owner=%s: %r\n" % (scope, owner, e))
 
     mid = exec_sql(
-        "INSERT INTO memory (scope, owner_id, text, source, source_ref, applies_to, updated_at) "
-        "VALUES (%s,%s,%s,%s,%s,%s,NOW(3))",
-        (scope, str(owner), kept, body.get("source") or "manual", source_ref, applies_to))
+        "INSERT INTO memory (scope, owner_id, project_id, text, source, source_ref, "
+        "applies_to, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(3))",
+        (scope, str(owner), pid or None, kept, body.get("source") or "manual",
+         source_ref, applies_to))
     rendered = _rerender_if_project(scope, str(owner))
     return 200, {"code": 0, "data": {"id": mid, "saved_to": note, "rendered": rendered,
                                      "applies_to": applies_to}}
@@ -337,7 +362,7 @@ def _memory_guard(rows, user):
 
 
 def handle_memory_patch(mid, body, user=None):
-    rows = q("SELECT id, scope, owner_id FROM memory WHERE id=%s", (mid,))
+    rows = q("SELECT id, scope, owner_id, project_id FROM memory WHERE id=%s", (mid,))
     if not rows:
         return 404, {"code": 404, "message": "记忆不存在"}
     deny = _memory_guard(rows, user)
@@ -350,6 +375,9 @@ def handle_memory_patch(mid, body, user=None):
         exec_sql("UPDATE memory SET status=%s, updated_at=NOW(3) WHERE id=%s",
                  (1 if body["status"] else 0, mid))
     rendered = _rerender_if_project(rows[0]["scope"], rows[0]["owner_id"])
+    if rows[0].get("project_id"):
+        from .biz import render_user_project_md
+        rendered = render_user_project_md(rows[0]["owner_id"], rows[0]["project_id"]) or rendered
     return 200, {"code": 0, "data": {"ok": True, "rendered": rendered}}
 
 
