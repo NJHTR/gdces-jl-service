@@ -26,6 +26,7 @@
 import ast
 import builtins
 import io
+import json
 import os
 import re
 import sys
@@ -283,6 +284,83 @@ def check_imports():
     return 0
 
 
+def check_templates():
+    """表式模板与映射必须自洽：文件在、标签在模板里找得到。
+
+    这是"格式保真"的地基：模板被换掉/字段名改了，生成时才发现就太晚了。
+    """
+    tdir = os.path.join(ROOT, "data", "knowledge", "templates", "docx")
+    if not os.path.isdir(tdir):
+        return [("模板目录不存在: %s" % tdir, "templates")]
+    try:
+        from docx import Document
+    except Exception:
+        return []          # 没装 python-docx 就跳过（服务器上装了）
+    out = []
+    for fn in sorted(os.listdir(tdir)):
+        if not fn.endswith(".fields.json"):
+            continue
+        fp = os.path.join(tdir, fn)
+        try:
+            spec = json.load(io.open(fp, encoding="utf-8"))
+        except (OSError, ValueError) as e:
+            out.append(("%s 解析失败: %r" % (fn, e), "模板映射"))
+            continue
+        tpl = os.path.join(tdir, spec.get("template") or "")
+        if not os.path.isfile(tpl):
+            out.append(("%s 指向的模板不存在: %s" % (fn, spec.get("template")), "模板映射"))
+            continue
+        doc = Document(tpl)
+        text = "\n".join([p.text for p in doc.paragraphs] +
+                          [c.text for t in doc.tables for r in t.rows for c in r.cells])
+        for lb in spec.get("fixed_labels") or []:
+            if lb not in text:
+                out.append(("%s 的固定标签在模板里找不到: %s" % (fn, lb), "模板映射"))
+        for slot in spec.get("slots") or []:
+            lb = slot.get("label")
+            if lb and slot.get("target") != "para" and lb not in text:
+                out.append(("%s 的槽位标签找不到: %s" % (fn, lb), "模板映射"))
+    return out
+
+
+def check_memory_single_writer():
+    """rules.md 只能由 render_rules_md 渲染，不许再"追加一行"。
+
+    以前创建记忆时"往文件追加一行 + 同时写库"，两处各写各的（改库文件不动）。
+    """
+    fp = os.path.join(ROOT, "bff", "bffpkg", "biz.py")
+    if not os.path.isfile(fp):
+        return []
+    src = io.open(fp, encoding="utf-8").read()
+    bad = []
+    for line in src.splitlines():
+        if "rules.md" in line and ('"a"' in line or "'a'" in line or "\"a\"" in line):
+            bad.append(line.strip())
+    # 允许 render_rules_md 内部写文件（它是渲染器）
+    if bad:
+        return [("rules.md 被追加写入: %s" % bad[0], "记忆写者")]
+    return []
+
+
+def check_exports_dir():
+    """导出目录必须存在且可写（报告/表式都落在这里）。"""
+    if not os.path.isdir(os.path.join(ROOT, "data", "workspaces")):
+        return []           # 本地仓库没有运行数据（工作区/导出只在服务器上）
+    d = os.path.join(ROOT, "data", "exports")
+    out = []
+    if not os.path.isdir(d):
+        out.append(("data/exports 不存在", "导出"))
+        return out
+    probe = os.path.join(d, ".preflight-write-test")
+    try:
+        with io.open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+    except OSError as e:
+        out.append(("data/exports 不可写: %r" % (e,), "导出"))
+    return out
+
+
 def check_ws_gitignore_code():
     """工作区 .gitignore 必须由代码保证（不是手工在服务器上加的）。"""
     fp = os.path.join(ROOT, "bff", "bffpkg", "biz.py")
@@ -354,7 +432,8 @@ def check_tools_wiring():
     m = re.search(r'import \{([^}]+)\} from "\./tools\.js"', src)
     imported = {x.strip() for x in (m.group(1).split(",") if m else []) if x.strip()}
     h = re.search(r"const HANDLERS = \{(.*?)\};", src, re.S)
-    used = set(re.findall(r"(\w+):\s*\w+", h.group(1))) if h else set()
+    # HANDLERS 形如 `get_project: getProject,` —— 要比的是**值**（函数名）
+    used = set(re.findall(r"\w+\s*:\s*(\w+)", h.group(1))) if h else set()
     missing = sorted(used - imported)
     return [("tools 接线缺失: %s" % ", ".join(missing), "server.js")] if missing else []
 
@@ -419,12 +498,28 @@ def main():
     total += check_imports()
 
     print("")
-    problems.extend(check_architecture())
+    # 这些检查以前写了却没挂进来（main 只调 check_architecture）——
+    # 等于白写。统一在这里逐个跑。
+    checks = [
+        check_architecture, check_tools_wiring, check_dead_endpoints,
+        check_duplicate_constants, check_memories_path, check_ws_gitignore_code,
+        check_templates, check_memory_single_writer, check_exports_dir,
+    ]
+    for fn in checks:
+        try:
+            problems.extend(fn())
+        except Exception as e:
+            problems.append("检查 %s 自己崩了: %r" % (fn.__name__, e))
 
     if problems:
         print("发现 %d 个问题：" % len(problems))
         for p in problems:
-            print("  X " + p)
+            if isinstance(p, tuple):
+                msg = p[0]
+                where = p[1] if len(p) > 1 else ""
+                print("  X %s%s" % (msg, ("（%s）" % where) if where else ""))
+            else:
+                print("  X " + str(p))
         return 1
     print("全部通过。")
     return 0
