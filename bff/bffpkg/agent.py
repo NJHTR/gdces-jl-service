@@ -387,12 +387,17 @@ def handle_memory_patch(mid, body, user=None):
 
 # ---------------------------------------------------------------- handle_memory_delete
 def handle_memory_delete(mid, user=None):
-    rows = q("SELECT id, scope, owner_id FROM memory WHERE id=%s", (mid,))
+    rows = q("SELECT id, scope, owner_id, project_id FROM memory WHERE id=%s", (mid,))
     deny = _memory_guard(rows, user)
     if deny:
         return deny
     exec_sql("DELETE FROM memory WHERE id=%s", (mid,))
     rendered = _rerender_if_project(rows[0]["scope"], rows[0]["owner_id"]) if rows else None
+    # 个人×项目的行删掉后，那个人的项目记忆文件也要重渲染（否则文件里还留着）
+    if rows and rows[0].get("project_id"):
+        from .biz import render_user_project_md
+        rendered = render_user_project_md(rows[0]["owner_id"],
+                                          rows[0]["project_id"]) or rendered
     return 200, {"code": 0, "data": {"ok": True, "rendered": rendered}}
 
 
