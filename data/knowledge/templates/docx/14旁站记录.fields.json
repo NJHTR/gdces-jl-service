@@ -1,0 +1,67 @@
+{
+  "form": "旁站记录",
+  "code": "GD-B-212",
+  "template": "14旁站记录.docx",
+  "version": 1,
+  "desc": "省统表 14。一行一段：关键部位工序/施工单位/起止时间，下面两块正文。",
+  "slots": [
+    {
+      "key": "header",
+      "label": "工程项目名称：",
+      "target": "para",
+      "kind": "template",
+      "text": "工程项目名称：{project}\u3000\u3000编号：{serial}"
+    },
+    {
+      "key": "关键部位工序",
+      "label": "旁站的关键部位、关键工序",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "施工单位",
+      "label": "施工单位",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "开始时间",
+      "label": "旁站开始时间",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "结束时间",
+      "label": "旁站结束时间",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "施工情况",
+      "label": "关键部位、关键工序施工情况",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "施工情况lines"
+    },
+    {
+      "key": "发现问题及处理",
+      "label": "旁站发现的问题及处理情况",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "问题lines",
+      "keep_tail": ["旁站监理人员（签名）"],
+      "sig_label": "旁站监理人员（签名）：",
+      "sig_key": "旁站人员",
+      "date_key": "date_text"
+    }
+  ],
+  "fixed_labels": [
+    "旁站的关键部位、关键工序",
+    "施工单位",
+    "旁站开始时间",
+    "旁站结束时间",
+    "旁站发现的问题及处理情况",
+    "旁站监理人员（签名）",
+    "注：本表一式一份"
+  ]
+}

@@ -155,63 +155,83 @@ def write_text(cell, text):
 
 
 def write_block(cell, lines, keep_tail=None, sig_line=None, date_line=None):
-    """多行写入：保留首行标签与尾部签名行，中间换成 lines。
+    """多行写入：保留标签段（不一定是第 0 段！）与尾部签名行，中间换成 lines。
 
-    注意：必须按 XML 元素身份比较段落，不能 `is` 比较包装对象
-    （python-docx 每次访问都新建包装对象，会把首行误判成"多余段落"删掉）。
+    两个坑：
+    · 旁站模板的首段是空的，标签在第 2 段 → 不能假设 paragraphs[0] 是标签
+    · 段落比较必须用 XML 元素身份（python-docx 每次访问都新建包装对象）
     """
     keep_tail = keep_tail or []
     ps = cell.paragraphs
     if not ps:
         return cell
-    first = ps[0]
-    first_el = first._element
 
-    # 尾部起点（签名行）
-    tail, tail_el = None, None
-    for p in ps[1:]:
-        if keep_tail and any(t in p.text for t in keep_tail):
-            tail, tail_el = p, p._element
+    # 1) 标签段：第一段有字的
+    label_idx = None
+    for i, p in enumerate(ps):
+        if p.text.strip():
+            label_idx = i
             break
+    if label_idx is None:
+        return cell
+    label_el = ps[label_idx]._element
+
+    # 2) 尾部签名段：标签之后、包含 keep_tail 的第一段
+    tail_idx, tail_el = None, None
+    if keep_tail:
+        for i in range(label_idx + 1, len(ps)):
+            if any(t in ps[i].text for t in keep_tail):
+                tail_idx, tail_el = i, ps[i]._element
+                break
 
     style_run = _first_run_style(cell)
     font_name = style_run.font.name if style_run else None
     font_size = style_run.font.size if style_run else None
     bold = style_run.bold if style_run else None
 
-    # 删掉中间段与尾部的日期段（只保留首行 + 签名行）
+    # 3) 删掉：标签之后、签名之前的所有段；签名之后的日期段也删（稍后重写）
+    keep_els = {label_el}
+    for i in range(0, label_idx + 1):
+        keep_els.add(ps[i]._element)
+    if tail_el is not None:
+        keep_els.add(tail_el)
     for p in list(ps):
-        el = p._element
-        if el is first_el or (tail_el is not None and el is tail_el):
-            continue
-        el.getparent().remove(el)
+        if p._element not in keep_els:
+            p._element.getparent().remove(p._element)
 
-    # 正文行：逐条插在首行之后（倒序插入保证顺序）
+    # 4) 正文行：倒序插在标签段之后，保证顺序
     for line in reversed(list(lines or [])):
         np = cell.add_paragraph()
         r = np.add_run(str(line))
-        r.font.name = font_name
-        r.font.size = font_size
+        r.font.name = font_name or "宋体"
+        r.font.size = font_size or Pt(10)
         r.bold = bold
-        first_el.addnext(np._element)
+        if not font_name:
+            r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+        label_el.addnext(np._element)
 
-    # 签名行
-    if tail is not None and sig_line is not None:
-        for r in list(tail.runs):
-            r._element.getparent().remove(r._element)
-        r = tail.add_run(sig_line)
-        r.font.name = font_name
-        r.font.size = font_size
-        r.bold = bold
+    # 5) 签名行
+    if tail_el is not None and sig_line is not None:
+        tail = None
+        for p in cell.paragraphs:
+            if p._element is tail_el:
+                tail = p
+                break
+        if tail is not None:
+            for r in list(tail.runs):
+                r._element.getparent().remove(r._element)
+            r = tail.add_run(sig_line)
+            r.font.name = font_name or "宋体"
+            r.font.size = font_size or Pt(10)
+            r.bold = bold
 
-    # 日期行
+    # 6) 日期行：放签名后
     if date_line:
         dp = cell.add_paragraph()
         r = dp.add_run(date_line)
-        r.font.name = font_name
-        r.font.size = font_size
-        anchor = tail_el if tail_el is not None else first_el
-        anchor.addnext(dp._element)
+        r.font.name = font_name or "宋体"
+        r.font.size = font_size or Pt(10)
+        (tail_el if tail_el is not None else label_el).addnext(dp._element)
 
     return cell
 
@@ -265,12 +285,20 @@ def _fill_one(doc, spec, data, table_idx=0, header_idx=0):
         else:  # cell
             target = tb.rows[ri].cells[ci]
             if slot.get("kind") == "block":
+                # 每张表的"正文"来自不同的键：巡逻用 lines，旁站用「施工情况」等
+                lines = data.get(slot.get("lines_key") or "lines") or []
+                # 只有显式声明了签名/日期的槽才写这两行（施工情况那种正文块不该带日期）
+                sig = ""
+                if slot.get("sig_label"):
+                    sig = slot["sig_label"] + (
+                        data.get(slot.get("sig_key") or "inspector") or "")
+                date = data.get(slot["date_key"]) if slot.get("date_key") else ""
                 write_block(
                     target,
-                    data.get("lines") or [],
+                    lines,
                     keep_tail=slot.get("keep_tail") or [],
-                    sig_line=slot.get("sig_label", "") + (data.get("inspector") or ""),
-                    date_line=data.get("date_text") or "",
+                    sig_line=sig,
+                    date_line=date,
                 )
             else:
                 write_text(target, data.get(slot["key"], ""))
@@ -278,21 +306,34 @@ def _fill_one(doc, spec, data, table_idx=0, header_idx=0):
     return changed
 
 
-def _block_elements(doc):
-    """返回要复制的一页元素（标题…表格…注），用于多份。"""
+def _block_elements(doc, title=""):
+    """返回要复制的一页元素（标题…表格…注），用于多份。
+
+    标题不能写死「巡视记录」——每张表标题不同（旁站记录/平行检查记录…）。
+    """
     body = doc.element.body
     els = list(body)
+    title = (title or "").strip()
     start = end = None
     for i, el in enumerate(els):
         tag = el.tag.split("}")[-1]
-        text = "".join(t.text or "" for t in el.iter(qn("w:t")))
-        if start is None and tag == "p" and "巡视记录" in text:
+        text = "".join(t.text or "" for t in el.iter(qn("w:t"))).strip()
+        if start is None and tag == "p" and title and title in text:
             start = i
         if start is not None and tag == "p" and "注：本表" in text:
             end = i
             break
     if start is None:
-        raise RuntimeError("模板里找不到标题「巡视记录」")
+        # 兜底：第一段非空段落就是标题（省统表都是"标题 → 编号 → 表"）
+        for i, el in enumerate(els):
+            if el.tag.split("}")[-1] != "p":
+                continue
+            text = "".join(t.text or "" for t in el.iter(qn("w:t"))).strip()
+            if text and "注：" not in text and "工程项目名称" not in text:
+                start = i
+                break
+    if start is None:
+        raise RuntimeError("模板里找不到标题段（title=%r）" % title)
     if end is None:
         end = len(els) - 1
     return [els[i] for i in range(start, end + 1)], start
@@ -305,7 +346,7 @@ def build(form, records, out_path):
     base_sig = signature(doc)
     base_labels = all_text(doc)
 
-    els, start = _block_elements(doc)
+    els, start = _block_elements(doc, spec.get("title") or spec.get("form") or "")
     body = doc.element.body
     last = els[-1]
 

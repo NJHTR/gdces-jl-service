@@ -323,6 +323,29 @@ class Handler(BaseHTTPRequestHandler):
                     "bytes": got["bytes"], "days": got["days"],
                     "docs": got["docs"], "photos": got["photos"],
                     "from": start, "to": end}})
+            if path == "/api/v1/reports/form":
+                from .report import build_form_docx
+                usr = resolve_token(bearer(self.headers))
+                pid = (body.get("projectId") or "").strip()
+                did = body.get("docId")
+                if not pid or not did:
+                    return self._send(400, {"code": 400, "message": "projectId 和 docId 必填"})
+                deny = guard_project(pid, usr)
+                if deny:
+                    return self._send(*deny)
+                try:
+                    got = build_form_docx(pid, int(did))
+                except FileNotFoundError as exc:
+                    return self._send(400, {"code": 400,
+                                            "message": "这张表还没接模板：%s" % (exc,)})
+                except Exception as exc:
+                    traceback.print_exc()
+                    return self._send(500, {"code": 500, "message": "生成失败: %r" % (exc,)})
+                sub = os.path.basename(os.path.dirname(got["path"]))
+                return self._send(200, {"code": 0, "data": {
+                    "name": got["name"],
+                    "url": "/api/v1/exports/%s/%s" % (sub, got["url_name"]),
+                    "bytes": got["bytes"], "docId": got["docId"], "kind": got["kind"]}})
             if path == "/api/v1/reviews":
                 usr = resolve_token(bearer(self.headers))
                 return self._send(*handle_review_record(body, usr))

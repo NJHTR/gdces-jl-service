@@ -286,3 +286,75 @@ def build_patrol_docx(project_id, start, end, inspector="", org=None,
     return {"path": path, "name": display, "url_name": url_name,
             "bytes": os.path.getsize(path), "days": len(records),
             "docs": len(docs), "photos": len(photos)}
+
+
+# ---------------------------------------------------------------- 单份文书 → 表式
+def _wrap(text, width=38, limit=14):
+    """把长文本折成若干行（表格里一行一段，太长会压到签名行）。"""
+    out = []
+    for para in str(text or "").split("\n"):
+        seg = para.strip()
+        while seg and len(out) < limit:
+            out.append(seg[:width])
+            seg = seg[width:]
+        if len(out) >= limit:
+            break
+    return out or ["（待补）"]
+
+
+def _cn_date(v):
+    """把 2026-11-06 / 2026-11-06 09:30 变成「2026 年 11 月 6 日」。"""
+    t = str(v or "").strip()
+    if len(t) >= 10 and t[4] == "-" and t[7] == "-":
+        y, m, d = t[:4], t[5:7], t[8:10]
+        return "%s 年 %s 月 %s 日" % (y, m.lstrip("0"), d.lstrip("0"))
+    return t or "—"
+
+
+def build_form_docx(project_id, doc_id):
+    """把一份已入库的文书套进对应省统表模板，生成单份 docx。
+
+    表式差异全部由 <表名>.fields.json 描述，这里只做字段搬运：
+      · 普通槽：data[key] = fields[key]
+      · block 槽：lines_key="施工情况lines" → 从 fields["施工情况"] 折行
+    """
+    from .formfill import build as fill_forms, load_spec
+
+    rows = q("SELECT id, kind, obj, fields, project_id FROM doc WHERE id=%s", (doc_id,))
+    if not rows:
+        raise RuntimeError("文书不存在: %s" % doc_id)
+    d = dict(rows[0])
+    if d["project_id"] != project_id:
+        raise RuntimeError("文书不属于该项目")
+    fields = _loads(d.get("fields"))
+    kind = d.get("kind") or ""
+    spec = load_spec(kind)          # 没有 fields.json 会抛错（这也是"未接入"的明确信号）
+    proj_rows = q("SELECT name FROM project WHERE id=%s", (project_id,))
+    proj_name = (proj_rows[0]["name"] if proj_rows else project_id)
+
+    data = dict(fields)
+    data["project"] = proj_name
+    data["serial"] = "%s %04d" % (spec.get("code") or "", doc_id)
+    data["date_text"] = _cn_date(fields.get("开始时间") or fields.get("日期") or "")
+
+    # block 槽：把对应字段折行
+    for slot in spec.get("slots") or []:
+        if slot.get("kind") != "block":
+            continue
+        key = slot.get("lines_key") or "lines"
+        src = key[:-5] if key.endswith("lines") else key
+        data[key] = _wrap(fields.get(src) or "")
+
+    display = "%s-%s-%s.docx" % (proj_name, kind, d.get("obj") or doc_id)
+    url_name = "form-%s-%s.docx" % (_safe_name(kind), doc_id)
+    dest = os.path.join(EXPORT_ROOT, _safe_name(project_id))
+    os.makedirs(dest, exist_ok=True)
+    path = os.path.join(dest, url_name)
+
+    got = fill_forms(kind, [data], path)
+    if not got.get("labels_ok"):
+        raise RuntimeError("模板校验未通过，拒绝交付")
+    with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
+        json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
+    return {"path": path, "name": display, "url_name": url_name,
+            "bytes": os.path.getsize(path), "docId": doc_id, "kind": kind}
