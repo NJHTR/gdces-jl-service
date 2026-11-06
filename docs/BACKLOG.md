@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C7  近义规矩归并（现有重复条目收敛）
+next = Wave3 / C8  验证引擎整理真的在工作（phase1/phase2 产出核对）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -217,7 +217,15 @@ next = Wave3 / C7  近义规矩归并（现有重复条目收敛）
             proposals pending/accepted/rejected=0 → acceptRate=null
       smoke：字段齐全 + byWeek 是数组
 [ ] C6 指标可查：每人每周主动写记忆次数、记忆复用次数、撤销率、确认率
-[ ] C7 近义归并：现有 5 条「整改回复附对比图」变体，人工或整理员合并（不自动删）
+[x] C7 近义归并：脚本出清单（只提议，不改库）
+      scripts/propose_rule_merge.py：归一文本 + 编辑相似度/二元组 Jaccard 双口径，
+      >=0.72 聚组，输出 runtime/rules-merge-proposal.md
+      同时修 smoke：清理时用「原文 PATCH text」触发重渲染，不再 PATCH status=1
+      —— 之前正是它把归并停用的 6 条近义规则又启用了（rules.md 从 6 条涨回 12 条）
+      已恢复 test-sandbox 的归并状态（保留 17/21/22/31/40/94，其余 status=0），
+      rules.md 回到 6 条
+      剩余待拍板：yun-gu-3qi 的 #1（本单位体积写 m³，不写「方」）与
+      #3（本单位体积一律写 m³，禁止写「方」）建议合并
 [ ] C8 验证引擎整理真的在工作（phase1 闲置≥1h / phase2 6h）——从没验证过
       2026-11-06 17:30 部分核实：homes/501 的 MEMORY.md 4409B + summary 2060B（02:53 生成），
       内容已有 User Profile / 「只回：记住」画像；phase 的时序（闲置/6h）还没验。
