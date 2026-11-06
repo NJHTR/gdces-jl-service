@@ -850,17 +850,6 @@ def rich_reply(text, gap_items):
         if pos < len(s):
             out.extend(_split_num(s[pos:]))
 
-    def push_cites(s):
-        """把 [n] 切成角标片段；其余交回 push_num。"""
-        pos = 0
-        for m in CITE_MARK_RE.finditer(s):
-            if m.start() > pos:
-                push_num(s[pos:m.start()])
-            out.append({"s": "c", "v": m.group(0), "n": int(m.group(1))})
-            pos = m.end()
-        if pos < len(s):
-            push_num(s[pos:])
-
     pos = 0
     for m in BOLD_RE.finditer(text):
         if m.start() > pos:
@@ -948,6 +937,17 @@ def rich_segments(text):
             pos = m.end()
         if pos < len(s):
             out.append({"s": "t", "v": s[pos:]})
+
+    def push_cites(s):
+        """把 [n] 切成引用角标，其余交回 push_num。"""
+        pos2 = 0
+        for m in CITE_MARK_RE.finditer(s):
+            if m.start() > pos2:
+                push_num(s[pos2:m.start()])
+            out.append({"s": "c", "v": m.group(0), "n": int(m.group(1))})
+            pos2 = m.end()
+        if pos2 < len(s):
+            push_num(s[pos2:])
 
     pos = 0
     for m in BOLD_RE.finditer(text):
