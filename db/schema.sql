@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS memory (
   scope      ENUM('user','project') NOT NULL,
   owner_id   VARCHAR(32) NOT NULL COMMENT 'scope=user 时是 user_id，等于 project 时是 project_id',
   text       VARCHAR(512) NOT NULL,
-  source     ENUM('manual','auto','learned') NOT NULL DEFAULT 'manual',
+  source     ENUM('manual','auto','learned','confirmed','correction') NOT NULL DEFAULT 'manual',
   hits       INT NOT NULL DEFAULT 0 COMMENT '被引用次数',
   status     TINYINT NOT NULL DEFAULT 1 COMMENT '1=生效 0=停用',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
