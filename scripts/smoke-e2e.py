@@ -454,11 +454,18 @@ def main():
     })
     mid = (b.get("data") or {}).get("id")
     check("建记忆", st in (200, 201) and bool(mid), "id=%s" % mid)
+    check("记忆带 applies_to",
+          (b.get("data") or {}).get("applies_to") == "project:" + PROJECT,
+          str((b.get("data") or {}).get("applies_to")))
     if mid:
         st, b = call("GET", "/api/v1/memories?projectId=%s&ownerId=%s" % (PROJECT, PROJECT))
         items = (b.get("data") or {}).get("list") if isinstance(b.get("data"), dict) else b.get("data")
         found = any(str(x.get("id")) == str(mid) for x in (items or []))
         check("记忆出现在列表里", found, "共 %d 条" % len(items or []))
+        row0 = next((x for x in (items or []) if str(x.get("id")) == str(mid)), {})
+        check("列表带 applies_to/updated_at",
+              bool(row0.get("applies_to")) and bool(row0.get("updated_at")),
+              "%s / %s" % (row0.get("applies_to"), (row0.get("updated_at") or "")[:19]))
         st, b = call("PATCH", "/api/v1/memories/%s" % mid, {"status": 0})
         check("停用记忆", st == 200, "HTTP %s" % st)
         st, b = call("DELETE", "/api/v1/memories/%s" % mid)

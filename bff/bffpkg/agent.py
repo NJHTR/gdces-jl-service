@@ -263,7 +263,8 @@ def handle_memory_list(params, user=None):
         deny = guard_project(owner, user)
         if deny:
             return deny
-    rows = q("SELECT id, scope, owner_id, text, source, hits, status FROM memory "
+    rows = q("SELECT id, scope, owner_id, text, source, source_ref, applies_to, "
+             "hits, status, created_at, updated_at FROM memory "
              "WHERE scope=%s AND owner_id=%s ORDER BY status DESC, hits DESC, id DESC",
              (scope, owner))
     return 200, {"code": 0, "data": rows}
@@ -277,15 +278,20 @@ def handle_memory_create(body):
     if scope not in ("user", "project") or not owner or not text:
         return 400, {"code": 400, "message": "scope/ownerId/text 必填"}
     kept = text[:512]
+    # 这条规矩/偏好作用在哪：项目级还是个人级（以后 C1 的"个人×项目"也用它区分）
+    applies_to = "%s:%s" % (scope, owner)
+    source_ref = (body.get("sourceRef") or "").strip() or None
     # 完全相同的条目只加使用次数，不新增行（近义合并交给整理/人工，不在这里猜）
     try:
         dup = q("SELECT id FROM memory WHERE scope=%s AND owner_id=%s AND text=%s LIMIT 1",
                 (scope, str(owner), kept))
         if dup:
-            exec_sql("UPDATE memory SET hits=hits+1, status=1 WHERE id=%s", (dup[0]["id"],))
+            exec_sql("UPDATE memory SET hits=hits+1, status=1, updated_at=NOW(3) WHERE id=%s",
+                     (dup[0]["id"],))
             _rerender_if_project(scope, str(owner))
             return 200, {"code": 0, "data": {"id": dup[0]["id"], "duplicated": True,
-                                             "saved_to": "", "rendered": None}}
+                                             "saved_to": "", "rendered": None,
+                                             "applies_to": applies_to}}
     except Exception as e:
         sys.stderr.write("[memory] 查重失败: %r\n" % (e,))
 
@@ -308,10 +314,13 @@ def handle_memory_create(body):
     except OSError as e:
         sys.stderr.write("[memory] 写文件失败 scope=%s owner=%s: %r\n" % (scope, owner, e))
 
-    mid = exec_sql("INSERT INTO memory (scope, owner_id, text, source) VALUES (%s,%s,%s,%s)",
-                   (scope, str(owner), kept, body.get("source") or "manual"))
+    mid = exec_sql(
+        "INSERT INTO memory (scope, owner_id, text, source, source_ref, applies_to, updated_at) "
+        "VALUES (%s,%s,%s,%s,%s,%s,NOW(3))",
+        (scope, str(owner), kept, body.get("source") or "manual", source_ref, applies_to))
     rendered = _rerender_if_project(scope, str(owner))
-    return 200, {"code": 0, "data": {"id": mid, "saved_to": note, "rendered": rendered}}
+    return 200, {"code": 0, "data": {"id": mid, "saved_to": note, "rendered": rendered,
+                                     "applies_to": applies_to}}
 
 
 # ---------------------------------------------------------------- handle_memory_patch
@@ -335,9 +344,11 @@ def handle_memory_patch(mid, body, user=None):
     if deny:
         return deny
     if "text" in body:
-        exec_sql("UPDATE memory SET text=%s WHERE id=%s", ((body["text"] or "")[:512], mid))
+        exec_sql("UPDATE memory SET text=%s, updated_at=NOW(3) WHERE id=%s",
+                 ((body["text"] or "")[:512], mid))
     if "status" in body:
-        exec_sql("UPDATE memory SET status=%s WHERE id=%s", (1 if body["status"] else 0, mid))
+        exec_sql("UPDATE memory SET status=%s, updated_at=NOW(3) WHERE id=%s",
+                 (1 if body["status"] else 0, mid))
     rendered = _rerender_if_project(rows[0]["scope"], rows[0]["owner_id"])
     return 200, {"code": 0, "data": {"ok": True, "rendered": rendered}}
 
