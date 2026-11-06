@@ -19,6 +19,7 @@
 """
 import json
 import os
+import sys
 import subprocess
 import threading
 import time
@@ -66,13 +67,22 @@ def ensure_home(user_id):
     cfg = os.path.join(home, "config.toml")
     try:
         os.makedirs(home, exist_ok=True)
-        if not os.path.exists(cfg):
+        # 注意：不能只在"文件不存在"时写。已有家目录会永远缺 keys
+        #（实测 950 的 memories 就是关的，因为 ensure_home 只在创建时写一次）
+        if os.path.exists(cfg) or True:
             base = ""
-            try:
-                with open(_MAIN_CONFIG, encoding="utf-8") as f:
-                    base = f.read()
-            except Exception:
-                base = ""
+            if os.path.exists(cfg):
+                try:
+                    with open(cfg, encoding="utf-8") as f:
+                        base = f.read()
+                except OSError:
+                    base = ""
+            if not base:
+                try:
+                    with open(_MAIN_CONFIG, encoding="utf-8") as f:
+                        base = f.read()
+                except Exception:
+                    base = ""
             # 注意：必须插在 [features] 表**里面**。
             # 追加到文件末尾的话，会变成最后一个表的键（之前就踩了：
             # memories 落进 [agent_roles.reviewer]，引擎根本没启用记忆）。
@@ -94,6 +104,13 @@ def ensure_home(user_id):
                 base = "\n".join(lines) + "\n"
             else:
                 base = base.rstrip() + "\n\n[features]\nmemories = true\n"
+            # 一次启动多领几条，否则积压的 rollout 永远整理不完
+            if "[memories]" not in base:
+                base = base.rstrip() + ("\n\n[memories]\n"
+                                        "max_rollouts_per_startup = 20\n")
+            elif "max_rollouts_per_startup" not in base.split("[memories]", 1)[1]:
+                head, tail = base.split("[memories]", 1)
+                base = head + "[memories]\nmax_rollouts_per_startup = 20" + tail
             with open(cfg, "w", encoding="utf-8") as f:
                 f.write(base)
     except Exception as exc:
@@ -113,6 +130,7 @@ class _Client:
         self.notifications = []
         self._lock = threading.Lock()
         self._dead = False
+        self.last_used = time.time()
 
     # ---------------------------------------------------------------- 进程
     def _spawn(self):
@@ -279,6 +297,36 @@ class _Client:
             pass
 
 
+def recycle_idle(idle_seconds=6 * 3600):
+    """回收空闲很久的引擎进程。
+
+    为什么要它：引擎的记忆整理（phase1/phase2）只在**进程启动**时跑，
+    一次最多领 2 条 rollout（且要求闲置 >=6h）。我们的 app-server 是常驻的，
+    等于永远不启动 → 记忆永远不整理（实测：78 个用户里只有 501 有 MEMORY.md）。
+    回收后下一次对话会重启引擎，顺带把这批已闲置的 rollout 整理掉。
+    """
+    now = time.time()
+    out = []
+    for key in list(_CLIENTS.keys()):
+        c = _CLIENTS.get(key)
+        if not c:
+            continue
+        idle = now - getattr(c, "last_used", now)
+        if idle < idle_seconds:
+            continue
+        try:
+            c.close()
+        except Exception as e:
+            sys.stderr.write("[engine] 回收 %s 失败: %r\n" % (key, e))
+            continue
+        _CLIENTS.pop(key, None)
+        out.append((key, round(idle / 3600.0, 1)))
+    if out:
+        sys.stderr.write("[engine] 回收空闲引擎 %d 个: %s\n"
+                         % (len(out), ", ".join("%s(%.1fh)" % x for x in out)))
+    return out
+
+
 def _client(project_id, user_id=1):
     """会话按「项目 + 用户」隔离。
 
@@ -294,6 +342,7 @@ def _client(project_id, user_id=1):
             c = _Client(project_id, user_id)
             c._spawn()
             _CLIENTS[key] = c
+        c.last_used = time.time()
         return c
 
 

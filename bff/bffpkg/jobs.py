@@ -131,6 +131,20 @@ def pending_docs_digest(payload):
     return {"projects": len(rows), "pending": total}
 
 
+@handler("engine_memory")
+def engine_memory(payload):
+    """回收空闲引擎进程，让下次对话重启时把积压的 rollout 整理成记忆。
+
+    引擎的整理只在进程启动时跑（phase1 一次最多领 max_rollouts_per_startup 条，
+    默认 2，已在 config 里调到 20）。常驻进程不重启 → 记忆永远不整理。
+    """
+    from .appserver import recycle_idle
+
+    hours = float((payload or {}).get("idleHours") or 6)
+    got = recycle_idle(hours * 3600)
+    return {"recycled": len(got), "idleHours": hours}
+
+
 @handler("cleanup_temp")
 def cleanup_temp(payload):
     """每天清一次临时产物。
@@ -299,6 +313,8 @@ DEFAULTS = [
      "每天 18:00 统计待补文书并留痕"),
     ("cleanup_temp", "0 4 * * *", "cleanup_temp", {},
      "每天 04:00 清掉超过 1 天的临时产物（复核目录、语音 wav、出稿临时文件）"),
+    ("engine_memory", "10 4 * * *", "engine_memory", {"idleHours": 6},
+     "每天 04:10 回收闲置 6h+ 的引擎进程，让下次对话重启时整理记忆"),
     ("export_authoritative", "40 3 * * 1", "export_authoritative", {},
      "每周一 03:40 把被反复确认的依据导出到 knowledge/kb/authoritative/"),
 ]
