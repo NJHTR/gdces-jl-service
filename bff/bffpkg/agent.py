@@ -630,6 +630,53 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
                  (str(e)[:900], task_id))
 
 
+# ---------------------------------------------------------------- _drain_cites
+def _drain_cites(ws, since):
+    """把工具这一轮写下的引用取走（读 <ws>/.agent/cites.jsonl 然后删掉）。
+
+    为什么要这样：app-server 的 commandExecution item 里**没有输出字段**
+    （实测 keys 只有 type/id/command/cwd/processId/source），
+    所以引用不能在客户端解析命令输出，只能由工具侧落盘、这里取走。
+    """
+    fp = os.path.join(ws, ".agent", "cites.jsonl")
+    out = []
+    try:
+        if not os.path.exists(fp):
+            return out
+        with open(fp, encoding="utf-8") as f:
+            lines = f.readlines()
+        os.remove(fp)
+    except OSError as e:
+        sys.stderr.write("[cite] 取引用失败 %s: %r\n" % (fp, e))
+        return out
+
+    seen = set()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if float(d.get("ts") or 0) < since - 1:
+            continue
+        key = (d.get("code"), d.get("clause"))
+        if not key[0] or not key[1] or key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "kind": "rule",
+            "std": (d.get("std") or "").strip(),
+            "code": d.get("code"),
+            "clause": d.get("clause"),
+            "title": (d.get("title") or "").strip(),
+            "quote": (d.get("quote") or "").strip(),
+            "source": "标准原文（公司购买版）",
+        })
+    return out[:5]
+
+
 # ---------------------------------------------------------------- _cites_from_output
 def _cites_from_output(label, output):
     """从工具输出里扣出"引用了什么"，用来做论文式引用"""
@@ -774,6 +821,12 @@ def _parse_cli_jsonl(stdout):
 
     # 最终回复只取最后一条：前面那些是过程里的插话，拼起来会变成流水账
     final = texts[-1] if texts else ""
+
+    # 工具侧落盘的引用（命令输出拿不到，只能这么取）
+    for ci in _drain_cites(ws, started):
+        if not any((x["code"], x["clause"]) == (ci["code"], ci["clause"]) for x in cites):
+            ci["n"] = len(cites) + 1
+            cites.append(ci)
     return thread_id, final, timeline, cites
 
 

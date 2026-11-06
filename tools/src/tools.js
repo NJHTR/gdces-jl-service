@@ -1,5 +1,6 @@
 // 四个工具的实际实现
 import { q, one } from "./db.js";
+import fs from "node:fs";
 import {
   readProject, readMemories, safeName, writeWorkspaceFile, gitCommit, excerpt, wsPath, listFiles,
 } from "./workspace.js";
@@ -73,6 +74,24 @@ export async function searchStandards({ query: text, limit = 5 }) {
       LIMIT ?`,
     [text, Math.min(Number(limit) || 5, 20)]
   );
+  // 记一笔「这一轮查过什么」：引擎的命令输出不回传给客户端，
+  // 所以引用只能在工具侧落盘，由 BFF 在一轮结束时取走（见 agent._drain_cites）。
+  try {
+    const ws = process.env.JL_WS || "";
+    if (!ws) throw new Error("没有 JL_WS");
+    const dir = path.join(ws, ".agent");
+    fs.mkdirSync(dir, { recursive: true });
+    const fp = path.join(dir, "cites.jsonl");
+    const now = Date.now() / 1000;
+    for (const r of rows) {
+      fs.appendFileSync(fp, JSON.stringify({
+        ts: now, code: r.code, clause: r.clause, title: r.title,
+        std: r.std_title, quote: String(r.body || "").replace(/\s+/g, " ").slice(0, 140),
+      }) + "\n");
+    }
+  } catch (e) {
+    console.error("[search_standards] 写引用失败:", e && e.message);
+  }
   return rows;
 }
 

@@ -51,6 +51,8 @@ def call(req):
             # 用 host 网络：容器直接访问 127.0.0.1 上的 BFF 和映射出来的 MySQL
             "--network", "host",
             "-e", "BFF_URL=http://127.0.0.1:8081",
+            # 引擎执行命令时 cwd 就是项目工作区；工具据此把引用写到 <ws>/.agent/cites.jsonl
+            "-e", "JL_WS=" + os.getcwd(),
             "-e", "MYSQL_HOST=127.0.0.1",
             "-e", "MYSQL_PORT=3309",
             "-e", f"MYSQL_PASSWORD={env_password()}",
