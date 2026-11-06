@@ -43,6 +43,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, path, name, ctype):
+        """下发文件（docx 等），带 Content-Disposition 让小程序能存成文件名。"""
+        try:
+            with open(path, "rb") as f:
+                body = f.read()
+        except OSError as e:
+            return self._send(404, {"code": 404, "message": "文件不存在: %r" % (e,)})
+        from urllib.parse import quote as _q
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition",
+                         "attachment; filename*=UTF-8''%s" % _q(name))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         try:
             path = urlparse(self.path).path
@@ -54,6 +70,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "engine": "up" if eng else "down"})
             if path in ("/admin", "/admin/"):
                 return self._send(*handle_admin())
+            if path.startswith("/api/v1/exports/"):
+                from urllib.parse import unquote
+                name = unquote(path[len("/api/v1/exports/"):])
+                if "/" in name or "\\" in name or ".." in name:
+                    return self._send(400, {"code": 400, "message": "文件名不合法"})
+                fp = os.path.join(ROOT, "data", "exports", name)
+                # 允许子目录：/<project>/<file>.docx
+                if not os.path.isfile(fp):
+                    import glob
+                    hits = glob.glob(os.path.join(ROOT, "data", "exports", "*", name))
+                    fp = hits[0] if hits else fp
+                ctype = ("application/vnd.openxmlformats-officedocument."
+                         "wordprocessingml.document")
+                return self._send_file(fp, os.path.basename(fp), ctype)
             if path == "/api/v1/jobs":
                 return self._send(200, {"code": 0, "data": {"list": list_jobs()}})
             if path == "/api/v1/project":
@@ -259,6 +289,32 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_asr(body, resolve_token(bearer(self.headers))))
             if path == "/api/v1/docs/validate":
                 return self._send(*handle_doc_validate(body, resolve_token(bearer(self.headers))))
+            if path == "/api/v1/reports/patrol":
+                from .report import build_patrol_docx
+                usr = resolve_token(bearer(self.headers))
+                pid = (body.get("projectId") or "").strip()
+                deny = guard_project(pid, usr)
+                if deny:
+                    return self._send(*deny)
+                end = (body.get("to") or time.strftime("%Y-%m-%d")).strip()
+                start = (body.get("from") or "").strip()
+                if not start:
+                    import datetime as _dt
+                    d = _dt.date.today() - _dt.timedelta(days=6)
+                    start = d.isoformat()
+                try:
+                    got = build_patrol_docx(pid, start, end,
+                                            inspector=(body.get("inspector") or "").strip())
+                except Exception as exc:
+                    traceback.print_exc()
+                    return self._send(500, {"code": 500, "message": "生成失败: %r" % (exc,)})
+                sub = os.path.basename(os.path.dirname(got["path"]))
+                return self._send(200, {"code": 0, "data": {
+                    "name": got["name"],
+                    "url": "/api/v1/exports/%s/%s" % (sub, got["name"]),
+                    "bytes": got["bytes"], "days": got["days"],
+                    "docs": got["docs"], "photos": got["photos"],
+                    "from": start, "to": end}})
             if path == "/api/v1/reviews":
                 usr = resolve_token(bearer(self.headers))
                 return self._send(*handle_review_record(body, usr))
