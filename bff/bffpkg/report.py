@@ -126,6 +126,7 @@ def _day_block(day, docs, photos):
         "parts": objs,
         "start": times[0] if times else "",
         "end": times[-1] if times else "",
+        "times": times,
         "objs": objs,
         "issues": issues,
         "quality": quality,
@@ -171,17 +172,48 @@ def _org_of(docs, default="中建八局华南公司"):
     return max(counts.items(), key=lambda kv: kv[1])[0][:40]
 
 
+def _norm_part(s):
+    """部位名归一：去掉括号说明与空白，用于去重（4#楼东侧外架 / 4#楼东侧外架（待补）算一条）。"""
+    t = re.sub(r"[（(][^）)]*[）)]", "", str(s or ""))
+    return re.sub(r"\s+", "", t)
+
+
+def _parts(b):
+    seen, out = set(), []
+    for p in b.get("parts") or []:
+        k = _norm_part(p)
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(str(p).strip())
+    return out[:8]
+
+
+def _work_times(b):
+    """只取工作时段内的时间（07:00–19:00）；取不到就返回空。
+    原始时间是文书创建时间，含凌晨自测稿，直接取 min/max 会出现 00:50 至 23:05。
+    """
+    ts = [t for t in (b.get("times") or []) if t and "07:00" <= t <= "19:00"]
+    if not ts:
+        return "", ""
+    return ts[0], ts[-1]
+
+
 def _period(b):
-    span = "%s %s 至 %s" % (b["date"], b["start"] or "—", b["end"] or "—")
+    st, en = _work_times(b)
+    span = "%s %s 至 %s" % (b["date"], st or "—", en or "—")
     if b.get("weather"):
         span += "（天气：%s）" % b["weather"]
     return span
 
 
-def _issue_lines(b):
+def _issue_lines(b, limit=10):
     lines = []
-    for i, it in enumerate((b.get("issues") or [])[:12], 1):
+    items = b.get("issues") or []
+    for i, it in enumerate(items[:limit], 1):
         lines.append("%d. %s" % (i, str(it)[:180]))
+    if len(items) > limit:
+        lines.append("另有 %d 项问题，见当日《监理通知单》。" % (len(items) - limit))
     if b.get("deadlines"):
         lines.append("整改期限：%s。" % "、".join(b["deadlines"][:5]))
     if b.get("docs"):
@@ -217,7 +249,7 @@ def build_patrol_docx(project_id, start, end, inspector="", org=None,
         records.append({
             "project": proj_name,
             "serial": "GD-B-214 %04d" % i,
-            "parts": "、".join(b["parts"][:10]) or "（本日无新增文书）",
+            "parts": "、".join(_parts(b)) or "（本日无新增文书）",
             "org": org or _org_of(b["docs"]),
             "period": _period(b),
             "lines": _issue_lines(b),
