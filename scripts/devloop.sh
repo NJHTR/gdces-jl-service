@@ -22,6 +22,13 @@ FAIL=0
 
 echo "=== 开发 loop $STAMP ==="
 
+# 线上跑的是哪个提交（部署入口会写 runtime/DEPLOYED）
+if [ -f "$R/runtime/DEPLOYED" ]; then
+  say "[线上] $(head -1 "$R/runtime/DEPLOYED")"
+else
+  say "[线上] 没有 runtime/DEPLOYED —— 说明不是经 deploy.ps1 部署的"
+fi
+
 # 1) preflight 三条硬线
 if OUT=$(python3 scripts/preflight.py 2>&1); then
   say "[preflight] 通过"
