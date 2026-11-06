@@ -1,4 +1,4 @@
-# 部署（唯一入口）
+﻿# 部署（唯一入口）
 #
 # 用法（本地 PowerShell）：
 #   .\scripts\deploy.ps1              # 全部：检查 → 传代码 → 重启 → preflight → 健康
