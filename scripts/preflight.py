@@ -283,6 +283,27 @@ def check_imports():
     return 0
 
 
+def check_dead_endpoints():
+    """禁回退：E2 删掉的两个端点与三个 handler 不许再出现。
+
+    它们要么没人调用（/members），要么功能已被自动渲染取代（render-memory），
+    留着只会让人误以为还有这条链路。
+    """
+    bad = ["/api/v1/members", "/render-memory",
+           "handle_members", "handle_member_add", "handle_render_memory"]
+    hits = []
+    for rel in ("bff/bffpkg/api.py", "bff/bffpkg/biz.py",
+                "bff/bffpkg/core.py", "bff/bffpkg/agent.py"):
+        fp = os.path.join(ROOT, rel)
+        if not os.path.isfile(fp):
+            continue
+        src = io.open(fp, encoding="utf-8").read()
+        for b in bad:
+            if b in src:
+                hits.append("%s 里还有 %s" % (rel, b))
+    return [(h, "死端点") for h in hits]
+
+
 def check_tools_wiring():
     """server.js 的 import 名字必须覆盖 HANDLERS 用到的函数。
 

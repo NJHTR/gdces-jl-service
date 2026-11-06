@@ -227,7 +227,7 @@ button{cursor:pointer}.pri{background:#0a6dff;color:#fff;border-color:#0a6dff}
     <select id="m-owner" onchange="loadMemories()"></select>
     <input id="m-text" placeholder="新增一条记忆" size="40">
     <button class="pri" onclick="addMemory()">添加</button>
-    <button onclick="renderMemory()">渲染到工作区</button>
+    
   </div>
   <table id="memories"></table>
 </div>
@@ -301,11 +301,6 @@ async function delMemory(id) {
   if (!confirm('删除这条记忆？')) return;
   await api('/api/v1/memories/' + id, {method:'DELETE'});
   loadMemories();
-}
-async function renderMemory() {
-  const owner = document.getElementById('m-owner').value;
-  const d = await api(`/api/v1/projects/${owner}/render-memory`, {method:'POST'});
-  alert(d.code === 0 ? `已渲染 ${d.data.count} 条到工作区\\ncommit: ${d.data.commit || '（无变化）'}` : d.message);
 }
 async function loadTasks() {
   const d = await api('/api/v1/tasks?limit=20');
@@ -1047,22 +1042,6 @@ _USER_LOCKS = {}
 
 # ---------------------------------------------------------------- _USER_LOCKS_GUARD
 _USER_LOCKS_GUARD = threading.Lock()
-
-
-# ---------------------------------------------------------------- handle_render_memory
-def handle_render_memory(project_id):
-    try:
-        from .biz import render_project_memory
-
-        return 200, {"code": 0, "data": render_project_memory(project_id)}
-    except Exception as e:
-        return 500, {"code": 500, "message": str(e)}
-
-# ================================================================ 多模态
-# 图片落盘 & 语音转写。放在文件末尾，避免打断原有顺序。
-
-IMG_MAGIC = ((b"\x89PNG", ".png"), (b"\xff\xd8\xff", ".jpg"),
-             (b"GIF8", ".gif"), (b"RIFF", ".webp"), (b"BM", ".bmp"))
 
 
 def _blob_file(sha):

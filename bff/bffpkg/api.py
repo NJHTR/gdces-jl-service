@@ -15,11 +15,11 @@ from urllib.parse import parse_qs, urlparse
 import pymysql
 
 """HTTP 路由层：只负责解析请求、调 handler、写回响应。"""
-from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, validate_fields, list_schemas)
+from .core import (ADMIN_HTML, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, validate_fields, list_schemas)
 from .jobs import list_jobs, run_now, start as start_jobs
 from .knowledge import sync_standards
 from .biz import (
-    handle_review_record, handle_observations, handle_rule_propose, handle_rule_proposals, handle_rule_decide, handle_memory_metrics, handle_asr, append_manifest, audit, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_register, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_photo_index, handle_photo_index, handle_photo_caption, handle_photo_search, parse_multipart_full, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob, handle_doc_validate)
+    handle_review_record, handle_observations, handle_rule_propose, handle_rule_proposals, handle_rule_decide, handle_memory_metrics, handle_asr, append_manifest, audit, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_register, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_photo_index, handle_photo_index, handle_photo_caption, handle_photo_search, parse_multipart_full, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob, handle_doc_validate)
 from .agent import (Engine, _cites_from_output, _parse_cli_jsonl, _run_agent_loop_inner, _run_cli_turn, _set_progress, _user_lock, build_context, engine, handle_bootstrap, handle_chat, handle_memory_create, handle_memory_delete, handle_memory_list, handle_memory_patch, handle_messages, handle_memory_recall, handle_task, handle_task_cancel, handle_task_list, handle_task_retry, learn_from_turn, render_agents_md, run_agent_loop, run_turn, sweeper)
 
 
@@ -109,12 +109,6 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/v1/stats":
                 return self._send(*handle_stats(parse_qs(urlparse(self.path).query),
                                                 resolve_token(bearer(self.headers))))
-            if path == "/api/v1/members":
-                usr = resolve_token(bearer(self.headers))
-                if self.command == "POST":
-                    return self._send(*handle_member_add(json.loads(self._body() or "{}"), usr))
-                return self._send(*handle_members(parse_qs(urlparse(self.path).query), usr))
-
             m = re.match(r"^/api/v1/tasks/(\d+)/cancel$", path)
             if m and self.command == "POST":
                 return self._send(*handle_task_cancel(int(m.group(1)),
@@ -412,9 +406,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_project_create(body))
             if path == "/api/v1/memories":
                 return self._send(*handle_memory_create(body))
-            m = re.match(r"^/api/v1/projects/([\w-]+)/render-memory$", path)
-            if m:
-                return self._send(*handle_render_memory(m.group(1)))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
