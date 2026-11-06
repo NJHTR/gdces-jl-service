@@ -539,14 +539,46 @@ def _base_ref(b):
     return "", ""
 
 
+CODE_RE = r"(?:GB/T|GB|JGJ/T|JGJ|JG|DBJ|CJJ|CECS)[\s/]*[\d.]+(?:-\s*\d{4})?"
+CLAUSE_CN_RE = r"第\s*([\d]+(?:\.[\d]+)*)\s*条"
+CLAUSE_NUM_RE = r"(\d+(?:\.\d+)+)"
+
+
 def _parse_ref(kind, ref):
-    """规范类依据 → (canon, code, clause)；不是规范返回 None。"""
-    if not ref or "#" not in ref:
+    """规范类依据 → (canon, code, clause)；认不出返回 None。
+
+    模型会混用三种写法，都得认（否则「依据」写对了却不记账）：
+      standard://JGJ 130-2011#6.4.3:1-1
+      JGJ130-2011#6.4.3
+      JGJ 130-2011 第 6.4.3 条
+    """
+    if not ref:
         return None
-    code, _, clause = ref.partition("#")
-    code, clause = code.strip(), clause.strip()
-    if not code or not clause:
+    r = ref.strip()
+
+    # ① 带 # 的两种写法
+    if "#" in r:
+        body = r[len("standard://"):] if r.startswith("standard://") else r
+        if ":" in body.rsplit("#", 1)[-1]:
+            body = body.rsplit(":", 1)[0]
+        code, _, clause = body.partition("#")
+        code, clause = code.strip(), clause.strip()
+        if code and clause:
+            return ("standard://%s#%s" % (code, clause)), code, clause
+
+    # ② 「JGJ 130-2011 第 6.4.3 条」
+    codes = re.findall(CODE_RE, r, re.I)
+    if not codes:
         return None
+    code = "".join(str(codes[0]).split()).upper()
+    # 标准号里字母段与编号之间要留空格（GB50204-2015 → GB 50204-2015）
+    cut = next((i for i, ch in enumerate(code) if ch.isdigit()), None)
+    if cut:
+        code = code[:cut] + " " + code[cut:]
+    clauses = re.findall(CLAUSE_CN_RE, r) or re.findall(CLAUSE_NUM_RE, r)
+    if not clauses:
+        return None
+    clause = clauses[-1]
     return ("standard://%s#%s" % (code, clause)), code, clause
 
 
