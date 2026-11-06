@@ -120,10 +120,12 @@ def main():
     item("备份在跑", bool(files) and bool(export_tars),
          "%d 个包（含导出 %d 个）" % (len(files), len(export_tars)))
 
-    # 引擎记忆
-    mem = os.path.join(ROOT, "data", "homes", "980", "memories", "MEMORY.md")
-    item("引擎整理有产物", os.path.isfile(mem),
-         ("MEMORY.md %d 字节" % os.path.getsize(mem)) if os.path.isfile(mem) else "无")
+    # 引擎记忆：按 D-记忆-04 应当是关闭的（MEMORY.md 只作候选，不参与注入）
+    import glob as _glob
+    cfgs = _glob.glob(os.path.join(ROOT, "data", "homes", "*", "config.toml"))
+    on = [f for f in cfgs if "memories = true" in io.open(f, encoding="utf-8").read()]
+    item("引擎记忆已关闭（D-记忆-04）", len(on) == 0,
+         "%d/%d 户仍开着" % (len(on), len(cfgs)))
 
     bad = [r for r in rows if not r[1]]
     out = os.path.join(ROOT, "runtime", "acceptance-%s.md" % time.strftime("%Y%m%d-%H%M"))

@@ -51,8 +51,9 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = 等拍板（F3 待补清理 / D1b 历史照片补描述 / B6.5 检查记录模板 / D2 真机验收）
-       工程项已全部完成：Wave0~Wave6 除 F1（暂缓）外都做了
+next = Wave 3.5 / M0  设计定稿：按 D-表式-02 / D-记忆-03~11 锁定口径
+       （C 系列已收口；C8 已按 D-04 回滚；C6 标 v1 deprecated）
+       仍等你：F3 待补清理 / D1b 补照片描述 / D2 真机验收
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -76,6 +77,7 @@ next = 等拍板（F3 待补清理 / D1b 历史照片补描述 / B6.5 检查记�
 > 目标已写入会话（24 轮上限）。轮次用完就停下汇报，不自己加轮。
 
 ```
+0. 先 diff 决策记录（本文件「决策记录」段）：本项与已拍板决策冲突就停下，不硬做
 1. 读「当前指针」→ 只做这一项
 2. 动手前核实现状（代码/数据/线上），不凭印象
 3. preflight → deploy.ps1（含 smoke）；失败先修绿
@@ -282,7 +284,11 @@ F3 数字更新：清理测试文书后是 **152**（原 137；已签 4 / 待签
           （重复键），且 import 行没同步 → "proposeRule is not defined"，
           模型空跑、出稿 doc=None、部署连红两次
           → preflight 新增「import 是否覆盖 HANDLERS」检查，以后这类直接报错
-[x] C6 指标可查：GET /api/v1/metrics/memory?projectId=
+[~] C6 v1（窄版，已 deprecated）：GET /api/v1/metrics/memory?projectId=
+      ⚠ 与 D-记忆-03 冲突：把 hits（检索次数）当"复用"KPI，而 D-03 已决定 hits 退役
+      ⚠ byWeek 的 uses 用创建周聚合 SUM(hits)，数学上不成立
+      ⚠ 只统计 scope='project'，user 记忆（15 条）没算
+      → 保留接口但标注 v1/不可用于决策；正解见下方原版（memory_use 事件表）
       口径：主动写=source in (manual,confirmed) · 复用=SUM(hits) ·
             撤销率=停用/总数 · 确认率=accepted/(accepted+rejected)
       实测 test-sandbox：entries=12 active=12 revokeRate=0.0
@@ -299,7 +305,13 @@ F3 数字更新：清理测试文书后是 **152**（原 137；已签 4 / 待签
       rules.md 回到 6 条
       剩余待拍板：yun-gu-3qi 的 #1（本单位体积写 m³，不写「方」）与
       #3（本单位体积一律写 m³，禁止写「方」）建议合并
-[x] C8 引擎整理端到端跑通（原来的"从没验证过"变成"有证据、且修好了"）
+[~] C8 引擎整理"跑通"了，但**违反 D-记忆-04/07，已回滚**（2026-11-07 01:10）
+      · 当时把 77 户 memories=true 打开、max_rollouts=20 → 引擎成了第二写者
+      · 已回滚：ensure_home 默认 memories=false（JL_ENGINE_MEMORY=1 才开）；
+        77 户配置全部改回 false（实测 0/77），生成 .bak 77 份
+      · 已产出的 MEMORY.md/summary（501 4.4KB、980 22KB）保留为候选，不注入、不删
+      · 验证：回滚后跑一轮 980，引擎日志无 phase1/记忆动作，MEMORY.md mtime 未变
+      · 技术根因（TOML 引号、extract/consolidation 模型选型）仍成立，留给 M6 参考
       机制（读源码）：整理只在引擎进程启动时跑；phase1 领 rollout（闲置>=6h、<=10d），
       phase2 合并成 MEMORY.md + summary；每用户一个家目录
       发现 3 个真问题并修掉：
@@ -389,7 +401,9 @@ F3 数字更新：清理测试文书后是 **152**（原 137；已签 4 / 待签
 ## Wave 4 · 多模态沉淀（1~2 天）
 
 ```
-[x] D1 影像索引按部位分组（从"平铺追加"改成"按部位可查"）
+[~] D1 影像索引按部位分组（功能完成，但**数据没达成**）
+      ⚠ 全库 28 张照片 27 张没有 place；test-sandbox 7 张里 6 张落在"未标部位"
+      ⚠ 所以"按部位回溯"这个主价值实际没验成 → 降为 [~]，等 D1b
       · records/photos.md 改为从 DB 渲染的视图：按部位分组、同一 sha 只留最新描述
       · GET /api/v1/photos/index?projectId= → 每个部位的张数/首末时间/描述样例
       · 每轮上下文加指针「records/photos.md（问这个部位以前查过什么先看这里）」
