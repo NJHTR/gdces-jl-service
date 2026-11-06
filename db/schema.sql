@@ -216,3 +216,18 @@ CREATE TABLE IF NOT EXISTS citation (
   UNIQUE KEY uk_digest (digest),
   KEY idx_kind (source_kind), KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='引用账本';
+
+-- ============ 观察队列（同类问题反复出现） ============
+CREATE TABLE IF NOT EXISTS observation (
+  id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  project_id  VARCHAR(64) NOT NULL,
+  doc_kind    VARCHAR(64) NOT NULL DEFAULT '',
+  tag         VARCHAR(32) NOT NULL COMMENT '复核员打的短标签',
+  count       INT NOT NULL DEFAULT 1,
+  status      VARCHAR(16) NOT NULL DEFAULT 'open' COMMENT 'open / ack / fixed',
+  samples     JSON NULL COMMENT '最近几条原话',
+  first_seen  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_obs (project_id, doc_kind, tag),
+  KEY idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='观察队列：重复出现的问题';

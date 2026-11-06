@@ -289,6 +289,7 @@ export async function searchPhotos({ projectId, q, place, dateFrom, dateTo, limi
  * 工具是声明式的、可校验的，而且判定直接进账本，成为「核验」信号。
  */
 export async function recordReview({ docId, verdict, findings = [], counter = [], alternatives = [], uncertainty = "", taskId }) {
+  // findings 里带 tag：同类问题反复出现时，观察队列靠它聚合（后端不解析文本）
   const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
   const resp = await fetch(`${bff}/api/v1/reviews`, {
     method: "POST",

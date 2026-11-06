@@ -681,6 +681,66 @@ def prepare_bases(fields, bases):
     return fields, bases
 
 
+def record_observations(project_id, doc_kind, findings):
+    """把带 tag 的意见累加成观察条目。tag 由复核员给，后端只计数。"""
+    n = 0
+    seen = {}
+    for f in (findings or []):
+        tag = (f.get("tag") or "").strip()[:32]
+        if not tag:
+            continue
+        seen.setdefault(tag, []).append((f.get("why") or "")[:120])
+    for tag, samples in seen.items():
+        try:
+            rows = q("SELECT id, count, samples FROM observation "
+                     "WHERE project_id=%s AND doc_kind=%s AND tag=%s",
+                     (project_id, doc_kind or "", tag))
+            if rows:
+                prev = rows[0].get("samples")
+                if isinstance(prev, str):
+                    try:
+                        prev = json.loads(prev)
+                    except Exception:
+                        prev = []
+                merged = ([x for x in (prev or [])] + samples)[-5:]
+                exec_sql("UPDATE observation SET count=count+%s, last_seen=NOW(), samples=%s "
+                         "WHERE id=%s",
+                         (len(samples), json.dumps(merged, ensure_ascii=False), rows[0]["id"]))
+            else:
+                exec_sql("INSERT INTO observation (project_id, doc_kind, tag, count, samples) "
+                         "VALUES (%s,%s,%s,%s,%s)",
+                         (project_id, doc_kind or "", tag, len(samples),
+                          json.dumps(samples[-5:], ensure_ascii=False)))
+            n += 1
+        except Exception as exc:
+            sys.stderr.write("[obs] 记账失败 %s/%s: %r\n" % (doc_kind, tag, exc))
+    return n
+
+
+def handle_observations(project_id, status="open", user=None):
+    """观察队列查询。达到 3 次的才算"反复出现"，一次的不算现象。"""
+    deny = guard_project(project_id, user)
+    if deny:
+        return deny
+    rows = q("SELECT id, doc_kind, tag, count, status, samples, first_seen, last_seen "
+             "FROM observation WHERE project_id=%s AND status=%s AND count >= 3 "
+             "ORDER BY count DESC, last_seen DESC LIMIT 50",
+             (project_id, status or "open"))
+    out = []
+    for r in rows:
+        sm = r.get("samples")
+        if isinstance(sm, str):
+            try:
+                sm = json.loads(sm)
+            except Exception:
+                sm = []
+        out.append({"id": r["id"], "docKind": r.get("doc_kind"), "tag": r.get("tag"),
+                    "count": r.get("count"), "status": r.get("status"),
+                    "samples": sm or [], "firstSeen": str(r.get("first_seen") or ""),
+                    "lastSeen": str(r.get("last_seen") or "")})
+    return 200, {"code": 0, "data": out}
+
+
 def handle_review_record(body, user=None):
     """复核判定落库。verdict 只能是枚举；findings/counter 每条必须带 locator。"""
     doc_id = body.get("docId") or body.get("doc_id")
@@ -709,7 +769,8 @@ def handle_review_record(body, user=None):
                 # 没有出处的意见不算数：拒收，让复核员补 locator
                 return None, "%s 里有一条没有 locator：%r" % (name, (it.get("why") or it.get("reading") or "")[:40])
             out.append({"why": (it.get("why") or "").strip()[:300],
-                        "locator": loc[:400]})
+                        "locator": loc[:400],
+                        "tag": (it.get("tag") or "").strip()[:32]})
         return out, None
 
     findings, err = _clean(body.get("findings"), "findings")
@@ -740,6 +801,14 @@ def handle_review_record(body, user=None):
          json.dumps(body.get("alternatives") or [], ensure_ascii=False),
          (body.get("uncertainty") or "")[:512],
          (body.get("model") or "")[:64]))
+
+    # 观察队列：同一类问题反复出现 → 进人工队列（不自动改技能）
+    try:
+        krow = q("SELECT kind FROM doc WHERE id=%s", (doc_id,))
+        doc_kind = (krow[0].get("kind") if krow else "") or ""
+        record_observations(pid, doc_kind, findings)
+    except Exception as exc:
+        sys.stderr.write("[obs] 累加失败 doc=%s: %r\n" % (doc_id, exc))
 
     bumped = verify_citations_for_doc(doc_id) if verdict == "ok" else 0
     return 200, {"code": 0, "data": {"id": rid, "verdict": verdict,

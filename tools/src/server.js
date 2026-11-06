@@ -139,8 +139,9 @@ const TOOLS = [
             properties: {
               why: { type: "string", description: "哪一句站不住、为什么" },
               locator: { type: "string", description: "出处定位符，如 standard://JGJ 130-2011#6.4.3:1-1 或 knowledge/...:12-12" },
+              tag: { type: "string", description: "短标签（2-6 字），同类问题用同一个词，如 依据缺失/事实不足/条号不符/期限不合理/责任越界" },
             },
-            required: ["why", "locator"],
+            required: ["why", "locator", "tag"],
           },
         },
         counter: {

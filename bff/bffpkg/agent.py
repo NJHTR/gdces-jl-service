@@ -1083,10 +1083,13 @@ def _review_pass(task_id, project_id, doc_id, first_text, images=None, user_text
         "  records/photos.md:<行>-<行>\n\n"
         "最后必须调用工具把判定落库，这是唯一有效的交付方式：\n"
         "  jl-tool record_review '{\"docId\": <本单id>, \"verdict\": \"must_fix|suggest|ok\", "
-        "\"findings\": [{\"why\": \"...\", \"locator\": \"...\"}], "
+        "\"findings\": [{\"why\": \"...\", \"locator\": \"...\", \"tag\": \"短标签\"}], "
         "\"counter\": [{\"reading\": \"...\", \"locator\": \"...\"}], "
         "\"alternatives\": [\"...\"], \"uncertainty\": \"...\"}'\n"
         "verdict 只能是 must_fix（不改不能签）/ suggest（建议改）/ ok（可签）。\n"
+        "每条 findings 必带 tag：2-6 个字，同类问题必须用同一个词\n"
+        "（例如 依据缺失 / 事实不足 / 条号不符 / 期限不合理 / 责任越界）。\n"
+        "同一个 tag 反复出现，就会被攒成一条「疑似缺流程」的观察，交给人决定。\n"
         "工具返回成功后，再用两三句话说明最要紧的一两条；不要复述整份文书。"
     )
     steps = []
