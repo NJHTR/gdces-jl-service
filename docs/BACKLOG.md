@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C5  待确认列表 UI（规矩提案的确认入口）
+next = Wave3 / C6  指标可查（主动写/复用/撤销率/确认率）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -184,7 +184,16 @@ next = Wave3 / C5  待确认列表 UI（规矩提案的确认入口）
       点条目真调 PATCH/DELETE 后重拉 bootstrap
       修了两处：onMemoTap 原来只改本地数组（假写）；request.js 没有 PATCH
       实测：条目 p158 带全部元数据；停用后 status=0 且仍在列表
-[ ] C5 待确认列表（与 observation 同一套 UI）
+[x] C5 「待确认」分段（规矩提案的确认入口）
+      bootstrap 带出 pendingRules；小程序第三段「待确认 N」，
+      每条显示正文 + 「模型提议 · 还没生效」，采纳/否决两个按钮走 C2 接口
+      实测：提案 id=22 → bootstrap pendingRules 命中 → 采纳 200 accepted →
+            清理后 rules.md 里不残留
+      坑：给 jl-tool 加 recall_memory/propose_rule 时，name 插进了 record_review 对象里
+          （重复键），且 import 行没同步 → "proposeRule is not defined"，
+          模型空跑、出稿 doc=None、部署连红两次
+          → preflight 新增「import 是否覆盖 HANDLERS」检查，以后这类直接报错
+[ ] C6 指标可查：每人每周主动写记忆次数、记忆复用次数、撤销率、确认率
 [ ] C6 指标可查：每人每周主动写记忆次数、记忆复用次数、撤销率、确认率
 [ ] C7 近义归并：现有 5 条「整改回复附对比图」变体，人工或整理员合并（不自动删）
 [ ] C8 验证引擎整理真的在工作（phase1 闲置≥1h / phase2 6h）——从没验证过
