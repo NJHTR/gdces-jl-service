@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C0  记忆条目元数据（source / hits / status / applies_to）+ 引擎整理现状核实
+next = Wave3 / C1  个人×项目记忆：homes/<uid>/memories/projects/<pid>.md
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -146,7 +146,13 @@ next = Wave3 / C0  记忆条目元数据（source / hits / status / applies_to�
 ```
 [x] 决策：不选“纯人写”（负担），不选“全自动写项目规矩”（失控）
 [x] 决策：个人层自动积累；项目层自动提案 + 一键确认（可配超时生效）
-[ ] C0 记忆条目元数据：source（对话id/纠正/手动）、hits、status、applies_to
+[x] C0 记忆条目元数据：source_ref（来源对话/任务）、applies_to（作用域）、updated_at
+      表已加列并回填 applies_to=scope:owner；create 收 sourceRef、重复条目也更新 updated_at；
+      list 带出全部元数据；smoke 断言 applies_to=project:<项目> 与 updated_at
+      实测：新建条目 applies_to=project:test-sandbox、source_ref=task:0、
+            updated_at=2026-11-06 16:52:43
+      **核实**：引擎整理确实在跑（homes/501 的 MEMORY.md 4409B + summary 2060B，
+      02:53 生成）；notes 通道 0 文件（用户级记忆还没人写过）
 [ ] C1 个人×项目记忆：homes/<uid>/memories/projects/<pid>.md（同一记忆根，不新建第三处）
 [ ] C2 项目规矩提案：从“人改字段/否定结论/重复要求”捕捉 → 观察队列 → 确认写库
 [ ] C3 memory:// 引用：回答里标「依据你上次说的…」+ 命中时 hits+1
