@@ -219,6 +219,9 @@ def build_context(project_id, user_id, query=None):
     # 工具清单不写死：跑 `jl-tool list` 永远是最新的（以前写死过，加工具忘了改）。
     parts.append("【入库】文书只有经 `jl-tool create_doc_draft` 才会出现在系统里；"
                  "手写 md 用户看不到。")
+    # 能力事实（不是行为规则）：告诉它规范在哪、怎么取。
+    # 没有这一行，模型会在工作区 rg 十几遍找不到，然后凭记忆背条号（实测 task 278）。
+    parts.append("【规范】条文在库里，用 `jl-tool search_standards` 查（工作区没有规范全文）。")
 
     # 指针：只说「东西在哪」，不描述怎么做。文件不存在就不写，省得模型白找。
     ws = f"{WS_ROOT}/{project_id}"
@@ -1503,6 +1506,35 @@ def handle_task(task_id, user=None):
               (t["project_id"], t["user_id"], task_id))
     queue_ahead = ahead[0]["n"] if ahead else 0
 
+    def _no_source(msgs):
+        """答复里提到库里的标准号/标准名，但这一单没调过 search_standards → 标记未溯源。
+
+        做法是拿库里的标准号做字符串包含判断，不是解析模型输出结构。
+        """
+        called = False
+        texts = []
+        for m in msgs or []:
+            if m.get("role") != "assistant":
+                continue
+            texts.append(m.get("text") or "")
+            for it in (m.get("trace") or []):
+                if (it.get("tool") or "") == "search_standards":
+                    called = True
+        if called or not texts:
+            return False
+        blob = "\n".join(texts)
+        try:
+            rows = q("SELECT code, std_title FROM standard")
+        except Exception as e:
+            sys.stderr.write("[cite] 取标准号失败: %r\n" % (e,))
+            return False
+        for r in rows:
+            code = (r.get("code") or "").strip()
+            std = (r.get("std_title") or "").strip()
+            if (code and code in blob) or (std and std in blob):
+                return True
+        return False
+
     progress = t.get("progress")
     if isinstance(progress, str):
         try:
@@ -1525,6 +1557,7 @@ def handle_task(task_id, user=None):
         "progress": progress,
         "queueAhead": queue_ahead,
         "artifact": artifact,
+        "noSource": _no_source(msgs),
         "id": t["id"], "status": t["status"], "error": t["error"],
         "threadId": t["thread_id"], "turnId": t["turn_id"],
         "createdAt": str(t["created_at"]), "finishedAt": str(t["finished_at"]),
