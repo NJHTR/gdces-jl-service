@@ -518,9 +518,14 @@ def main():
     if data.get("memoryId"):
         sql("DELETE FROM memory WHERE id=%s" % int(data["memoryId"]))
     sql("DELETE FROM rule_proposal WHERE id=%s" % int(rid))
-    any_mem = sql("SELECT id FROM memory WHERE scope='project' AND owner_id='%s' LIMIT 1" % PROJECT)
-    if any_mem.strip().isdigit():
-        call("PATCH", "/api/v1/memories/%s" % any_mem.strip(), {"status": 1})
+    # 触发重渲染但不能改状态：以前 PATCH status=1 会把别人停用的条目重新启用
+    # （C7 归并掉的近义条目就是这么被 smoke 弄回来的）
+    any_mem = sql("SELECT id, text FROM memory WHERE scope='project' AND owner_id='%s' "
+                  "ORDER BY id LIMIT 1" % PROJECT)
+    if any_mem.strip():
+        _id, _, _txt = any_mem.strip().partition("\t")
+        if _id.isdigit() and _txt:
+            call("PATCH", "/api/v1/memories/%s" % _id, {"text": _txt})
     check("清理后规矩文件里没有它", rule_text not in _rules())
 
     # 否决路径：不写规矩文件
