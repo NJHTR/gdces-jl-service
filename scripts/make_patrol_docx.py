@@ -10,7 +10,8 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
 # 产物放到用户文档目录：仓库只放生成脚本，避免交付物混进部署
-OUT_DIR = os.path.join(os.path.expanduser("~"), "Documents")
+# Documents 在本机是只读挂载（写会 FileNotFoundError），放桌面
+OUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop")
 os.makedirs(OUT_DIR, exist_ok=True)
 OUT = os.path.join(OUT_DIR, "监理巡视记录-20261105-06.docx")
 
