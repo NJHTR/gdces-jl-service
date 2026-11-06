@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave6 / F2  备份加 data/exports（现在只备 workspaces/blobs/memories/knowledge）
+next = 等拍板（F3 待补清理规则 / D1b 历史照片补描述 / B6.5 检查记录模板）—— 三个都等你一句话
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -97,7 +97,14 @@ next = Wave6 / F2  备份加 data/exports（现在只备 workspaces/blobs/memori
 6. 需要人拍板的（策略/取舍）→ 停下，写进「待拍板」一节，不自己决定
 ```
 
-## 待拍板
+## 卡在这里（都需要你一句话，否则我不动）
+
+```
+F3  137 份「待补」文书怎么清理？
+    可选：A. 补全字段 B. 归档到 records/archive/ C. 直接删（不可逆）
+D1b 历史照片补描述：yun-gu 14 张 place/caption 全空，要不要现在让模型看图补？
+B6.5 监理检查记录：省统表里没有这张，A 复用平行检查 / B 你给文件 / C 不做
+```
 
 ```
 （暂无）
@@ -388,7 +395,11 @@ next = Wave6 / F2  备份加 data/exports（现在只备 workspaces/blobs/memori
 
 ```
 [~] F1 微信后台：隐私保护指引、downloadFile 合法域名、HTTPS —— **暂缓**（要钱要时间，先开发）
-[ ] F2 备份加 data/exports（现在只备 workspaces/blobs/memories/knowledge）
+[x] F2 备份加 data/exports
+      backup.sh 新增 exports-<stamp>.tar.gz（恢复步骤同步写进脚本头）
+      实测：一次备份 0.75s，产物 exports-20261107-0032.tar.gz = 172K / 16 项
+      恢复演练：解到 /tmp → 解出 13 个文件 = 原始 13 个，文件清单 diff 一致 ✓
+      备份日志：db/工作区 2.4M/影像 5.1M/记忆 40K/知识 372K/导出 172K，当前 22 个包
 [ ] F3 137 份「待补」文书清理 —— 需你定规则
 [ ] F4 复议机制（一次、有界）—— 后置
 [ ] F5 离线拍照队列 —— 后置
