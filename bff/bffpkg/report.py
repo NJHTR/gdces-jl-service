@@ -3,9 +3,10 @@
 
 设计要点：
 - 内容只来自数据库里当天真实存在的文书与影像，不编造天气/实测值/签发人
-- 表式按《建设工程监理规范》GB/T 50319 巡视要求 + 常用监表 37 的字段
+- 表式由省统表原件模板（GD-B-214）保证；这里只整理数据，不排版
 - 生成物落在 data/exports/<project>/，用 GET /api/v1/exports/<名称> 取
 """
+import io
 import json
 import os
 import re
