@@ -42,7 +42,7 @@ foreach ($d in $dirs) {
 
 Write-Host "=== 3) 记下部署的提交 ===" -ForegroundColor Cyan
 $stamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-$cmd = "cd $RemoteDir && mkdir -p runtime && printf '%s  %s\n%s\n' '$hash' '$stamp' '$subject' > runtime/DEPLOYED && cat runtime/DEPLOYED"
+$cmd = "cd $RemoteDir && mkdir -p runtime && printf '%s  %s\n%s\n' '$hash' '$stamp' '$subject' > runtime/DEPLOYED && date +%s > runtime/UPLOADED_AT && cat runtime/DEPLOYED"
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
 $out = ssh -o ConnectTimeout=60 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
 $out.Trim().Split("`n") | ForEach-Object { "  $_" }
@@ -55,6 +55,18 @@ sleep 2
 scripts/start-bff.sh | tail -2
 sleep 3
 curl -s -m 5 http://127.0.0.1:8081/healthz; echo
+# 关键断言：进程必须比代码新（踩过"文件更新了但服务没重启"，只查 healthz 看不出来）
+PID=$(pgrep -f 'runtime/entry.py' | head -1)
+if [ -z "$PID" ]; then echo "  STALE: 没有 entry.py 进程"; exit 3; fi
+LS=$(ps -o lstart= -p "$PID")
+SE=$(date -d "$LS" +%s 2>/dev/null || echo 0)
+UA=$(cat runtime/UPLOADED_AT 2>/dev/null || echo 0)
+echo "  进程 $PID 启动于 $LS"
+if [ "$SE" -lt "$UA" ]; then
+  echo "  STALE: 进程启动时间早于代码上传时间（服务没真的重启）"
+  exit 3
+fi
+echo "  进程比代码新（OK）"
 "@
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cmd -replace "`r`n", "`n")))
 $out = ssh -o ConnectTimeout=200 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
