@@ -325,7 +325,7 @@ def build_form_docx(project_id, doc_id):
         raise RuntimeError("文书不存在: %s" % doc_id)
     d = dict(rows[0])
     if d["project_id"] != project_id:
-        raise RuntimeError("文书不属于该项目")
+        raise PermissionError("文书不属于该项目")
     fields = _loads(d.get("fields"))
     kind = d.get("kind") or ""
     spec = load_spec(kind)          # 没有 fields.json 会抛错（这也是"未接入"的明确信号）
@@ -346,7 +346,8 @@ def build_form_docx(project_id, doc_id):
         data[key] = _wrap(fields.get(src) or "")
 
     display = "%s-%s-%s.docx" % (proj_name, kind, d.get("obj") or doc_id)
-    url_name = "form-%s-%s.docx" % (_safe_name(kind), doc_id)
+    # URL 必须纯 ASCII：带中文时 urllib / wx.downloadFile 都会在请求行编码失败（踩过两次）
+    url_name = "form-doc%s.docx" % doc_id
     dest = os.path.join(EXPORT_ROOT, _safe_name(project_id))
     os.makedirs(dest, exist_ok=True)
     path = os.path.join(dest, url_name)

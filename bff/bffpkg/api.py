@@ -338,6 +338,8 @@ class Handler(BaseHTTPRequestHandler):
                 except FileNotFoundError as exc:
                     return self._send(400, {"code": 400,
                                             "message": "这张表还没接模板：%s" % (exc,)})
+                except PermissionError as exc:
+                    return self._send(400, {"code": 400, "message": str(exc)})
                 except Exception as exc:
                     traceback.print_exc()
                     return self._send(500, {"code": 500, "message": "生成失败: %r" % (exc,)})
