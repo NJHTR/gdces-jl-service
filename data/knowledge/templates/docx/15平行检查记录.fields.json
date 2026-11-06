@@ -1,0 +1,88 @@
+{
+  "form": "平行检查记录",
+  "code": "GD-B-213",
+  "template": "15平行检查记录.docx",
+  "version": 1,
+  "desc": "省统表 15。上两行四项（时间/部位/项目/方法），下面四块正文（依据/记录/结论/处理）。",
+  "slots": [
+    {
+      "key": "header",
+      "label": "工程项目名称：",
+      "target": "para",
+      "kind": "template",
+      "text": "工程项目名称：{project}\u3000\u3000编号：{serial}"
+    },
+    {
+      "key": "检查时间",
+      "label": "检查时间",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "检查部位",
+      "label": "检查部位",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "检查项目",
+      "label": "检查项目",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "检查方法",
+      "label": "检查方法",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "检查依据",
+      "label": "检查依据",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "检查依据lines"
+    },
+    {
+      "key": "检查记录",
+      "label": "检查记录",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "检查记录lines",
+      "keep_tail": ["检查人员（签名）"],
+      "sig_label": "检查人员（签名）：",
+      "sig_key": "检查人"
+    },
+    {
+      "key": "检查结论",
+      "label": "检查结论",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "检查结论lines",
+      "keep_tail": ["经检查"]
+    },
+    {
+      "key": "处理记录",
+      "label": "处理记录",
+      "target": "cell",
+      "kind": "block",
+      "lines_key": "处理记录lines",
+      "keep_tail": ["复核人员（签名）"],
+      "sig_label": "复核人员（签名）：",
+      "sig_key": "复核人"
+    }
+  ],
+  "fixed_labels": [
+    "检查时间",
+    "检查部位",
+    "检查项目",
+    "检查方法",
+    "检查依据",
+    "检查记录",
+    "检查结论",
+    "处理记录",
+    "检查人员（签名）",
+    "复核人员（签名）",
+    "注：项目监理机构"
+  ]
+}

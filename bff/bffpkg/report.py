@@ -311,6 +311,39 @@ def _cn_date(v):
     return t or "—"
 
 
+def _mark_checkbox(path, conclusion):
+    """平行检查记录里「经检查□是/□否」按结论勾选。
+
+    只在结论里明确出现「符合/合格」或「不符合/不合格」时才勾；
+    含糊就不勾（宁可留空让人手勾，也别替我判断）。
+    """
+    text = str(conclusion or "")
+    if "不符合" in text or "不合格" in text:
+        mark, other = "☑否", "□是"
+    elif "符合" in text or "合格" in text:
+        mark, other = "☑是", "□否"
+    else:
+        return False
+    from docx import Document
+
+    doc = Document(path)
+    hit = False
+    for tb in doc.tables:
+        for row in tb.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    if "经检查" not in p.text:
+                        continue
+                    for r in p.runs:
+                        if "□是" in r.text or "□否" in r.text:
+                            r.text = r.text.replace("□是", mark if mark.endswith("是") else "□是")
+                            r.text = r.text.replace("□否", mark if mark.endswith("否") else "□否")
+                            hit = True
+    if hit:
+        doc.save(path)
+    return hit
+
+
 def _hhmm(v, day):
     """把「9:10」补成「2026-11-06 09:10」；已经带日期的原样返回。"""
     t = str(v or "").strip()
@@ -391,6 +424,9 @@ def build_form_docx(project_id, doc_id):
     got = fill_forms(kind, [data], path)
     if not got.get("labels_ok"):
         raise RuntimeError("模板校验未通过，拒绝交付")
+    # 勾选框：只有结论明确时才勾（不做模糊判断）
+    if kind == "平行检查记录":
+        _mark_checkbox(path, fields.get("检查结论"))
     with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
         json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
     return {"path": path, "name": display, "url_name": url_name,

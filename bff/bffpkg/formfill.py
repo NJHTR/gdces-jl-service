@@ -211,7 +211,9 @@ def write_block(cell, lines, keep_tail=None, sig_line=None, date_line=None):
         label_el.addnext(np._element)
 
     # 5) 签名行
-    if tail_el is not None and sig_line is not None:
+    # 注意：空字符串不是 None。没有 sig_label 的槽会传 ""，
+    # 若按 is not None 判断会把尾部（如"经检查□是/□否…"）清空 —— 踩过。
+    if tail_el is not None and sig_line:
         tail = None
         for p in cell.paragraphs:
             if p._element is tail_el:
@@ -224,6 +226,8 @@ def write_block(cell, lines, keep_tail=None, sig_line=None, date_line=None):
             r.font.name = font_name or "宋体"
             r.font.size = font_size or Pt(10)
             r.bold = bold
+            if not font_name:
+                r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
 
     # 6) 日期行：放签名后
     if date_line:
@@ -231,6 +235,8 @@ def write_block(cell, lines, keep_tail=None, sig_line=None, date_line=None):
         r = dp.add_run(date_line)
         r.font.name = font_name or "宋体"
         r.font.size = font_size or Pt(10)
+        if not font_name:
+            r._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
         (tail_el if tail_el is not None else label_el).addnext(dp._element)
 
     return cell
