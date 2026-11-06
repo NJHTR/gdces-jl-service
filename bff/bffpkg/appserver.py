@@ -109,13 +109,22 @@ def ensure_home(user_id):
             # 日志里就是 "Phase 1 job failed ... stream disconnected before completion"
             #（实测 980 有 157 条可整理 rollout，raw 一直是 "No raw memories yet"）。
             try:
-                from .core import LLM_MODEL as _mem_model
+                from .core import LLM_MODEL as _mem_model, ENV as _env
             except Exception:
                 _mem_model = os.environ.get("LLM_MODEL") or "qwen3.7-plus"
+                _env = os.environ
+            # 两个阶段用不同模型（实测出来的组合）：
+            # · 抽取（phase1）：主模型即可，产出 raw_memories
+            # · 合并（phase2）：要按 apply_patch 写 MEMORY.md，主模型写不出合法补丁
+            #   （报 "apply_patch verification failed: invalid hunk"），
+            #   复核那个 flash 模型反而守格式 —— 实测换过去就产出了 22KB MEMORY.md
+            _cons_model = (_env.get("REVIEW_MODEL")
+                           or _env.get("LLM_FALLBACK_MODEL")
+                           or "qwen3.8-flash")
             want = {
                 "max_rollouts_per_startup": "20",
                 "extract_model": _mem_model,
-                "consolidation_model": _mem_model,
+                "consolidation_model": _cons_model,
             }
             if "[memories]" not in base:
                 base = base.rstrip() + "\n\n[memories]\n" + "".join(
