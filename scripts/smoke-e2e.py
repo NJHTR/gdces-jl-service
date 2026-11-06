@@ -116,7 +116,10 @@ def main():
     # 每次用不同的楼号：同一线程里重复同一句话，agent 会复用上次那份文书
     # （实测 task 240：6.8 秒答「刚才已经出了 docId 144」），不会产生新文书。
     import random
-    text = "%d#楼东侧外架连墙件缺失，出监理通知单" % random.randint(60, 99)
+    # 标题必须带 smoke- 前缀：清理时只删自己造的，绝不碰真文书
+    # （14:30 出过事：同项目并发时 BFF 把用户的文书当成本轮产物，smoke 清理把它删了）
+    text = "smoke-%d#楼东侧外架连墙件缺失，出监理通知单，标题用 smoke-%d#楼" % (
+        random.randint(60, 99), random.randint(60, 99))
     st, body = call("POST", "/api/v1/chat", {
         "projectId": PROJECT, "userId": 980,
         "clientId": "smoke-" + uuid.uuid4().hex[:8], "text": text,
@@ -199,7 +202,8 @@ def main():
             st, body = call("POST", "/api/v1/chat", {
                 "projectId": PROJECT, "userId": 980,
                 "clientId": "smoke-img-" + uuid.uuid4().hex[:8],
-                "text": "这张照片是 %d#楼南侧外架，出监理通知单" % random.randint(60, 99),
+                "text": "这张照片是 smoke-%d#楼南侧外架，出监理通知单，标题用 smoke-%d#楼" % (
+            random.randint(60, 99), random.randint(60, 99)),
                 "parts": [{"type": "image", "blob": sha}],
             })
             tid2 = (body.get("data") or {}).get("taskId")
@@ -295,6 +299,13 @@ def finish(created):
         print("  保留测试文书: %s" % created)
     else:
         for did in created:
+            try:
+                _obj = sql("SELECT COALESCE(obj,'') FROM doc WHERE id=%s" % did).strip()
+            except Exception:
+                _obj = ""
+            if not _obj.startswith("smoke-"):
+                print("  跳过删除 doc %s（%s，不是 smoke 造的）" % (did, _obj or "无标题"))
+                continue
             rows = subprocess.run(
                 ["docker", "exec", "jl-mysql", "mysql", "-ujl", "-p" +
                  next((l.split("=", 1)[1].strip() for l in open(os.path.join(ROOT, ".env"), encoding="utf-8")
