@@ -118,9 +118,9 @@ def ensure_home(user_id):
             # · 合并（phase2）：要按 apply_patch 写 MEMORY.md，主模型写不出合法补丁
             #   （报 "apply_patch verification failed: invalid hunk"），
             #   复核那个 flash 模型反而守格式 —— 实测换过去就产出了 22KB MEMORY.md
-            _cons_model = (_env.get("REVIEW_MODEL")
-                           or _env.get("LLM_FALLBACK_MODEL")
-                           or "qwen3.8-flash")
+            # 只能用复核模型，不能回落到 LLM_FALLBACK_MODEL（那就是主模型，
+            # 写不出合法 apply_patch，phase2 会一直失败）
+            _cons_model = _env.get("REVIEW_MODEL") or "qwen3.8-flash"
             want = {
                 "max_rollouts_per_startup": "20",
                 "extract_model": _mem_model,

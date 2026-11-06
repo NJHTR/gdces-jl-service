@@ -34,7 +34,7 @@ def main():
                           r'\1 = "\2"', txt)
             # phase2 的合并模型不能用主模型（写不出合法 apply_patch）→ 统一换成复核模型
             from bffpkg.core import ENV
-            cons = ENV.get("REVIEW_MODEL") or ENV.get("LLM_FALLBACK_MODEL") or "qwen3.8-flash"
+            cons = ENV.get("REVIEW_MODEL") or "qwen3.8-flash"
             new = _re.sub(r'(?m)^consolidation_model\s*=\s*"[^"]*"\s*$',
                           'consolidation_model = "%s"' % cons, new)
             if new != txt:
