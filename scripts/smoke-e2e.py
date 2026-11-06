@@ -141,7 +141,9 @@ def main():
     check("出稿后状态=待补", row and row["state"] == "待补", str(row and row["state"]))
 
     # 2) 补一半
-    st, b = call("PUT", "/api/v1/docs/%s" % doc_id, {"fields": {"受检单位": "中建八局华南公司"}})
+    st, b = call("PUT", "/api/v1/docs/%s" % doc_id,
+                 {"fields": {"受检单位": "中建八局华南公司",
+                             "依据": "JGJ 130-2011 第 6.4.3 条"}})
     data = b.get("data") or {}
     check("PUT 一个字段 200", st == 200, "state=%s" % data.get("state"))
     check("字段真的存进去了", (doc_row(doc_id) or {}).get("fields", {}).get("受检单位") == "中建八局华南公司")
@@ -149,6 +151,8 @@ def main():
 
     # 3) 补全部缺项
     need = {
+        # 依据现在是 schema 必填（文书必须写清依据），这里一起补上
+        "依据": "JGJ 130-2011 第 6.4.3 条",
         "事由": "外架连墙件缺失",
         "整改要求": "补齐连墙件并复验",
         "整改期限": "2026-11-20",

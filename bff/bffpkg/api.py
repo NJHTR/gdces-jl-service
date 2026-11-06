@@ -100,6 +100,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_standard(parse_qs(urlparse(self.path).query)))
             if path == "/api/v1/projects":
                 return self._send(*handle_project_list({}))
+            if path == "/api/v1/observations":
+                usr = resolve_token(bearer(self.headers))
+                pid = (qs.get("projectId") or [""])[0] or default_project_id()
+                status = (qs.get("status") or ["open"])[0]
+                return self._send(*handle_observations(pid, status, usr))
             if path == "/api/v1/tasks":
                 return self._send(*handle_task_list(parse_qs(urlparse(self.path).query)))
             m = re.match(r"^/api/v1/tasks/(\d+)$", path)
@@ -244,11 +249,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_asr(body, resolve_token(bearer(self.headers))))
             if path == "/api/v1/docs/validate":
                 return self._send(*handle_doc_validate(body, resolve_token(bearer(self.headers))))
-            if path == "/api/v1/observations":
-                usr = resolve_token(bearer(self.headers))
-                pid = (qs.get("projectId") or [""])[0] or default_project_id()
-                status = (qs.get("status") or ["open"])[0]
-                return self._send(*handle_observations(pid, status, usr))
             if path == "/api/v1/reviews":
                 usr = resolve_token(bearer(self.headers))
                 return self._send(*handle_review_record(body, usr))
