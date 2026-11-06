@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave3 / C8  验证引擎整理真的在工作（phase1/phase2 产出核对）
+next = Wave4 / D1  照片描述进检索（records/photos.md 按部位/工序可查）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -226,7 +226,21 @@ next = Wave3 / C8  验证引擎整理真的在工作（phase1/phase2 产出核�
       rules.md 回到 6 条
       剩余待拍板：yun-gu-3qi 的 #1（本单位体积写 m³，不写「方」）与
       #3（本单位体积一律写 m³，禁止写「方」）建议合并
-[ ] C8 验证引擎整理真的在工作（phase1 闲置≥1h / phase2 6h）——从没验证过
+[x] C8 引擎整理端到端跑通（原来的"从没验证过"变成"有证据、且修好了"）
+      机制（读源码）：整理只在引擎进程启动时跑；phase1 领 rollout（闲置>=6h、<=10d），
+      phase2 合并成 MEMORY.md + summary；每用户一个家目录
+      发现 3 个真问题并修掉：
+      ① 整理只在启动时跑，而我们的 app-server 常驻 → 永远不整理
+         → 新增 appserver.recycle_idle() + jobs.engine_memory（每天 04:10 回收闲置 6h+ 引擎）
+      ② [memories] 没配 extract_model → 回落到 provider 的 gpt-* 抽取模型，
+         dashscope 报 "Model not found: gpt…" → phase1 全失败
+         → ensure_home 写 extract_model=主模型；migrate-homes 补 77 个老家目录
+      ③ consolidation_model 用主模型时 phase2 写不出合法 apply_patch
+         （"invalid hunk"）→ 换成复核模型 qwen3.8-flash 后成功
+      实测（user 980）：raw_memories 37B → 73899B/814 行；
+      MEMORY.md 21997B + summary 8505B（含 Task Group/scope/applies_to）
+      脚本：scripts/check-engine-memory.py（每用户 rollout/可整理/raw/MEMORY/summary）
+      坑：TOML 字符串必须加引号——不加引号整份配置被引擎丢弃（出稿 1 秒空跑）
       2026-11-06 17:30 部分核实：homes/501 的 MEMORY.md 4409B + summary 2060B（02:53 生成），
       内容已有 User Profile / 「只回：记住」画像；phase 的时序（闲置/6h）还没验。
 ```
