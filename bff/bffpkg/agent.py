@@ -307,10 +307,25 @@ def handle_memory_create(body):
 
 
 # ---------------------------------------------------------------- handle_memory_patch
-def handle_memory_patch(mid, body):
+def _memory_guard(rows, user):
+    """记忆按 scope 归属：项目记忆校验项目成员，个人记忆只允许本人。"""
+    if not rows:
+        return None
+    m = rows[0]
+    if (m.get("scope") or "") == "project":
+        return guard_project(m.get("owner_id") or "", user)
+    if user and str(m.get("owner_id") or "") != str(user.get("id")):
+        return 403, {"code": 403, "message": "只能改自己的记忆"}
+    return None
+
+
+def handle_memory_patch(mid, body, user=None):
     rows = q("SELECT id, scope, owner_id FROM memory WHERE id=%s", (mid,))
     if not rows:
         return 404, {"code": 404, "message": "记忆不存在"}
+    deny = _memory_guard(rows, user)
+    if deny:
+        return deny
     if "text" in body:
         exec_sql("UPDATE memory SET text=%s WHERE id=%s", ((body["text"] or "")[:512], mid))
     if "status" in body:
@@ -320,8 +335,11 @@ def handle_memory_patch(mid, body):
 
 
 # ---------------------------------------------------------------- handle_memory_delete
-def handle_memory_delete(mid):
+def handle_memory_delete(mid, user=None):
     rows = q("SELECT id, scope, owner_id FROM memory WHERE id=%s", (mid,))
+    deny = _memory_guard(rows, user)
+    if deny:
+        return deny
     exec_sql("DELETE FROM memory WHERE id=%s", (mid,))
     rendered = _rerender_if_project(rows[0]["scope"], rows[0]["owner_id"]) if rows else None
     return 200, {"code": 0, "data": {"ok": True, "rendered": rendered}}

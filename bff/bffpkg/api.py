@@ -183,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
 
             m = re.match(r"^/api/v1/memories/(\d+)$", path)
             if m:
-                return self._send(*handle_memory_patch(int(m.group(1)), body))
+                return self._send(*handle_memory_patch(int(m.group(1)), body, usr))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
