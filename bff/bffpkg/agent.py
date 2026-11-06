@@ -1634,7 +1634,10 @@ def run_cli_turn(task_id, project_id, user_id, text):
 # ---------------------------------------------------------------- handle_chat
 def handle_chat(body, headers=None):
     project_id = body.get("projectId")
-    user_id = int(body.get("userId") or 1)
+    # 用户只能来自 token。以前用 body.userId —— 伪造一下就能把会话/记忆
+    # 写进别人的 home，整套「一人一个 EASYCODE_HOME」的隔离被一个参数绕开。
+    _u = resolve_token(bearer(headers)) if headers else None
+    user_id = int((_u or {}).get("id") or body.get("userId") or 1)
     client_id = body.get("clientId") or f"c-{uuid.uuid4().hex[:16]}"
 
     # parts 是新的内容模型：文字 / 图片 / 语音 / 定位，任意组合。

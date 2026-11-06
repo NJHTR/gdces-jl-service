@@ -26,7 +26,7 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
-from .core import ROOT, exec_sql, q
+from .core import ROOT, exec_rowcount, exec_sql, q
 
 # ---------------------------------------------------------------- cron 解析
 
@@ -194,7 +194,7 @@ def export_authoritative(payload):
              "created_at, last_used_at FROM citation "
              "WHERE status='authoritative' AND disputed=0 "
              "ORDER BY verified_count DESC, used_count DESC")
-    written, skipped, errors, removed = [], 0, [], []
+    written, skipped, errors, removed, skipped_files = [], 0, [], [], []
 
     for r in rows:
         ref = r.get("ref") or ""
@@ -242,25 +242,27 @@ def export_authoritative(payload):
                 old = io.open(fp, encoding="utf-8").read()
                 if hashlib.md5(old.encode("utf-8")).hexdigest() == digest:
                     skipped += 1
+                    skipped_files.append(slug + ".md")
                     continue
             io.open(fp, "w", encoding="utf-8", newline="\n").write(text)
             written.append(slug + ".md")
         except OSError as exc:
             errors.append("%s: %r" % (fp, exc))
 
-    # 清理：过期文件必须删。权威降级后文件还留着，等于把旧权威继续卖给模型。
-    keep = set(written)
+    # 清理：只删"已经不该是权威"的文件。
+    # 坑（2026-11-06 实测）：第一版把 skipped 当成"没写"就删了，
+    # 于是内容没变的权威文件每一轮都被删、下一轮再写回来，来回震荡。
+    keep = set(written) | set(skipped_files)
+    if errors:
+        # 有错误时一律不删：查库失败导致 keep 变空，会把整个目录清空
+        return {"authoritative": len(rows), "written": written, "skipped": skipped,
+                "removed": removed, "errors": errors[:5], "cleanup": "skipped due to errors"}
     try:
         for fn in _os.listdir(dest):
-            if not fn.endswith(".md"):
+            if not fn.endswith(".md") or fn in keep:
                 continue
-            if fn in keep:
-                continue
-            # 本次没写的，要么内容未变（skipped），要么已不该是权威
-            body_ok = any(fn == (w or "") for w in written)
-            if not body_ok:
-                _os.remove(_os.path.join(dest, fn))
-                removed.append(fn)
+            _os.remove(_os.path.join(dest, fn))
+            removed.append(fn)
     except OSError as exc:
         errors.append("清理失败: %r" % (exc,))
 
@@ -328,7 +330,7 @@ def claim_due(limit=5):
             nxt = Cron(row["cron_expr"]).next_after(datetime.now())
         except Exception:
             nxt = datetime.now() + timedelta(minutes=10)
-        n = exec_sql(
+        n = exec_rowcount(
             "UPDATE service_job SET next_run_at=%s WHERE id=%s AND next_run_at=%s",
             (nxt, row["id"], row["next_run_at"]),
         )

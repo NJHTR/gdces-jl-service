@@ -133,9 +133,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
-            m = re.match(r"^/api/v1/memories/(\d+)$", self.path)
+            path = urlparse(self.path).path
+            if AUTH_REQUIRED and not resolve_token(bearer(self.headers)):
+                return self._send(401, {"code": 401, "message": "未登录或令牌失效"})
+            m = re.match(r"^/api/v1/memories/(\d+)$", path)
             if m:
-                return self._send(*handle_memory_delete(int(m.group(1))))
+                return self._send(*handle_memory_delete(int(m.group(1)),
+                                                        resolve_token(bearer(self.headers))))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
@@ -165,6 +169,8 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
             path = urlparse(self.path).path
+            if AUTH_REQUIRED and not resolve_token(bearer(self.headers)):
+                return self._send(401, {"code": 401, "message": "未登录或令牌失效"})
             usr = resolve_token(bearer(self.headers))
 
             m = re.match(r"^/api/v1/docs/(\d+)$", path)
@@ -175,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
             if m:
                 return self._send(*handle_photo_patch(int(m.group(1)), body, usr))
 
-            m = re.match(r"^/api/v1/memories/(\d+)$", self.path)
+            m = re.match(r"^/api/v1/memories/(\d+)$", path)
             if m:
                 return self._send(*handle_memory_patch(int(m.group(1)), body))
             return self._send(404, {"code": 404, "message": "not found"})
@@ -204,8 +210,11 @@ class Handler(BaseHTTPRequestHandler):
                         qs.setdefault(k, [v])
                 else:
                     data = raw
-                pid = q1(qs, "projectId") or default_project_id()
-                code, payload = handle_upload(pid, qs, data)
+                pid = q1(qs, "projectId")
+                if not pid:
+                    return self._send(400, {"code": 400, "message": "projectId 必填"})
+                code, payload = handle_upload(pid, qs, data,
+                                              resolve_token(bearer(self.headers)))
                 if code == 200 and isinstance(payload, dict):
                     d = payload.get("data", {})
                     if d.get("sha256"):

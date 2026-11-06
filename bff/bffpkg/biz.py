@@ -156,7 +156,7 @@ def append_manifest(project_id, entry):
 
 
 # ---------------------------------------------------------------- handle_upload
-def handle_upload(project_id, params, data):
+def handle_upload(project_id, params, data, user=None):
     if not project_id:
         return 400, {"code": 400, "message": "projectId 必填"}
     if not data:
@@ -279,6 +279,9 @@ def index_photo(project_id, sha, caption, place=None):
     """
     if not project_id or not sha or not (caption or "").strip():
         return None
+    deny = guard_project(project_id, user)
+    if deny:
+        return deny
     ws = f"{WS_ROOT}/{project_id}"
     rel = "records/photos.md"
     path = f"{ws}/{rel}"
@@ -340,7 +343,10 @@ def handle_project_get(project_id):
 
 
 # ---------------------------------------------------------------- handle_project_save
-def handle_project_save(body):
+def handle_project_save(body, user=None):
+    deny = guard_project((body.get("id") or "").strip(), user)
+    if deny:
+        return deny
     pid = body.get("id") or body.get("projectId") or default_project_id()
     if not pid:
         return 404, {"code": 404, "message": "还没有项目"}
@@ -455,9 +461,66 @@ def handle_geo_reverse(params):
 
 
 # ---------------------------------------------------------------- handle_weather
+# WMO 天气代码 → 中文（Open-Meteo 用的就是这套码）
+WMO_TEXT = {
+    0: "晴", 1: "晴间多云", 2: "多云", 3: "阴",
+    45: "雾", 48: "雾凇",
+    51: "小毛毛雨", 53: "毛毛雨", 55: "大毛毛雨",
+    56: "冻毛毛雨", 57: "强冻毛毛雨",
+    61: "小雨", 63: "中雨", 65: "大雨",
+    66: "冻雨", 67: "强冻雨",
+    71: "小雪", 73: "中雪", 75: "大雪", 77: "米雪",
+    80: "阵雨", 81: "强阵雨", 82: "暴雨",
+    85: "阵雪", 86: "强阵雪",
+    95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "强雷雨伴冰雹",
+}
+_WX_CACHE = {}
+
+
 def handle_weather(params):
-    """天气：先返回占位，接第三方后替换"""
-    return 200, {"code": 0, "data": {"text": "多云", "temp": 26, "wind": "东南风 2 级", "stub": True}}
+    """真实天气：Open-Meteo（无需 key）。
+
+    为什么不再返回假数据：这个天气会被烧进照片水印，而照片是证据材料。
+    宁可不显示，也不能编一个「多云 26°C」。
+    取不到就回空字符串，前端自然不画这一行。
+    """
+    import urllib.parse
+    import urllib.request
+
+    lat = (q1(params, "lat") or "").strip()
+    lng = (q1(params, "lng") or "").strip()
+    if not lat or not lng:
+        return 200, {"code": 0, "data": {"text": "", "temp": None,
+                                         "source": "no-coords"}}
+    key = lat + "," + lng
+    hit = _WX_CACHE.get(key)
+    if hit and time.time() - hit[0] < 600:          # 10 分钟缓存
+        return 200, {"code": 0, "data": hit[1]}
+
+    url = ("https://api.open-meteo.com/v1/forecast?"
+           + urllib.parse.urlencode({
+               "latitude": lat, "longitude": lng,
+               "current": "temperature_2m,weather_code",
+               "timezone": "Asia/Shanghai",
+           }))
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "jl-service/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            raw = json.loads(r.read().decode("utf-8"))
+        cur = raw.get("current") or {}
+        code = cur.get("weather_code")
+        temp = cur.get("temperature_2m")
+        data = {
+            "text": WMO_TEXT.get(int(code), "") if code is not None else "",
+            "temp": int(round(temp)) if isinstance(temp, (int, float)) else None,
+            "source": "open-meteo",
+            "at": cur.get("time") or "",
+        }
+        _WX_CACHE[key] = (time.time(), data)
+        return 200, {"code": 0, "data": data}
+    except Exception as exc:
+        sys.stderr.write("[weather] 取天气失败 %s,%s: %r\n" % (lat, lng, exc))
+        return 200, {"code": 0, "data": {"text": "", "temp": None, "source": "error"}}
 
 
 # ---------------------------------------------------------------- audit
@@ -857,14 +920,13 @@ def handle_doc_register(body, user=None):
     # 状态只由 schema 决定，不接受客户端传的 state。
     state = "待补" if missing else "待签"
 
-    exec_sql(
+    # 用 lastrowid：以前 SELECT ... ORDER BY id DESC LIMIT 1 回头捞，
+    # 同项目并发登记会捞到别人的行（返回错误的 docId）。
+    doc_id = exec_sql(
         "INSERT INTO doc (project_id, kind, obj, state, fields, bases, path, git_commit) "
         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
         (pid, kind, obj or None, state, json.dumps(fields, ensure_ascii=False),
          json.dumps(bases, ensure_ascii=False), path or None, commit or None))
-
-    rows = q("SELECT id FROM doc WHERE project_id=%s ORDER BY id DESC LIMIT 1", (pid,))
-    doc_id = rows[0]["id"] if rows else None
 
     audit(pid, (user or {}).get("id") or 1, "doc.create", f"doc:{doc_id}", commit)
     return 200, {"code": 0, "data": {
@@ -1007,10 +1069,12 @@ def handle_doc_patch(doc_id, body, user=None):
                      "missing": missing}
     state = wanted or ("待补" if missing else "待签")
 
+    prev_state = d.get("state")
     exec_sql("UPDATE doc SET fields=%s, state=%s, updated_at=NOW(3) WHERE id=%s",
              (json.dumps(fields, ensure_ascii=False), state, doc_id))
-    # 人签发 = 依据被确认：引用账本 verified +1
-    if state == "已签":
+    # 人签发 = 依据被确认：引用账本 verified +1。
+    # 只在「从未签 → 已签」这一次生效，否则重复 PUT 会把权威度刷上去。
+    if state == "已签" and prev_state != "已签":
         verify_citations_for_doc(doc_id)
 
     # 写回工作区并提交，保证"文档=仓库里的文件"

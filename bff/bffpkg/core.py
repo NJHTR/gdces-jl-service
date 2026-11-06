@@ -125,6 +125,19 @@ def exec_sql(sql, args=()):
         return cur.lastrowid
 
 
+# ---------------------------------------------------------------- exec_rowcount
+def exec_rowcount(sql, args=()):
+    """执行写语句并返回**受影响行数**。
+
+    为什么单独一个：exec_sql 返回 cur.lastrowid，对 UPDATE 恒为 0。
+    claim_due 用 `n == 1` 判断"这次认领成功"，拿 lastrowid 就永远领不到
+    —— 整个 service_job 调度器等于没启动（实测 2026-11-06）。
+    """
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(sql, args)
+        return cur.rowcount
+
+
 # ---------------------------------------------------------------- NOTIFY
 NOTIFY = queue.Queue()
 
