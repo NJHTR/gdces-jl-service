@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave4 / D1  照片描述进检索（records/photos.md 按部位/工序可查）
+next = Wave5 / E1  删死代码（run_cli_turn / _parse_jsonl / parse_multipart / relevance / get_or_create_thread）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -316,7 +316,16 @@ next = Wave4 / D1  照片描述进检索（records/photos.md 按部位/工序可
 ## Wave 4 · 多模态沉淀（1~2 天）
 
 ```
-[ ] D1 图片/语音的“描述 + 指针”接入检索（records/photos.md 已有，缺按部位检索验证）
+[x] D1 影像索引按部位分组（从"平铺追加"改成"按部位可查"）
+      · records/photos.md 改为从 DB 渲染的视图：按部位分组、同一 sha 只留最新描述
+      · GET /api/v1/photos/index?projectId= → 每个部位的张数/首末时间/描述样例
+      · 每轮上下文加指针「records/photos.md（问这个部位以前查过什么先看这里）」
+      · 实测 test-sandbox：共 7 张 / 2 个部位（未标部位 6 张、3号楼2层 1 张）；
+        /photos/search?q=连墙件 能取回对应原图
+      · **数据缺口**：yun-gu 的 14 张历史照片 place 和 caption 都是空（早期上传没走描述链路）
+        → 索引里查不到它们，需要补描述（见待拍板）
+[ ] D2 真机验收（相机/定位/水印/下载）—— **需你配合**：得在微信里真机打开
+      暂不阻塞其它项，先跳过
 [ ] D2 真机验证：camera+cover-view 层级、chooseLocation、取景与出图一致
 ```
 
