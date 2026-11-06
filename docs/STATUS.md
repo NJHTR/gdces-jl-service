@@ -168,6 +168,48 @@ sed -n '/## 当前优先级/,/^## /p' docs/PLAN.md
 下面的记录按日期分组；**11-05 及更早的已移到 `STATUS-archive-2026-11-05.md`**。
 无日期的那些是流程/口径类说明（保留在最前面）。
 
+## 对抗性复核 + 引用账本（2026-11-06 12:46 实测）
+
+### 已上线（一套机制，不解析模型文本）
+
+```
+复核员：三问（替代解释 / 条文适用边界 / 反向读法），每条意见必须有 locator
+       判定走 jl-tool record_review → POST /api/v1/reviews（无 locator 直接 400）
+引用账本 citation：一条 ref 一行
+       出稿 +1 used；人签发 / 复核 ok +1 verified
+       同一 ref 出现不同摘录 → disputed=1，退回 raw
+       自动升级：verified≥2 且 used≥3 → trusted；≥5 且 ≥10 → authoritative
+「依据」字段：由 bases 派生（模型不用拼字符串）；模型只写字段时反哺成 bases
+```
+
+### 实测数据（不是推演）
+
+```
+账本：standard://JGJ 130-2011#6.4.3  used=3 verified=4  status=trusted（已自动升级）
+      standard://GB 50204-2015#8.2.1  used=1 verified=0  status=raw
+复核：13 份文书，全部 must_fix，0 份 ok
+文书 doc 220：bases=[('rule','standard://JGJ 130-2011#6.4.3', quote=True)]，签发后 verified +1
+smoke：19 项全绿
+```
+
+### 一个必须盯的信号
+
+**13/13 全 must_fix**：要么测试文书确实都不齐（多数是自测单、字段故意留空），
+要么复核员过严（把"建议改"也判成"必须改"）。
+这正是「复核一次通过率」这个度量的用途 —— 等有真实文书后再看：
+若长期 100% must_fix，说明 verdict 的判定线需要由人来校准，不是继续加提示词。
+
+### 这一轮踩的四个坑（都是"以为改了、其实没生效"）
+
+```
+① bases 有两种形态（字符串 locator / 对象 {ref,kind,text}）→ 记账只认对象，漏记
+② 模型绕过：把依据写进「依据」字段、不传 bases → 字段反哺 bases 才闭环
+③ 补丁插进了另一个创建函数（两处都有"state = 待补"）→ get 出来 bases 为空
+   → 抽出 prepare_bases() 两条路径共用
+④ citation digest 带了 quote → 同一法条引用十次拆成十行，计数失效
+   → digest 只算 kind+ref；不同摘录标 disputed
+```
+
 ## 引用跑通了：角标 + 底部出处（2026-11-06 11:55）
 
 实测两单（干净会话）：
