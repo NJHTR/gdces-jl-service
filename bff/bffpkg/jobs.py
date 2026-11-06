@@ -194,7 +194,7 @@ def export_authoritative(payload):
              "created_at, last_used_at FROM citation "
              "WHERE status='authoritative' AND disputed=0 "
              "ORDER BY verified_count DESC, used_count DESC")
-    written, skipped, errors = [], 0, []
+    written, skipped, errors, removed = [], 0, [], []
 
     for r in rows:
         ref = r.get("ref") or ""
@@ -248,13 +248,29 @@ def export_authoritative(payload):
         except OSError as exc:
             errors.append("%s: %r" % (fp, exc))
 
-    if written or skipped or errors:
+    # 清理：过期文件必须删。权威降级后文件还留着，等于把旧权威继续卖给模型。
+    keep = set(written)
+    try:
+        for fn in _os.listdir(dest):
+            if not fn.endswith(".md"):
+                continue
+            if fn in keep:
+                continue
+            # 本次没写的，要么内容未变（skipped），要么已不该是权威
+            body_ok = any(fn == (w or "") for w in written)
+            if not body_ok:
+                _os.remove(_os.path.join(dest, fn))
+                removed.append(fn)
+    except OSError as exc:
+        errors.append("清理失败: %r" % (exc,))
+
+    if written or skipped or removed or errors:
         sys.stderr.write("[job] 权威依据导出：写 %d / 未变 %d / 失败 %d\n"
                          % (len(written), skipped, len(errors)))
     for e in errors[:5]:
         sys.stderr.write("[job] 导出失败 %s\n" % e)
     return {"authoritative": len(rows), "written": written, "skipped": skipped,
-            "errors": errors[:5]}
+            "removed": removed, "errors": errors[:5]}
 
 
 # ---------------------------------------------------------------- 表与调度
