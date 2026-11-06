@@ -1,0 +1,51 @@
+{
+  "form": "巡视记录",
+  "code": "GD-B-214",
+  "template": "16巡视记录.docx",
+  "version": 1,
+  "desc": "省统表 16。标签定位，不写死行列号；模板挪行不影响填充。",
+  "slots": [
+    {
+      "key": "header",
+      "label": "工程项目名称：",
+      "target": "para",
+      "kind": "template",
+      "text": "工程项目名称：{project}\u3000\u3000编号：{serial}"
+    },
+    {
+      "key": "parts",
+      "label": "巡视的工程部位",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "org",
+      "label": "施工单位",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "period",
+      "label": "巡视时间",
+      "target": "right",
+      "kind": "text"
+    },
+    {
+      "key": "issues",
+      "label": "巡视发现的问题及处理情况",
+      "target": "cell",
+      "kind": "block",
+      "keep_tail": ["巡视监理人员（签名）："],
+      "sig_label": "巡视监理人员（签名）："
+    }
+  ],
+  "fixed_labels": [
+    "巡视的工程部位",
+    "施工单位",
+    "巡视时间",
+    "巡视内容",
+    "巡视发现的问题及处理情况",
+    "巡视监理人员（签名）",
+    "注：本表一式一份"
+  ]
+}
