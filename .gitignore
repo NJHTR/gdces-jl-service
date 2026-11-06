@@ -4,7 +4,10 @@ repos/easycode/.target/
 repos/easycode/.cargo-home/
 repos/easycode/v8lib.a
 repos/easycode/v8binding.rs
-data/
+# data 下只有 knowledge 要入库：写成 data/** 才能让负向规则对新建目录生效
+data/**
+!data/knowledge/
+!data/knowledge/**
 runtime/
 tools/node_modules/
 *.log
