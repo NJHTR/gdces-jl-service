@@ -54,6 +54,9 @@ def call(req):
             "-e", "MYSQL_HOST=127.0.0.1",
             "-e", "MYSQL_PORT=3309",
             "-e", f"MYSQL_PASSWORD={env_password()}",
+            # tools/src 用宿主机的（只读挂载）：镜像是 11 分钟前建的，
+            # 不挂的话改了 tools.js 部署也不会生效（实测踩过：状态修好了、排版还是旧的）
+            "-v", f"{ROOT}/tools/src:/app/src:ro",
             "-v", f"{ROOT}/data/workspaces:/ws",
             "-v", f"{ROOT}/data/blobs:/blobs",
             "-v", f"{path}:/tmp/req.jsonl:ro",
