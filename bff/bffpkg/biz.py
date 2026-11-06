@@ -580,6 +580,35 @@ def handle_doc_get(doc_id, user=None):
             bases = []
     check = validate_fields(d["kind"], fields)
     missing = list(check["missing"]) + list(check["placeholder"])
+
+    # 依据补全：库里的 bases 只存了 ref+text，这里补标准全名与原文摘录，
+    # 前端才好点开看。规范号空格不一致（"JGJ130-2011" vs "JGJ 130-2011"），
+    # 用 SQL 的 REPLACE 归一，不在 Python 里做正则拆分。
+    for b in (bases or []):
+        if not isinstance(b, dict):
+            continue
+        ref = (b.get("ref") or "")
+        if b.get("kind") != "rule" or "#" not in ref:
+            continue
+        code, _, clause = ref.partition("#")
+        try:
+            rows2 = q("SELECT title, std_title, body, clause FROM standard "
+                      "WHERE REPLACE(code,' ','')=REPLACE(%s,' ','') AND clause=%s",
+                      (code.strip(), clause.strip()))
+        except Exception as exc:
+            sys.stderr.write("[doc] 补依据失败 %s: %r\n" % (ref, exc))
+            continue
+        if not rows2:
+            continue
+        r2 = rows2[0]
+        b["std"] = (r2.get("std_title") or "").strip()
+        b["clause"] = r2.get("clause")
+        b["title"] = (r2.get("title") or "").strip()
+        # 摘录优先用库里的原文（≤160 字），没有就保留它自己写的 text
+        body = (r2.get("body") or "").strip().replace("\n", " ")
+        if body:
+            b["quote"] = body[:160]
+
     return 200, {"code": 0, "data": {
         "id": d["id"], "projectId": d["project_id"], "kind": d["kind"], "obj": d["obj"],
         "state": d["state"], "fields": fields or {}, "missing": missing,
