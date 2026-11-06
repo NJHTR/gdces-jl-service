@@ -64,8 +64,18 @@ export async function searchRecords({ projectId, keyword, place, kind, dateFrom,
 }
 
 /* ---------------- search_standards ---------------- */
-export async function searchStandards({ query: text, limit = 5 }) {
-  if (!text || !String(text).trim()) return [];
+export async function searchStandards(args = {}) {
+  // 参数不合格要报错，不能静默返回空：模型传错键名（如 keyword）时会以为"库里没有"。
+  // 实测：模型连续用 {"keyword": "连墙件"} 查了 5 次，全空，然后回答"规范库没有"。
+  const text = args.query;
+  if (text === undefined) {
+    throw new Error(
+      '参数不对：search_standards 要 {"query": "关键词"}，可带 "limit"（默认 5）。' +
+      '收到: ' + JSON.stringify(args)
+    );
+  }
+  const limit = Number(args.limit) || 5;
+  if (!String(text).trim()) return [];
   const rows = await q(
     `SELECT code, clause, title, std_title, body, version, effective_at,
             ROUND(MATCH(title, body) AGAINST (? IN NATURAL LANGUAGE MODE), 3) AS score
