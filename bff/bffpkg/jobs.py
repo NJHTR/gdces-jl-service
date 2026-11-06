@@ -189,9 +189,11 @@ def export_authoritative(payload):
     dest = _os.path.join(ROOT, "data", "knowledge", "kb", "authoritative")
     _os.makedirs(dest, exist_ok=True)
 
+    # disputed 的一律不导出：摘录前后不一致的东西，不能当权威卖出去
     rows = q("SELECT ref, quote, used_count, verified_count, disputed, status, "
              "created_at, last_used_at FROM citation "
-             "WHERE status='authoritative' ORDER BY verified_count DESC, used_count DESC")
+             "WHERE status='authoritative' AND disputed=0 "
+             "ORDER BY verified_count DESC, used_count DESC")
     written, skipped, errors = [], 0, []
 
     for r in rows:
@@ -201,7 +203,7 @@ def export_authoritative(payload):
         code, _, clause = ref[len("standard://"):].partition("#")
         code, clause = code.strip(), clause.strip()
         try:
-            srows = q("SELECT title, std_title, body FROM standard WHERE "
+            srows = q("SELECT title, std_title, body, review_note FROM standard WHERE "
                       "REPLACE(code,' ','')=REPLACE(%s,' ','') AND clause=%s",
                       (code, clause))
         except Exception as exc:
@@ -231,6 +233,7 @@ def export_authoritative(payload):
             "## 条文摘录",
             "",
             body or "（库里没有正文，只有条号）",
+            ("" if not std.get("review_note") else "\n> 复核状态：%s" % std.get("review_note")),
             "",
         ])
         digest = hashlib.md5(text.encode("utf-8")).hexdigest()

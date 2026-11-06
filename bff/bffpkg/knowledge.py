@@ -71,19 +71,28 @@ def sync_standards(dry_run=False, verbose=True):
             if not body:
                 skip += 1
                 continue
+            # 正文末尾常带一句运维备注（"（导入自原数据库记录，条号与原文未经…复核。）"）。
+            # 它不是条文，模型会把它当正文抄进回答 —— 剥出来单独存。
+            _note = ""
+            _i = body.rfind("（导入自")
+            if _i > 0 and body.rstrip().endswith("）"):
+                _note = body[_i:].strip()
+                body = body[:_i].rstrip()
+
             exists = q("SELECT id FROM standard WHERE code=%s AND clause=%s", (code, clause))
             if dry_run:
                 if verbose:
                     print("  %s %s %s → %s" % (code, clause, ctitle, "更新" if exists else "新增"))
                 continue
             if exists:
-                exec_sql("UPDATE standard SET title=%s, std_title=%s, body=%s, version=%s "
-                         "WHERE id=%s", (ctitle, std_title, body, version, exists[0]["id"]))
+                exec_sql("UPDATE standard SET title=%s, std_title=%s, body=%s, version=%s, "
+                         "review_note=%s WHERE id=%s",
+                         (ctitle, std_title, body, version, _note or None, exists[0]["id"]))
                 upd += 1
             else:
-                exec_sql("INSERT INTO standard (code, clause, title, std_title, body, version) "
-                         "VALUES (%s,%s,%s,%s,%s,%s)",
-                         (code, clause, ctitle, std_title, body, version))
+                exec_sql("INSERT INTO standard (code, clause, title, std_title, body, version, "
+                         "review_note) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                         (code, clause, ctitle, std_title, body, version, _note or None))
                 new += 1
     if verbose and not dry_run:
         total = q("SELECT COUNT(*) AS n FROM standard")[0]["n"]
