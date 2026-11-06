@@ -48,14 +48,15 @@ $out = ssh -o ConnectTimeout=60 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 |
 $out.Trim().Split("`n") | ForEach-Object { "  $_" }
 
 Write-Host "=== 4) 重启 BFF ===" -ForegroundColor Cyan
-$cmd = @"
-cd $RemoteDir
+# 单引号 here-string：里面的 bash 的 $(...) 与 || 不能被 PowerShell 展开
+$cmd = @'
+cd __DIR__
 pkill -9 -f 'runtime/entry.py' 2>/dev/null || true
 sleep 2
 scripts/start-bff.sh | tail -2
 sleep 3
 curl -s -m 5 http://127.0.0.1:8081/healthz; echo
-# 关键断言：进程必须比代码新（踩过"文件更新了但服务没重启"，只查 healthz 看不出来）
+# 关键断言：进程必须比代码新（踩过“文件更新了但服务没重启”，只查 healthz 看不出来）
 PID=$(pgrep -f 'runtime/entry.py' | head -1)
 if [ -z "$PID" ]; then echo "  STALE: 没有 entry.py 进程"; exit 3; fi
 LS=$(ps -o lstart= -p "$PID")
@@ -67,7 +68,8 @@ if [ "$SE" -lt "$UA" ]; then
   exit 3
 fi
 echo "  进程比代码新（OK）"
-"@
+'@
+$cmd = $cmd -replace '__DIR__', $RemoteDir
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cmd -replace "`r`n", "`n")))
 $out = ssh -o ConnectTimeout=200 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
 $out.Trim().Split("`n") | ForEach-Object { "  $_" }
