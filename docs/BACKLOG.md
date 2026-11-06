@@ -51,8 +51,9 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave 3.5 / M0  设计定稿：按 D-表式-02 / D-记忆-03~11 锁定口径
-       （C 系列已收口；C8 已按 D-04 回滚；C6 标 v1 deprecated）
+next = Wave 3.5 / M1  记忆 v2 表与状态机（memory_item / memory_variant /
+       memory_use / memory_review / memory_audit）—— P1-1 事件表并入 M1，不单开一轮
+       并在 M1 之前先做「测试隔离」：smoke 按 id 精确删、不再 LIKE + 直连业务表
        仍等你：F3 待补清理 / D1b 补照片描述 / D2 真机验收
 ```
 
@@ -158,6 +159,37 @@ data       workspaces 2.7MB · blobs 5.2MB · exports 0.2MB · knowledge 1.1MB
            孤儿文件（磁盘有库没有）25 · 丢失文件（库有磁盘没有）6
 影像       28 张 / 无描述 22 / 无部位 27
 记忆       active 18 · disabled 6 · 完全重复 2 组
+```
+
+## P0 收尾（2026-11-07 01:30，已闭环）
+
+评审指出的四件"假绿"，逐条修完并做了负向验证：
+
+```
+① deploy 门禁本身是坏的
+   原因：ps -o lstart 在中文 locale 下输出「六 11月 7 01:13:09 2026」，date -d 解析成 0
+   修：抽成 scripts/check-process-fresh.sh，用 /proc/<pid>/stat + /proc/stat btime 算 epoch
+   负向测试：传未来 epoch → STALE 退出 3（实测 PASS）；正常 deploy → 「进程比代码新（OK）」
+② "保留为候选"是空话（memory_* 表还没建）
+   修：501/980 的 MEMORY.md + summary 移到 data/homes/_quarantine/2026-11-07/<uid>/，
+       附 manifest（来源/大小/mtime/已知污染：只回：记住、smoke 任务）
+       不再叫 candidate —— 等 M1 建表、清洗后才谈导入
+③ 77 份 [memories] 配置段还在（只关 feature flag = 靠约定）
+   修：ensure_home 在 mem_on=false 时**删除整个 [memories] 段**
+       实测：0/77 份残留，memories=true 0/77
+④ smoke 的 PROJECT 守卫是同义反复
+   修：改为 JL_SMOKE_PROJECT 环境变量 + assert_test_project()（库里必须真有 test-sandbox）
+⑤ acceptance 掺旧口径
+   修：doc/memory 计数按 project 过滤（168 → 88 才是 test-sandbox 的真实数）；
+       C6 v1 只作信息、不参与通过；新增「[memories] 配置段已清零」验收项
+```
+
+验收报告现在 9 项（8 通过 + 1 条信息）：
+
+```
+✓ 服务健康 ✓ 数据可读（文书 88 / 待补 80）✓ 影像索引 ✓ 待确认规矩
+✓ 省统表出表 ✓ [memories] 段清零（0 份）✓ 备份 ✓ 引擎记忆已关闭（0/77）
+· 记忆指标(v1) 条目 12 / hits 524 —— 仅供参考
 ```
 
 ## 卡在这里（都需要你一句话，否则我不动）
