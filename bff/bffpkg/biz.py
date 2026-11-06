@@ -19,7 +19,7 @@ import pymysql
 这一层是「真值和规则」：状态机、字段校验、权限。
 未来抽成 Java 服务时，把这里的实现换掉即可，接口不变。
 """
-from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, load_schema, list_schemas)
+from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, materialize_images, validate_fields, load_schema, list_schemas)
 
 
 # ---------------------------------------------------------------- handle_project_list
@@ -244,52 +244,6 @@ def handle_blob(sha):
     with open(path, "rb") as f:
         data = f.read()
     return 200, data, "application/octet-stream"
-
-
-# ---------------------------------------------------------------- parse_multipart
-def parse_multipart_full(body, content_type):
-    """解析 multipart/form-data，返回 (文件字节, 字段字典)
-
-    wx.uploadFile 把 projectId 之类放在 formData 里（不是 query），
-    以前只抠文件、丢掉字段，导致上传永远进默认项目。这里把字段也带出来。
-    """
-    import re as _re
-    m = _re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type or "")
-    if not m:
-        return b"", {}
-    boundary = (m.group(1) or m.group(2)).strip()
-    sep = b"--" + boundary.encode()
-    data_file, fields = b"", {}
-    for part in body.split(sep):
-        idx = part.find(b"\r\n\r\n")
-        if idx < 0:
-            continue
-        head = part[:idx].decode("utf-8", "replace")
-        value = part[idx + 4:]
-        if value.endswith(b"\r\n"):
-            value = value[:-2]
-        name = ""
-        for chunk in head.split(";"):
-            chunk = chunk.strip()
-            if chunk.startswith("name=\""):
-                name = chunk[6:].rstrip("\"")
-                break
-        if not name:
-            continue
-        if "filename=" in head:
-            if name == "file" or b"filename=" in head.encode():
-                data_file = value
-        else:
-            try:
-                fields[name] = value.decode("utf-8")
-            except Exception:
-                fields[name] = ""
-    return data_file, fields
-
-
-def parse_multipart(body, content_type):
-    """从 multipart/form-data 里抠出文件字节。wx.uploadFile 用的是这种。"""
-    return parse_multipart_full(body, content_type)[0]
 
 
 # ---------------------------------------------------------------- default_project_id

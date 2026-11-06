@@ -20,8 +20,8 @@ import pymysql
 留 Python：它跟子进程、文件、git 打交道。
 """
 from .appserver import _client, run_isolated, run_stream
-from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_or_create_thread, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, relevance, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
-from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, parse_multipart, render_project_memory, store_blob)
+from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, STD_RE, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, handle_render_memory, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
+from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_member_add, handle_members, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob)
 
 
 # ---------------------------------------------------------------- Engine
@@ -1688,120 +1688,6 @@ def _unregistered_docs(project_id, started_at):
             if fn not in known:
                 out.append(fn)
     return out
-
-
-# ---------------------------------------------------------------- _parse_jsonl
-def _parse_jsonl(stdout):
-    """从 exec --json 的输出里捞出：会话 id、助手文本、工具调用"""
-    thread_id, texts, trace = None, [], []
-    for line in (stdout or "").splitlines():
-        line = line.strip()
-        if not line.startswith("{"):
-            continue
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        t = ev.get("type")
-        if t == "thread.started":
-            thread_id = ev.get("thread_id") or ev.get("threadId") or thread_id
-            continue
-        it = ev.get("item") or {}
-        it_type = (it.get("type") or "").lower()
-        if it_type in ("agent_message", "agentmessage"):
-            txt = it.get("text") or ""
-            if txt:
-                texts.append(txt)
-        elif "command" in it_type or "tool" in it_type or "exec" in it_type:
-            name = it.get("command") or it.get("name") or it_type
-            if isinstance(name, list):
-                name = " ".join(str(x) for x in name)
-            name = str(name).replace("\n", " ").strip()
-            # 只留关键信息：jl-tool 的哪个子命令
-            m = re.search(r"jl-tool\s+([a-z_]+)", name)
-            label = m.group(1) if m else name[:60]
-            icon = "search" if "search" in label else ("doc" if "create" in label else "run")
-            trace.append({"tool": label, "icon": icon, "text": label,
-                          "cmd": name[:200], "ms": it.get("duration_ms")})
-    return thread_id, "\n".join(t2 for t2 in texts if t2.strip()).strip(), trace
-
-
-# ---------------------------------------------------------------- run_cli_turn
-def run_cli_turn(task_id, project_id, user_id, text):
-    """一个任务 = 一次 easycode exec 子进程（不走 app-server，避开 code-mode）"""
-    ws = f"{WS_ROOT}/{project_id}"
-    # 同样按任务隔离（同项目并发时不互相覆盖）
-    out_file = f"{ws}/.agent/last-{task_id}.md"
-    started = time.time()
-    try:
-        render_agents_md(project_id, user_id)
-        try:
-            os.remove(out_file)
-        except FileNotFoundError:
-            pass
-
-        hint = (
-            "\n\n[输出要求] 最后一句话请严格写成三行，不要写别的东西：\n"
-            "结论：一句话说做了什么、结论是什么\n"
-            "依据：规范号 + 条号；没有就写无\n"
-            "待补：还缺哪些字段，用、隔开；没有就写无"
-        )
-        cmd = [ENGINE, "exec", "-C", ws,
-               "--dangerously-bypass-approvals-and-sandbox",
-               "--json", "-o", out_file, text + hint]
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=600, env=ENGINE_ENV)
-
-        thread_id, text_out, trace = _parse_jsonl(p.stdout)
-        if not text_out:
-            try:
-                with open(out_file, encoding="utf-8") as f:
-                    text_out = f.read().strip()
-            except FileNotFoundError:
-                pass
-            with contextlib.suppress(OSError):
-                os.remove(out_file)
-        if not text_out:
-            text_out = (p.stdout or "")[-1500:].strip() or "（模型没有返回内容）"
-
-        ms = int((time.time() - started) * 1000)
-        short = {"search_standards": "查规范", "search_records": "查记录",
-                 "create_doc_draft": "写文书", "get_project": "读项目",
-                 "get_context": "读上下文"}
-        noise = {"list", "get_context", "get_project"}
-        ok_steps = [
-            t for t in trace
-            if t.get("ok") and t.get("tool") not in noise
-            and t.get("kind") in ("cmd", "shell", None)
-        ]
-        trace_sum = ("调了 " + "、".join(short.get(t["tool"], t["tool"]) for t in ok_steps[:3])) if ok_steps else None
-
-        exec_sql(
-            "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync, cites) "
-            "VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1,%s)",
-            (project_id, user_id, f"r-{task_id}-{int(time.time())}", clean_reply(text_out),
-             json.dumps(trace, ensure_ascii=False) if trace else None, trace_sum, ms, task_id,
-             json.dumps(cites, ensure_ascii=False) if cites else None))
-
-        if thread_id and re.match(r"^[a-zA-Z0-9_-]{8,64}$", thread_id):
-            exec_sql("UPDATE thread_map SET thread_id=%s, last_active_at=NOW() "
-                     "WHERE project_id=%s AND user_id=%s",
-                     (thread_id, project_id, user_id))
-
-        failed = p.returncode not in (0,)
-        exec_sql("UPDATE task SET status=%s, error=%s, finished_at=NOW(3), thread_id=%s WHERE id=%s",
-                 ("failed" if failed else "done",
-                  (p.stderr or "")[-500:] if failed else None, thread_id, task_id))
-        sys.stderr.write(f"[turn] task {task_id} -> {'failed' if failed else 'done'} "
-                         f"({ms}ms, trace {len(trace)})\n")
-
-    except subprocess.TimeoutExpired:
-        exec_sql("UPDATE task SET status='failed', error='超时（10 分钟）', finished_at=NOW(3) WHERE id=%s",
-                 (task_id,))
-        sys.stderr.write(f"[turn] task {task_id} 超时\n")
-    except Exception as e:
-        traceback.print_exc()
-        exec_sql("UPDATE task SET status='failed', error=%s, finished_at=NOW(3) WHERE id=%s",
-                 (str(e)[:900], task_id))
 
 
 # ---------------------------------------------------------------- handle_chat

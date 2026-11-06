@@ -326,16 +326,6 @@ def _bigrams(text):
     return {t[i:i + 2] for i in range(len(t) - 1)} if len(t) > 1 else {t}
 
 
-# ---------------------------------------------------------------- relevance
-def relevance(memory_text, query):
-    """记忆和当前这句话的相关度：字符 bigram 的 Jaccard"""
-    a, b = _bigrams(memory_text), _bigrams(query)
-    if not a or not b:
-        return 0.0
-    inter = len(a & b)
-    return inter / (len(a) + len(b) - inter) if inter else 0.0
-
-
 # ---------------------------------------------------------------- _rerender_if_project
 def _rerender_if_project(scope, owner):
     """项目记忆一变，就把 memories/project.md 重渲染并提交 —— 不用人工点"""
@@ -575,31 +565,6 @@ def get_project(project_id):
     if not rows:
         raise ValueError(f"项目不存在: {project_id}")
     return rows[0]
-
-
-# ---------------------------------------------------------------- get_or_create_thread
-def get_or_create_thread(project_id, user_id, kind="chronic"):
-    rows = q("SELECT thread_id FROM thread_map WHERE project_id=%s AND user_id=%s AND kind=%s",
-             (project_id, user_id, kind))
-    if rows:
-        return rows[0]["thread_id"], False
-
-    ws = f"{WS_ROOT}/{project_id}"
-    # sandbox 必须放开：工具要调 docker 访问数据库和工作区，
-    # 默认沙箱会拦住，表现为 exec_command 失败但 turn 仍显示 done。
-    from .agent import engine
-
-    r = engine().call("thread/start", {
-        "cwd": ws,
-        "sandbox": "danger-full-access",
-        "approvalPolicy": "never",
-    }, 120)
-    if not r or "error" in (r or {}):
-        raise RuntimeError(f"thread/start 失败: {r}")
-    tid = r["result"]["thread"]["id"]
-    exec_sql("INSERT INTO thread_map (project_id, user_id, thread_id, kind) VALUES (%s,%s,%s,%s)",
-             (project_id, user_id, tid, kind))
-    return tid, True
 
 
 # ---------------------------------------------------------------- LEARN_PROMPT
