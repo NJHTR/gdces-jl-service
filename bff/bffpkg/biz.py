@@ -344,6 +344,48 @@ def handle_photo_index(params, user=None):
     return 200, {"code": 0, "data": {"places": out, "total": len(rows)}}
 
 
+# ---------------------------------------------------------------- parse_multipart_full
+def parse_multipart_full(body, content_type):
+    """解析 multipart/form-data，返回 (文件字节, 字段字典)。
+
+    wx.uploadFile 的 projectId 之类是放在 formData 里的（不在 query 上），
+    所以字段必须解析出来；文件取第一个带 filename 的 part。
+    """
+    import re as _re
+
+    m = _re.search(r'boundary=(?:"([^"]+)"|([^;]+))', content_type or "")
+    if not m:
+        return b"", {}
+    boundary = (m.group(1) or m.group(2)).strip()
+    sep = b"--" + boundary.encode()
+    data_file, fields = b"", {}
+    for part in body.split(sep):
+        idx = part.find(b"\r\n\r\n")
+        if idx < 0:
+            continue
+        head = part[:idx].decode("utf-8", "replace")
+        value = part[idx + 4:]
+        if value.endswith(b"\r\n"):
+            value = value[:-2]
+        name = ""
+        for chunk in head.split(";"):
+            chunk = chunk.strip()
+            if chunk.startswith('name="'):
+                name = chunk[6:].rstrip('"')
+                break
+        if not name:
+            continue
+        if "filename=" in head:
+            if name == "file" or b"filename=" in head.encode():
+                data_file = value
+        else:
+            try:
+                fields[name] = value.decode("utf-8")
+            except Exception:
+                fields[name] = ""
+    return data_file, fields
+
+
 # ---------------------------------------------------------------- handle_project_get
 def handle_project_get(project_id):
     pid = project_id or default_project_id()
