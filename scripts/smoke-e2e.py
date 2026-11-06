@@ -620,6 +620,13 @@ def main():
     body = open(pfp, encoding="utf-8").read() if os.path.isfile(pfp) else ""
     check("索引文件按部位分组", body.startswith("# 现场影像索引（按部位）") and "## " in body)
 
+    # 4.997) E3 清洗：删掉路径后不能留「，。」这种残句
+    from bffpkg.core import clean_reply
+    dirty = "已出稿 /home/baize/jl-service/data/workspaces/x/a.md，。 请查收。"
+    got = clean_reply(dirty)
+    check("清洗后无残句标点", "，。" not in got and "，." not in got and bool(got.strip()),
+          repr(got[:50]))
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {

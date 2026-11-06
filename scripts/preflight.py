@@ -283,6 +283,21 @@ def check_imports():
     return 0
 
 
+def check_duplicate_constants():
+    """core.py 的模块级常量不许定义两次。
+
+    实测：7 组常量在文件里写了两遍（AUTH_REQUIRED/TOKEN_TTL_HOURS/BLOB_ROOT/
+    WEEK/STATE_TO_ST/KIND_TO_ICON/KIND_TO_TINT），改一处漏一处。
+    """
+    fp = os.path.join(ROOT, "bff", "bffpkg", "core.py")
+    if not os.path.isfile(fp):
+        return []
+    src = io.open(fp, encoding="utf-8").read()
+    names = re.findall(r"(?m)^([A-Z][A-Z0-9_]{2,})\s*=", src)
+    dup = sorted({n for n in names if names.count(n) > 1})
+    return [("重复定义: %s" % ", ".join(dup), "core.py")] if dup else []
+
+
 def check_dead_endpoints():
     """禁回退：E2 删掉的两个端点与三个 handler 不许再出现。
 
