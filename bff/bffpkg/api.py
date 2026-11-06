@@ -73,13 +73,15 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/v1/exports/"):
                 from urllib.parse import unquote
                 name = unquote(path[len("/api/v1/exports/"):])
-                if "/" in name or "\\" in name or ".." in name:
+                # 允许 <project>/<file>，但每段都要干净（防路径穿越）
+                parts = [x for x in name.split("/") if x]
+                if not parts or len(parts) > 2 or any(
+                        x in (".", "..") or "\\" in x for x in parts):
                     return self._send(400, {"code": 400, "message": "文件名不合法"})
-                fp = os.path.join(ROOT, "data", "exports", name)
-                # 允许子目录：/<project>/<file>.docx
+                fp = os.path.join(ROOT, "data", "exports", *parts)
                 if not os.path.isfile(fp):
                     import glob
-                    hits = glob.glob(os.path.join(ROOT, "data", "exports", "*", name))
+                    hits = glob.glob(os.path.join(ROOT, "data", "exports", "*", parts[-1]))
                     fp = hits[0] if hits else fp
                 ctype = ("application/vnd.openxmlformats-officedocument."
                          "wordprocessingml.document")
