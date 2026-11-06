@@ -273,11 +273,12 @@ def main():
         check("删除记忆", st in (200, 204), "HTTP %s" % st)
 
     # 5) 反向：缺字段不许签
-    st, b = call("POST", "/api/v1/docs", {
+    # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
+    st, b = call("POST", "/api/v1/docs/register", {
         "projectId": PROJECT, "kind": "监理通知单",
         "obj": "smoke-反向用例-自动删除", "fields": {"部位": "测试"},
     })
-    bad_id = (b.get("data") or {}).get("id")
+    bad_id = (b.get("data") or {}).get("docId")
     if bad_id:
         created.append(bad_id)
         st, b2 = call("PUT", "/api/v1/docs/%s" % bad_id, {"state": "已签"})
