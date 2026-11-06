@@ -592,9 +592,17 @@ def handle_bootstrap(params, user):
                              "WHERE scope='project' AND owner_id=%s "
                              "ORDER BY status DESC, hits DESC, id DESC", (project_id,))]
 
+    # 待确认的规矩提案：模型提议的东西先放这里，人点了才生效
+    pending_rules = q("SELECT id, text, source, evidence, created_at FROM rule_proposal "
+                      "WHERE project_id=%s AND status='pending' ORDER BY id DESC LIMIT 20",
+                      (project_id,))
+    for _r in pending_rules:
+        _r["createdAt"] = str(_r.get("created_at") or "")
+
     return 200, {"code": 0, "data": {
         "msgs": msgs, "records": records, "docs": docs,
         "memos": memos, "projMemos": proj_memos, "project": project_view,
+        "pendingRules": pending_rules,
     }}
 
 

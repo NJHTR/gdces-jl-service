@@ -577,6 +577,17 @@ def main():
               str(off)[:60])
         call("DELETE", "/api/v1/memories/%s" % mid4)
 
+    # 4.99) C5 待确认列表：bootstrap 必须带出 pending 提案
+    st, b = call("POST", "/api/v1/rule-proposals", {
+        "projectId": PROJECT, "text": "smoke 待确认 " + uuid.uuid4().hex[:5]})
+    rid5 = (b.get("data") or {}).get("id")
+    st, b = call("GET", "/api/v1/bootstrap?projectId=" + PROJECT)
+    pr = (b.get("data") or {}).get("pendingRules") or []
+    check("待确认列表带出提案",
+          any(str(x.get("id")) == str(rid5) for x in pr), "共 %d 条" % len(pr))
+    if rid5:
+        sql("DELETE FROM rule_proposal WHERE id=%s" % int(rid5))
+
     # 5) 反向：缺字段不许签
     # POST /api/v1/docs 已下线（它绕过守卫、自己排版）。反向用例改走 register 这条唯一入口。
     st, b = call("POST", "/api/v1/docs/register", {
