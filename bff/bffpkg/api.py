@@ -153,6 +153,10 @@ class Handler(BaseHTTPRequestHandler):
             m = re.match(r"^/api/v1/tasks/(\d+)$", path)
             if m:
                 return self._send(*handle_task(int(m.group(1)), resolve_token(bearer(self.headers))))
+            if path == "/api/v1/memories/recall":
+                return self._send(*handle_memory_recall(
+                    parse_qs(urlparse(self.path).query),
+                    resolve_token(bearer(self.headers))))
             if path.startswith("/api/v1/memories"):
                 return self._send(*handle_memory_list(
                     parse_qs(urlparse(self.path).query),
@@ -394,10 +398,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_standard(parse_qs(urlparse(self.path).query)))
             if path == "/api/v1/projects":
                 return self._send(*handle_project_create(body))
-            if path == "/api/v1/memories/recall":
-                return self._send(*handle_memory_recall(
-                    parse_qs(urlparse(self.path).query),
-                    resolve_token(bearer(self.headers))))
             if path == "/api/v1/memories":
                 return self._send(*handle_memory_create(body))
             m = re.match(r"^/api/v1/projects/([\w-]+)/render-memory$", path)

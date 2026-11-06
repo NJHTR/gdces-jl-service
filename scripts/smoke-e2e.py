@@ -546,7 +546,9 @@ def main():
     st, b = call("POST", "/api/v1/memories", {
         "scope": "project", "ownerId": PROJECT, "text": kw + "：结论放前面再写依据"})
     mid3 = (b.get("data") or {}).get("id")
-    st, b = call("GET", "/api/v1/memories/recall?projectId=%s&q=%s" % (PROJECT, kw))
+    from urllib.parse import quote as _quote
+    st, b = call("GET", "/api/v1/memories/recall?projectId=%s&q=%s"
+                 % (PROJECT, _quote(kw)))
     items = b.get("data") or []
     hit = next((x for x in items if str(x.get("id")) == str(mid3)), None)
     check("检索能召回", st == 200 and bool(hit), "命中 %d 条" % len(items))
