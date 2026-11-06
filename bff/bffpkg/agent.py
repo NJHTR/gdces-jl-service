@@ -233,7 +233,7 @@ def build_context(project_id, user_id, query=None):
     except OSError:
         pass
     if os.path.isdir(f"{ws}/knowledge"):
-        here.insert(0, "组织知识 `knowledge/`（规范、模板、填写示例、验收要点；只读）")
+        here.insert(0, "组织知识 `knowledge/`（模板、填写示例、验收要点；只读）")
     if here:
         parts.append("【在哪找】" + " · ".join(here))
 
@@ -1186,10 +1186,19 @@ def ensure_ws_links(project_id):
     在工作区里根本不存在）。
     """
     ws = f"{WS_ROOT}/{project_id}"
-    src = os.path.join(ROOT, "data", "knowledge")
+    # 只挂 kb/：规范全文不进工作区（否则模型会去 rg 全文，绕开工具、拿不到条号）
+    src = os.path.join(ROOT, "data", "knowledge", "kb")
     dst = os.path.join(ws, "knowledge")
     if os.path.islink(dst):
-        return
+        # 目标变了要重建（软链从 knowledge 根改到 kb/ 时，旧链会一直指着老地方）
+        try:
+            if os.path.realpath(dst) != os.path.realpath(src):
+                os.unlink(dst)
+            else:
+                return
+        except OSError as e:
+            sys.stderr.write("[ws] 检查旧软链失败 %s: %r\n" % (dst, e))
+            return
     if os.path.exists(dst):
         return                     # 已经是真目录（有人手动建过），不覆盖
     try:

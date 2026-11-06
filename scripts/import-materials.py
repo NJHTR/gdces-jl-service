@@ -23,7 +23,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-OUT = os.path.join(ROOT, "data", "knowledge")
+OUT = os.path.join(ROOT, "data", "knowledge", "kb")
 SECRET_RE = re.compile(r"key|secret|token|password|apikey|密钥", re.I)
 
 
