@@ -431,6 +431,15 @@ def handle_doc_create(body):
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ws,
                                 capture_output=True, text=True).stdout.strip()
 
+    # 模型有时不传 bases，而是把依据写进「依据」字段（实测 doc 214）。
+    # 字段是声明式数据，反哺成结构化依据，别让「写了依据却不记账」发生。
+    if not bases and isinstance(fields, dict) and str(fields.get("依据") or "").strip():
+        _items = [x.strip() for x in re.split(r"[；;、,，]", str(fields["依据"])) if x.strip()]
+        for _it in _items:
+            _p = _parse_ref("rule", _it)
+            if _p:
+                bases.append({"kind": "rule", "ref": _p[0], "text": _it[:120]})
+
     # 记账：出稿即引用一次（used_count+1）
     record_citations(bases)
 
