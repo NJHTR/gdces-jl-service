@@ -764,6 +764,15 @@ def _parse_cli_jsonl(stdout):
                              "text": names.get(tool, "子 agent 协作：" + (tool or "")),
                              "output": json.dumps(it, ensure_ascii=False)[:600]})
 
+        # ---- 联网搜索（引擎自己调，结果不回传，只能看到 query）----
+        elif kind == "web_search":
+            q = it.get("query") or ""
+            action = it.get("action") or {}
+            qs = action.get("queries") or ([q] if q else [])
+            text_label = "联网搜索：" + "；".join([x for x in qs if x][:3] or ["（未给查询词）"])
+            timeline.append({"kind": "note", "icon": "search", "text": text_label,
+                             "output": json.dumps(it, ensure_ascii=False)[:600]})
+
         # ---- 命令执行 ----
         elif kind == "command_execution":
             cid = it.get("id") or ""

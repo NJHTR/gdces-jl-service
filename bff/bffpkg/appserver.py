@@ -43,6 +43,7 @@ _ITEM_MAP = {
     "subAgentActivity": "sub_agent_activity",
     "collabAgentToolCall": "collab_tool_call",
     "mcpToolCall": "mcp_tool_call",
+    "webSearch": "web_search",
 }
 
 
@@ -83,6 +84,11 @@ def ensure_home(user_id):
                 # 关键：不加这两行的话，MCP 工具会被"推迟"而模型看不见，
                 # 于是它改用 shell 调 jl-tool CLI —— 每次调用都要起一个容器（2~4 秒）。
                 # 实测：一次出稿 13~17 次 shell 调用，时间全耗在这。
+                # 联网搜索：不开这个键，引擎的 resolve_web_search_mode 返回 None，
+                # web_search 工具根本不出现（不是线路不支持，实测百炼能用）
+                if not any(l.strip().startswith("web_search") for l in lines):
+                    first_table = next((i for i, l in enumerate(lines) if l.startswith("[")), len(lines))
+                    lines.insert(first_table, 'web_search = "live"')
                 if not any(l.strip().startswith("tool_search_always_defer_mcp_tools") for l in lines):
                     lines.insert(at + 1, "tool_search_always_defer_mcp_tools = false")
                 base = "\n".join(lines) + "\n"
