@@ -516,6 +516,22 @@ def handle_asr(body, user=None):
     sha = (body.get("blob") or body.get("sha") or "").strip()
     if not sha:
         return 400, {"code": 400, "message": "blob 必填"}
+
+    # 项目归属：优先用传上来的 projectId，没有就按 sha 反查；都查不到就拒绝。
+    # 以前完全没有守卫 —— 知道 sha 就能跨项目转写并写入别人项目的影像索引。
+    pid = (body.get("projectId") or "").strip()
+    if not pid:
+        try:
+            _r = q("SELECT project_id FROM photo WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
+            pid = (_r[0].get("project_id") if _r else "") or ""
+        except Exception as e:
+            sys.stderr.write("[asr] 反查项目失败 %s: %r\n" % (sha[:8], e))
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填（按 sha 找不到所属项目）"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+
     text, err = transcribe_audio(sha)
     if err and text is None:
         return 503, {"code": 503, "message": err}
@@ -525,12 +541,12 @@ def handle_asr(body, user=None):
     saved = False
     if (text or "").strip():
         rows = q("SELECT id, caption, project_id, place FROM photo "
-                 "WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
+                 "WHERE project_id=%s AND sha256=%s ORDER BY id DESC LIMIT 1", (pid, sha))
         if rows and not (rows[0].get("caption") or "").strip():
             cap = "语音：" + text.strip()[:480]
             exec_sql("UPDATE photo SET caption=%s, caption_at=NOW(3) WHERE id=%s",
                      (cap, rows[0]["id"]))
-            index_photo((body.get("projectId") or "").strip(), sha, cap)
+            index_photo(pid, sha, cap)
             saved = True
 
     return 200, {"code": 0, "data": {"text": text or "", "note": err or "",
@@ -1321,7 +1337,8 @@ def handle_photo_caption(body, user=None):
         rows = q("SELECT id, caption, project_id, place FROM photo "
                  "WHERE project_id=%s AND sha256=%s ORDER BY id DESC LIMIT 1", (pid, sha))
     elif sha:
-        rows = q("SELECT id, caption FROM photo WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
+        rows = q("SELECT id, caption, project_id, place FROM photo "
+                 "WHERE sha256=%s ORDER BY id DESC LIMIT 1", (sha,))
     else:
         return 400, {"code": 400, "message": "projectId 或 sha256 必填"}
     if not rows:
@@ -1331,10 +1348,11 @@ def handle_photo_caption(body, user=None):
         return 200, {"code": 0, "data": {"id": row["id"], "caption": row["caption"],
                                          "skipped": True}}
     exec_sql("UPDATE photo SET caption=%s, caption_at=NOW(3) WHERE id=%s", (caption[:500], row["id"]))
-    index_photo(pid or (row.get("project_id") or ""), sha, caption[:500],
-                row.get("place"))
+    owner = pid or (row.get("project_id") or "")
+    idx = index_photo(owner, sha, caption[:500], row.get("place"))
+    # 没写成索引就如实说 None：以前不管写没写成都回 records/photos.md
     return 200, {"code": 0, "data": {"id": row["id"], "caption": caption[:500],
-                                     "indexed": "records/photos.md"}}
+                                     "indexed": idx or None}}
 
 
 # ---------------------------------------------------------------- handle_photo_search

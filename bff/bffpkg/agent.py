@@ -1394,8 +1394,9 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
              json.dumps(answer, ensure_ascii=False) if answer else None))
 
         # 有文书且开复核 → 交给后台，任务等复核完成后才置 done（前端会一直轮询到那时）
-        if (ENGINE_MODE == "appserver" and doc_row
-                and (os.environ.get("REVIEW_PASS") or "1") != "0" and message_id):
+        # 不再用 ENGINE_MODE 判断：只要这一轮出了文书就该复核。
+        # 以前写 == appserver，配置改成 cli 时复核会静默消失。
+        if (doc_row and (os.environ.get("REVIEW_PASS") or "1") != "0" and message_id):
             threading.Thread(target=_review_async,
                              args=(task_id, project_id, user_id, text, images, doc_row["id"],
                                    final_text, message_id, answer, trace, ms, trace_sum,
@@ -1790,10 +1791,20 @@ def handle_task(task_id, user=None):
         """
         called = False
         texts = []
+        has_cites = False
         for m in msgs or []:
             if m.get("role") != "assistant":
                 continue
             texts.append(m.get("text") or "")
+            # 已经有结构化引用（引擎 memoryCitation / 工具账本）就不算"未溯源"
+            try:
+                _c = m.get("cites")
+                if isinstance(_c, str):
+                    _c = json.loads(_c or "[]")
+                if _c:
+                    has_cites = True
+            except (ValueError, TypeError) as e:
+                sys.stderr.write("[cite] cites 解析失败 消息%s: %r\n" % (m.get("id"), e))
             trace = m.get("trace")
             if isinstance(trace, str):
                 try:
@@ -1803,7 +1814,7 @@ def handle_task(task_id, user=None):
             for it in trace or []:
                 if isinstance(it, dict) and (it.get("tool") or "") == "search_standards":
                     called = True
-        if called or not texts:
+        if called or has_cites or not texts:
             return False
         blob = "\n".join(texts)
         try:

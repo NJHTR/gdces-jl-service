@@ -1069,7 +1069,9 @@ def clean_reply(text):
 
 
 # ---------------------------------------------------------------- ENGINE_MODE
-ENGINE_MODE = os.environ.get("ENGINE_MODE", "cli")   # cli = 引擎自己跑工具；loop = BFF 驱动
+# appserver = 常驻 app-server 跑（唯一支持的一等路径）；cli = 一次性 exec（老路径）
+# 默认改成 appserver：以前默认 cli 会让"复核开关"静默失效（判断写的是 == appserver）
+ENGINE_MODE = os.environ.get("ENGINE_MODE", "appserver")
 
 
 # ---------------------------------------------------------------- _USER_LOCKS
