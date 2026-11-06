@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto, searchPhotos, recordReview } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
