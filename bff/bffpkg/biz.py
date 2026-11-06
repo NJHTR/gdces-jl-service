@@ -502,6 +502,37 @@ def handle_asr(body, user=None):
                                      "saved": saved}}
 
 # ---------------------------------------------------------------- 引用账本
+def _base_ref(b):
+    """把一条依据归一成 (kind, ref)。支持两种形态：
+       对象 {"kind":"rule","ref":"JGJ130-2011#6.4.3"}
+       字符串 "standard://JGJ 130-2011#6.4.3:1-1"（模型按引用格式写的）
+    """
+    if isinstance(b, str):
+        loc = b.strip()
+        if loc.startswith("standard://"):
+            body = loc[len("standard://"):]
+            # 去掉结尾的 :1-1
+            if ":" in body:
+                body = body.rsplit(":", 1)[0]
+            return "rule", body
+        return "file", loc
+    if isinstance(b, dict):
+        return (b.get("kind") or ""), (b.get("ref") or "")
+    return "", ""
+
+
+def _parse_ref(kind, ref):
+    """规范类依据 → (canon, code, clause)；不是规范返回 None。"""
+    if not ref or "#" not in ref:
+        return None
+    code, _, clause = ref.partition("#")
+    code, clause = code.strip(), clause.strip()
+    if not code or not clause:
+        return None
+    return ("standard://%s#%s" % (code, clause)), code, clause
+
+
+
 def _cite_digest(kind, ref, quote=""):
     import hashlib
     return hashlib.md5(("%s|%s|%s" % (kind, ref, (quote or "")[:120])).encode("utf-8")).hexdigest()
@@ -511,14 +542,14 @@ def record_citations(bases):
     """出稿时：把 rule 类依据记进账本（used_count+1）。不判断对错，只记账。"""
     n = 0
     for b in (bases or []):
-        if not isinstance(b, dict) or b.get("kind") != "rule":
+        kind, ref = _base_ref(b)
+        parsed = _parse_ref(kind, ref)
+        if not parsed:
             continue
-        ref = (b.get("ref") or "").strip()
-        if not ref or "#" not in ref:
-            continue
-        code, _, clause = ref.partition("#")
-        canon = "standard://%s#%s" % (code.strip(), clause.strip())
-        quote = (b.get("quote") or b.get("text") or "")[:120]
+        canon, code, clause = parsed
+        quote = ""
+        if isinstance(b, dict):
+            quote = (b.get("quote") or b.get("text") or "")[:120]
         dg = _cite_digest("standard", canon, quote)
         try:
             exec_sql(
@@ -546,13 +577,11 @@ def verify_citations_for_doc(doc_id):
         return 0
     n = 0
     for b in (bases or []):
-        if not isinstance(b, dict) or b.get("kind") != "rule":
+        kind, ref = _base_ref(b)
+        parsed = _parse_ref(kind, ref)
+        if not parsed:
             continue
-        ref = (b.get("ref") or "").strip()
-        if not ref or "#" not in ref:
-            continue
-        code, _, clause = ref.partition("#")
-        canon = "standard://%s#%s" % (code.strip(), clause.strip())
+        canon, code, clause = parsed
         try:
             # 只更新已存在的账本行（不凭空造）
             exec_sql("UPDATE citation SET verified_count=verified_count+1 "
@@ -609,6 +638,18 @@ def handle_review_record(body, user=None):
     counter, err = _clean(body.get("counter"), "counter")
     if err:
         return 400, {"code": 400, "message": err}
+
+    # 去重：复核员有时会把同一条判定调两次（实测会重复）
+    try:
+        dup = q("SELECT id, verdict FROM review WHERE doc_id=%s AND verdict=%s "
+                "AND findings=%s AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR) "
+                "ORDER BY id DESC LIMIT 1",
+                (doc_id, verdict, json.dumps(findings or [], ensure_ascii=False)))
+        if dup:
+            return 200, {"code": 0, "data": {"id": dup[0]["id"], "verdict": verdict,
+                                             "duplicated": True, "verifiedBumped": 0}}
+    except Exception as exc:
+        sys.stderr.write("[review] 去重查询失败: %r\n" % (exc,))
 
     rid = exec_sql(
         "INSERT INTO review (doc_id, task_id, project_id, verdict, findings, counter, "
@@ -710,13 +751,24 @@ def handle_doc_get(doc_id, user=None):
     # 依据补全：库里的 bases 只存了 ref+text，这里补标准全名与原文摘录，
     # 前端才好点开看。规范号空格不一致（"JGJ130-2011" vs "JGJ 130-2011"），
     # 用 SQL 的 REPLACE 归一，不在 Python 里做正则拆分。
+    norm_bases = []
     for b in (bases or []):
-        if not isinstance(b, dict):
+        kind, ref = _base_ref(b)
+        parsed = _parse_ref(kind, ref)
+        if parsed:
+            canon, code, clause = parsed
+            nb = dict(b) if isinstance(b, dict) else {
+                "kind": "rule", "ref": ref, "text": ""}
+            nb["kind"], nb["ref"] = "rule", canon
+            norm_bases.append((nb, code, clause))
+        else:
+            nb = dict(b) if isinstance(b, dict) else {"kind": kind, "ref": ref, "text": ""}
+            norm_bases.append((nb, None, None))
+
+    for nb, code, clause in norm_bases:
+        b = nb
+        if not code:
             continue
-        ref = (b.get("ref") or "")
-        if b.get("kind") != "rule" or "#" not in ref:
-            continue
-        code, _, clause = ref.partition("#")
         try:
             rows2 = q("SELECT title, std_title, body, clause FROM standard "
                       "WHERE REPLACE(code,' ','')=REPLACE(%s,' ','') AND clause=%s",
@@ -734,6 +786,8 @@ def handle_doc_get(doc_id, user=None):
         body = (r2.get("body") or "").strip().replace("\n", " ")
         if body:
             b["quote"] = body[:160]
+
+    bases = [nb for nb, _, _ in norm_bases]
 
     return 200, {"code": 0, "data": {
         "id": d["id"], "projectId": d["project_id"], "kind": d["kind"], "obj": d["obj"],
