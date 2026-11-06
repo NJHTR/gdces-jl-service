@@ -32,9 +32,20 @@ export function readProject(projectId) {
   return { meta, ctx };
 }
 
+/**
+ * 项目记忆：现在有两份
+ *  - records/rules.md：项目规矩（由 memory 表渲染，唯一真相）
+ *  - memories/project.md：旧位置，若有还读（逐步淘汰，别让人以为记忆丢了）
+ * 个人记忆在家目录里（homes/<uid>/memories），容器只挂工作区，读不到 —— 那是故意的。
+ */
 export function readMemories(projectId) {
-  const f = path.join(wsPath(projectId), "memories", "project.md");
-  return existsSync(f) ? readFileSync(f, "utf8") : "";
+  const ws = wsPath(projectId);
+  const parts = [];
+  const rules = path.join(ws, "records", "rules.md");
+  if (existsSync(rules)) parts.push(readFileSync(rules, "utf8").trim());
+  const legacy = path.join(ws, "memories", "project.md");
+  if (existsSync(legacy)) parts.push(readFileSync(legacy, "utf8").trim());
+  return parts.filter(Boolean).join("\n\n");
 }
 
 /** 文件名安全化：去掉路径分隔符和非法字符 */

@@ -283,6 +283,17 @@ def check_imports():
     return 0
 
 
+def check_memories_path():
+    """readMemories 不能只读旧的 memories/project.md（那个文件早就不写了）。"""
+    fp = os.path.join(ROOT, "tools", "src", "workspace.js")
+    if not os.path.isfile(fp):
+        return []
+    src = io.open(fp, encoding="utf-8").read()
+    if 'records", "rules.md"' in src or "records/rules.md" in src:
+        return []
+    return [("readMemories 还只读 memories/project.md", "workspace.js")]
+
+
 def check_duplicate_constants():
     """core.py 的模块级常量不许定义两次。
 
