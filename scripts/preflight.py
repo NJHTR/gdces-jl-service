@@ -240,6 +240,49 @@ def check_silent_except():
     say("  [静默失败] %d 处 except+pass（基线 %d）" % (n, base))
     return n
 
+def check_imports():
+    """真 import 一次 bffpkg.api。
+
+    为什么加这条：删掉一个函数后忘了改 api.py 的 import 列表，
+    语法检查、未定义检查都过得去，但服务起不来（实测踩过）。
+    真 import 一次能把这类错误一次抓完。
+    """
+    import subprocess
+
+    # core.py 的 ROOT 是服务器绝对路径（读 .env）；不在服务器上就没法真 import，
+    # 这条检查交给服务器跑（devloop 每天 09:00 会跑 preflight）。
+    if not os.path.isdir("/home/baize/jl-service"):
+        say("  [导入] 跳过（不在服务器上；服务器 devloop 每天会跑）")
+        return 0
+
+    # 本机可能没装 pymysql（只有服务器装）：插个桩，让 import 能走完。
+    # 我们抓的是「删了函数忘改 import」，不是数据库能不能连。
+    code = (
+        "import sys, types\n"
+        "sys.path.insert(0, %r)\n"
+        "try:\n"
+        "    import pymysql\n"
+        "except ImportError:\n"
+        "    m = types.ModuleType('pymysql')\n"
+        "    c = types.ModuleType('pymysql.cursors')\n"
+        "    c.DictCursor = object\n"
+        "    m.cursors = c\n"
+        "    m.connect = lambda *a, **k: None\n"
+        "    sys.modules['pymysql'] = m\n"
+        "    sys.modules['pymysql.cursors'] = c\n"
+        "import bffpkg.api\n"
+    ) % os.path.join(ROOT, "bff")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        tail = (r.stderr or "").strip().splitlines()
+        detail = tail[-1] if tail else "import 失败"
+        add("导入失败：%s" % detail)
+        say("  [导入] 失败：%s" % detail)
+        return 1
+    say("  [导入] bffpkg.api 可导入")
+    return 0
+
+
 def main():
     say("preflight —— 提交前自检")
     total = 0
@@ -253,6 +296,7 @@ def main():
     check_hardcode()
     check_silent_except()
     total += check_agents()
+    total += check_imports()
 
     print("")
     if problems:
