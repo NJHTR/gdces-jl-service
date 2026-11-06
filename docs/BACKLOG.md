@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave5 / E3  core.py 7 组重复常量、STD_RE、clean_reply 残句
+next = Wave5 / E4  tools/workspace.js readMemories 改读 records/rules.md
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -348,7 +348,15 @@ next = Wave5 / E3  core.py 7 组重复常量、STD_RE、clean_reply 残句
       实测（重启后）：/members → 404、render-memory → 404、后台页 renderMemory 出现 0 次
       坑：最后一次部署被中断，文件已传但进程没重启 → 端点还 200；
           重跑一次 deploy（幂等）后恢复，说明"部署成功"要看进程启动时间不能只看文件
-[ ] E3 core.py 7 个重复常量、STD_RE、clean_reply 残句
+[x] E3 core.py 7 个重复常量、STD_RE、clean_reply 残句
+      · 7 组常量（AUTH_REQUIRED/TOKEN_TTL_HOURS/BLOB_ROOT/WEEK/STATE_TO_ST/
+        KIND_TO_ICON/KIND_TO_TINT）各定义两遍 → 删第二组，保留第一组
+      · STD_RE 无人使用（三个文件只 import）→ 删定义 + 三处 import
+      · clean_reply 加标点清洗：先去掉标点间空白，再合并连续标点，再逗号+句号归一
+      · 实测：「好了。。 。 请看 /home/a/b.md」→「好了。请看」；
+              「已出稿 /home/x/a.md，。 请查收。」→「已出稿，请查收。」
+      · 线上复核：重复常量 0、STD_RE 残留 0
+      门禁：preflight 新增「常量不许重复定义」；smoke 新增「清洗后无残句标点」
 [ ] E4 tools/workspace.js readMemories 改读 records/rules.md
 [ ] E5 test-sandbox 补 .gitignore
 [ ] E6 preflight 加：模板签名、记忆唯一写者、data/exports 存在
