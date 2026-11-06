@@ -10,7 +10,8 @@
 param(
   [string]$Remote = "rokid-r640",
   [string]$RemoteDir = "/home/baize/jl-service",
-  [switch]$SkipSmoke
+  [switch]$SkipSmoke,
+  [switch]$Acceptance
 )
 
 $ErrorActionPreference = "Stop"
