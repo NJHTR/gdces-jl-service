@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave5 / E5  工作区 .gitignore（test-sandbox 缺，防 .agent/ 进仓库）
+next = Wave5 / E6  preflight 补三项检查（模板结构签名 / 记忆唯一写者 / data/exports 存在）
 ```
 
 ## 本轮踩的坑（记下来，避免重犯）
@@ -364,7 +364,12 @@ next = Wave5 / E5  工作区 .gitignore（test-sandbox 缺，防 .agent/ 进仓�
         memoriesFile 返回「# 项目规矩 … - 整改回复必须附整改前后对比图…」✓
         wsPath=/ws/test-sandbox
       preflight 新增：readMemories 必须读 records/rules.md
-[ ] E5 test-sandbox 补 .gitignore
+[x] E5 工作区 .gitignore 由代码保证
+      biz.ensure_ws_gitignore()：写 .gitignore（.agent/、*.tmp、tmp/）+ 无条件 git rm --cached .agent
+      render_project_memory 每轮调用（老工作区会被补上）；preflight 加"代码保证"检查
+      实测：三个工作区都补上；被跟踪 .agent 文件 0 个；.agent/ 新临时文件不进 git status
+      两个坑：① .gitignore 只管未跟踪文件，已提交的要 git rm --cached
+              ② 第一版"内容一样就早退"，永远走不到取消跟踪那步
 [ ] E6 preflight 加：模板签名、记忆唯一写者、data/exports 存在
 ```
 
