@@ -52,16 +52,18 @@ def template_path(spec):
 
 # ---------------------------------------------------------------- 结构签名
 def table_signature(tb):
+    """结构签名：(行数, 列数, 每行(单元格数, 去合并后的真实格数))。
+
+    注意：不能用 id(cell._tc) 去重 —— lxml 的元素代理会回收，
+    id() 可能被复用，导致"明明是不同格子却判成同一个"（踩过）。
+    这里用元素对象做 key（dict 持有引用，hash 稳定）。
+    """
     rows = []
     for r in tb.rows:
-        seen, uniq = {}, 0
+        seen = {}
         for c in r.cells:
-            k = id(c._tc)
-            if k in seen:
-                continue
-            seen[k] = 1
-            uniq += 1
-        rows.append((len(r.cells), uniq))
+            seen[c._tc] = 1
+        rows.append((len(r.cells), len(seen)))
     return (len(tb.rows), len(tb.columns), tuple(rows))
 
 
@@ -101,11 +103,15 @@ def find_cell(tb, label):
 
 
 def cell_right_of(tb, ri, ci):
-    """同一行、标签单元格右边第一个"不同的"单元格（跳过合并重复）。"""
+    """同一行、标签单元格右边第一个"不同的"单元格（跳过合并重复）。
+
+    用 `is` 比较元素对象，别用 id()：代理对象回收后 id 会复用。
+    """
     row = tb.rows[ri]
-    anchor = id(row.cells[ci]._tc)
+    anchor_el = row.cells[ci]._tc
     for cj in range(ci + 1, len(row.cells)):
-        if id(row.cells[cj]._tc) != anchor:
+        el = row.cells[cj]._tc
+        if el is not anchor_el:
             return row.cells[cj]
     return None
 
