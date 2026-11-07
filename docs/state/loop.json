@@ -1,18 +1,36 @@
 {
-  "round": 3,
+  "round": 4,
   "wave": "Wave7 稳定性",
-  "pointer": "M1 记忆 v2 表与状态机（需你批准 schema 变更）",
-  "attempts": {},
+  "pointer": "CHECKPOINT · M1-schema 完成；M1b 双写/影子读待批（需定 0001 应用到 jl 或测试 BFF）",
+  "attempts": {
+    "P0-perf": 3,
+    "D0": 1,
+    "M1": 1
+  },
   "budget": {
     "max_attempts_per_item": 2,
     "max_items_per_wave": 6,
     "max_rounds": 24
   },
+  "approvals": {
+    "M1": {
+      "approved_by": "lead (human-delegated)",
+      "scope": [
+        "only add memory_item/memory_variant/memory_use/memory_review/memory_audit + schema_migrations",
+        "scratch DB jl_m1 only; never apply to jl",
+        "no dual-write, no read path, no feature flag enable",
+        "no production schema apply or cutover",
+        "one commit, no server hand edits"
+      ],
+      "expires": "2026-11-10",
+      "consumed_at": "2026-11-08T00:24:00+08:00"
+    }
+  },
   "blocked": [
     {
-      "item": "M1 记忆 v2（memory_item/variant/use/review/audit + 状态机）",
-      "type": "SCHEMA",
-      "reason": "改 schema 属 STOP 条件：需要你明确批准后单独一项做；P1-1 的 memory_use 事件表并入 M1，不单开一轮"
+      "item": "M1b 双写 + 影子读",
+      "type": "DECISION",
+      "reason": "需要先定 0001 应用目标：应用到生产 jl（需人批）或起测试 BFF 连 jl_m1；当前只完成 schema"
     },
     {
       "item": "F3 真实待补（yun-gu 71 + baiyun 2）",
@@ -27,19 +45,30 @@
     {
       "item": "B6.5 监理检查记录",
       "type": "DECISION",
-      "reason": "决策写的是「不做省统表 + 走非正式导出」，但代码没有非正式导出；要么补实现，要么清掉待拍板"
-    },
-    {
-      "item": "M1 记忆 v2 表与状态机",
-      "type": "SCHEMA",
-      "reason": "改 schema 属于 STOP 条件，需要人批准后单独一项做"
+      "reason": "决策写了「不做省统表 + 走非正式导出」，但代码没有非正式导出"
     },
     {
       "item": "T6.5 测试隔离落点",
       "type": "DECISION",
-      "reason": "A 测试栈（半天~一天）或 B 同库测试模式（1~2 小时）"
+      "reason": "A 测试栈 / B 同库测试模式；M1 用 jl_m1 影子库绕开，暂缓"
     }
   ],
-  "last_receipt": "docs/receipts/20261107-2357-D0.json",
-  "updated_at": "2026-11-08T00:00:00+08:00"
+  "last_receipt": "docs/receipts/20261108-0021-M1-schema.json",
+  "checkpoint": {
+    "at": "2026-11-08T00:24:00+08:00",
+    "item": "M1-schema",
+    "verdict": "pass",
+    "builder_commit": "700d3b2",
+    "receipt": "docs/receipts/20261108-0021-M1-schema.json",
+    "verified_by": "verifier:independent",
+    "evidence": "jl_m1 6 tables (5 v2 + schema_migrations); apply/re-apply/rollback/re-apply; checksum tamper + drop negative; --database jl exit 2; jl.memory 39 rows unchanged; diff_hash aec5861d3a72b9f8",
+    "gates": {
+      "preflight": "not_run",
+      "deploy": "not_applicable",
+      "smoke": "not_applicable",
+      "acceptance": "not_applicable",
+      "negative": "pass"
+    }
+  },
+  "updated_at": "2026-11-08T00:24:00+08:00"
 }

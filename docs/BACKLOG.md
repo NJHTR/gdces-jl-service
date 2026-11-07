@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = T6 测试隔离（M1 前置；五条验收见下）
+next = CHECKPOINT · M1-schema 完成；M1b 双写/影子读待批（需定 0001 应用到 jl 或测试 BFF）
        之后 M1：memory_item / variant / use / review / audit + 状态机
        （P1-1 事件表并入 M1，不单开一轮）
        仍等你：F3 待补清理 / D1b 补照片描述 / D2 真机验收
@@ -584,7 +584,7 @@ F3 数字：按项目实算见「LOOP 已落地」段（test-sandbox 80 待补�
 [ ] M0 设计定稿：按 D-表式-02 / D-记忆-03~11 锁定口径
        （排序三段启用 / 引擎 A / 影子 3 天 / 全降级+20 条 / 单写者 / project 默认）
        + 指标口径（注入精度/应用率/纠正率/重复率/漂移/成本）
-[ ] M1 数据模型：memory_item / memory_variant / memory_use / memory_review / memory_audit
+[~] M1 数据模型：memory_item / memory_variant / memory_use / memory_review / memory_audit（schema-only 完成 2026-11-08：700d3b2 + 回执 20261108-0021；jl_m1 验证；jl 未动；M1b 双写/影子读待批）
       状态机 candidate→active→superseded/archived/expired；新旧并存、可回滚
 [ ] M2 写入闸门：候选制（④：自动→candidate；显式「记住」/手动/确认→active）
       + 来源白名单（只认显式「记住」/编辑 diff/驳回/确认）

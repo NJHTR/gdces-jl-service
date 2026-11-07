@@ -1,0 +1,355 @@
+{
+  "round": 3,
+  "item": "M1-schema",
+  "type": "IMPL",
+  "commit": "700d3b2",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "700d3b2"
+    }
+  ],
+  "files": [
+    "db/migrations/0001_memory_v2.sql",
+    "db/migrations/0001_memory_v2.down.sql",
+    "scripts/migrate.py",
+    "scripts/check-memory-v2.py",
+    "docs/M1-DESIGN.md"
+  ],
+  "file_sha256": {
+    "db/migrations/0001_memory_v2.sql": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+    "db/migrations/0001_memory_v2.down.sql": "ae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527",
+    "scripts/migrate.py": "7beda945993469a30edbce38dbe956f914f4f9d97c4aa2f025f9f70d9d2bb83b",
+    "scripts/check-memory-v2.py": "21c4e431dc3a6bbc00db5d9302b7e5fbcd3818114606fed214d3567dda692557",
+    "docs/M1-DESIGN.md": "8b602fc3ff3961023ff3aa0f3a67f04a37eb3400450741bf57e4a3b692315186"
+  },
+  "base_commit": "2521607",
+  "diff_hash": "aec5861d3a72b9f8",
+  "diff_hash_algo": "sha256(git diff 2521607ebc7091d5fa2028c554700701a01f5586..700d3b2213b9b007572332bae8997387baeab344 raw bytes)[:16]",
+  "diff_len": 45310,
+  "diff_per_repo": [
+    {
+      "repo": "jl-service",
+      "base": "2521607",
+      "sha": "700d3b2",
+      "diff_len": 45310,
+      "files_changed": 5
+    }
+  ],
+  "scope_check": {
+    "git_show_stat_files": [
+      "db/migrations/0001_memory_v2.down.sql",
+      "db/migrations/0001_memory_v2.sql",
+      "docs/M1-DESIGN.md",
+      "scripts/check-memory-v2.py",
+      "scripts/migrate.py"
+    ],
+    "only_allowed_files": true,
+    "forbidden_hits": [],
+    "pre_existing_uncommitted_excluded": [
+      "docs/BACKLOG.md",
+      "docs/state/loop.json"
+    ],
+    "reviewed_only_commit": "700d3b2",
+    "code_edits_by_verifier": false
+  },
+  "environment": {
+    "host": "baize-R640 via ssh rokid-r640",
+    "python": "3.14.4",
+    "mysql_driver": "pymysql 2.2.8",
+    "db": "127.0.0.1:3309 user=jl",
+    "scratch_db": "jl_m1",
+    "production_db_touched": false,
+    "test_dir": "/tmp/m1-verify (removed after run)",
+    "server_time_at_run": "2026-11-08 00:21:15 +0800"
+  },
+  "baseline": {
+    "jl_m1_tables_before": [
+      "memory_audit",
+      "memory_item",
+      "memory_review",
+      "memory_use",
+      "memory_variant",
+      "schema_migrations"
+    ],
+    "jl_m1_recreated_from_scratch": true,
+    "jl_m1_recreate_method": "DROP TABLE IF EXISTS all 6 residual tables (builder state) via jl@% on jl_m1.*, verified 0 tables, then migrate.py re-created schema",
+    "jl_memory_rows": 39,
+    "jl_memory_pct_tables": 0,
+    "jl_tables": 19,
+    "tested_artifact": "raw committed blobs extracted with git show 700d3b2:<path> and uploaded; server sha256 equals committed blob sha256 (LF bytes, not Windows CRLF worktree copy)"
+  },
+  "dod": [
+    {
+      "check": "commit 700d3b2 contains only the 5 allowed files (no bff/*, BACKLOG, loop.json, receipts, deploy)",
+      "cmd": "git show --stat --name-only --format= 700d3b2",
+      "expect": "db/migrations/0001_memory_v2.sql, db/migrations/0001_memory_v2.down.sql, scripts/migrate.py, scripts/check-memory-v2.py, docs/M1-DESIGN.md only; 5 files, 1057 insertions",
+      "pass": true
+    },
+    {
+      "check": "diff anchored to non-empty base != commit",
+      "cmd": "git diff 2521607ebc7091d5fa2028c554700701a01f5586..700d3b2213b9b007572332bae8997387baeab344",
+      "expect": "5 files added (A), diff_len=45310, diff_hash=aec5861d3a72b9f8, base 2521607 != commit 700d3b2",
+      "pass": true
+    },
+    {
+      "check": "fresh apply on jl_m1 from scratch",
+      "cmd": "ssh rokid-r640 'cd /tmp/m1-verify && python3 scripts/migrate.py --env-file /home/baize/jl-service/.env'",
+      "expect": "exit 0, MIGRATE_OK (1 migration(s) applied), 6 statements",
+      "pass": true
+    },
+    {
+      "check": "re-apply is a no-op",
+      "cmd": "python3 scripts/migrate.py --env-file /home/baize/jl-service/.env",
+      "expect": "exit 0, SKIP 0001_memory_v2 (already applied, checksum ok), MIGRATE_OK (no-op), schema_migrations count stays 1",
+      "pass": true
+    },
+    {
+      "check": "migration state check + structural checker pass",
+      "cmd": "python3 scripts/migrate.py --env-file ... --check ; python3 scripts/check-memory-v2.py --env-file ...",
+      "expect": "migrate: exit 0 MIGRATIONS_OK; checker: exit 0 M1_OK, 99 PASS / 0 FAIL",
+      "pass": true
+    },
+    {
+      "check": "rollback removes 5 v2 tables and the migration row",
+      "cmd": "python3 scripts/migrate.py --env-file ... --rollback",
+      "expect": "exit 0 ROLLBACK_OK; information_schema memory_% tables = 0; schema_migrations row count = 0 (table itself remains)",
+      "pass": true
+    },
+    {
+      "check": "post-rollback check fails as expected",
+      "cmd": "migrate.py --check ; check-memory-v2.py",
+      "expect": "migrate exit 1 MIGRATIONS_NOT_APPLIED; checker exit 1 M1_FAIL",
+      "pass": true
+    },
+    {
+      "check": "re-apply after rollback restores schema and checks pass",
+      "cmd": "python3 scripts/migrate.py ... ; migrate.py --check ; check-memory-v2.py",
+      "expect": "6 tables, migrate exit 0 MIGRATIONS_OK, checker exit 0 M1_OK",
+      "pass": true
+    },
+    {
+      "check": "--database jl hard-refused by both scripts",
+      "cmd": "python3 scripts/migrate.py --env-file ... --database jl ; python3 scripts/check-memory-v2.py --env-file ... --database jl",
+      "expect": "both exit 2, FATAL: REFUSED, no connection/DDL against jl",
+      "pass": true
+    },
+    {
+      "check": "database jl untouched by whole run",
+      "cmd": "SHOW TABLES IN jl LIKE 'memory_%' (via information_schema count); SELECT COUNT(*) FROM jl.memory; SHOW CREATE TABLE jl.memory",
+      "expect": "memory_% tables in jl = 0; jl.memory rows = 39 before and after; jl table count = 19 before and after; SHOW CREATE TABLE jl.memory byte-identical before/after",
+      "pass": true
+    },
+    {
+      "check": "negative: tampered checksum is detected (then restored)",
+      "cmd": "UPDATE schema_migrations SET checksum=REPEAT('0',64); migrate.py --check; migrate.py (apply)",
+      "expect": "check exit 1 MISMATCH + MIGRATIONS_NOT_APPLIED; apply exit 1 FATAL CHECKSUM MISMATCH; restore checksum -> check exit 0 MIGRATIONS_OK",
+      "pass": true
+    },
+    {
+      "check": "negative: dropped v2 table is detected (then restored)",
+      "cmd": "DROP TABLE memory_variant; check-memory-v2.py",
+      "expect": "checker exit 1 M1_FAIL naming missing memory_variant; rollback+re-apply -> 6 tables, checker exit 0 M1_OK",
+      "pass": true
+    },
+    {
+      "check": "memory_item structure: enums, columns, indexes, InnoDB/utf8mb4",
+      "cmd": "SHOW CREATE TABLE memory_item + information_schema queries",
+      "expect": "17 columns; enums kind/scope/status/created_by exact; status default candidate, confidence 0.500, outcome default unknown; 5 indexes in declared order (idx_scope_status, idx_project_status, idx_kind_status, idx_expires + PK); ENGINE=InnoDB CHARSET=utf8mb4; all 6 tables InnoDB + utf8mb4 + table comments",
+      "pass": true
+    },
+    {
+      "check": "exactly 3 FKs, all to memory_item(id) ON DELETE CASCADE",
+      "cmd": "SELECT ... FROM information_schema.key_column_usage JOIN referential_constraints WHERE table_schema='jl_m1'",
+      "expect": "3 rows: memory_variant/memory_use/memory_review item_id -> memory_item.id CASCADE",
+      "pass": true
+    },
+    {
+      "check": "no server hand edits; tests confined to /tmp and cleaned",
+      "cmd": "find /home/baize/jl-service -maxdepth 4 \\( -path '*/data' -o -path '*/backups' -o -path '*/runtime' \\) -prune -o -newermt '2026-11-08 00:00' -printf '%p\\n' ; ls -d /tmp/m1*",
+      "expect": "empty find output (no deployed/repo file modified during builder M1 run); verifier test dir /tmp/m1-verify removed after evidence download; no code or repo file edited by verifier",
+      "pass": true
+    }
+  ],
+  "evidence": [
+    {
+      "check": "commit file scope",
+      "cmd": "git show --stat 700d3b2 (local repo)",
+      "exit": 0,
+      "expect": "5 allowed files only",
+      "pass": true,
+      "out_tail": "db/migrations/0001_memory_v2.down.sql | 11 +\ndb/migrations/0001_memory_v2.sql | 100 +\ndocs/M1-DESIGN.md | 92 +\nscripts/check-memory-v2.py | 430 +\nscripts/migrate.py | 424 +\n5 files changed, 1057 insertions(+)"
+    },
+    {
+      "check": "tested bytes = committed blobs",
+      "cmd": "sha256sum db/migrations/*.sql scripts/*.py docs/M1-DESIGN.md on server /tmp/m1-verify",
+      "exit": 0,
+      "expect": "f8751b76.. / ae9f4cf5.. / 7beda945.. / 21c4e431.. / 8b602fc3..",
+      "pass": true,
+      "out_tail": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae  db/migrations/0001_memory_v2.sql\nae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527  db/migrations/0001_memory_v2.down.sql\n7beda945993469a30edbce38dbe956f914f4f9d97c4aa2f025f9f70d9d2bb83b  scripts/migrate.py\n21c4e431dc3a6bbc00db5d9302b7e5fbcd3818114606fed214d3567dda692557  scripts/check-memory-v2.py\n8b602fc3ff3961023ff3aa0f3a67f04a37eb3400450741bf57e4a3b692315186  docs/M1-DESIGN.md"
+    },
+    {
+      "check": "scratch DB recreated empty first",
+      "cmd": "DROP TABLE IF EXISTS memory_audit,memory_review,memory_use,memory_variant,memory_item,schema_migrations; SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='jl_m1'",
+      "exit": 0,
+      "expect": "0 tables",
+      "pass": true,
+      "out_tail": "OK rows=0 -> count=0"
+    },
+    {
+      "check": "apply #1",
+      "cmd": "python3 scripts/migrate.py --env-file /home/baize/jl-service/.env",
+      "exit": 0,
+      "expect": "MIGRATE_OK (1 migration(s) applied)",
+      "pass": true,
+      "out_tail": "database=jl_m1 env_file=.env migrations=1\nAPPLY 0001_memory_v2  <- 0001_memory_v2.sql\n  OK  6 statement(s)\nMIGRATE_OK (1 migration(s) applied)"
+    },
+    {
+      "check": "apply #2 no-op",
+      "cmd": "python3 scripts/migrate.py --env-file /home/baize/jl-service/.env",
+      "exit": 0,
+      "expect": "MIGRATE_OK (no-op), schema_migrations count 1",
+      "pass": true,
+      "out_tail": "SKIP  0001_memory_v2 (already applied, checksum ok)\nMIGRATE_OK (no-op: all migrations already applied)\nschema_migrations count=1"
+    },
+    {
+      "check": "migrate --check after apply",
+      "cmd": "python3 scripts/migrate.py --env-file ... --check",
+      "exit": 0,
+      "expect": "MIGRATIONS_OK",
+      "pass": true,
+      "out_tail": "APPLIED 0001_memory_v2 (checksum ok)\nMIGRATIONS_OK"
+    },
+    {
+      "check": "check-memory-v2.py after apply",
+      "cmd": "python3 scripts/check-memory-v2.py --env-file /home/baize/jl-service/.env",
+      "exit": 0,
+      "expect": "M1_OK, 99 PASS lines, 0 FAIL",
+      "pass": true,
+      "out_tail": "PASS  外键 = 3 条且都指向 memory_item(id) ON DELETE CASCADE\nPASS  0001_memory_v2 已应用且 checksum 与仓库文件一致\nM1_OK"
+    },
+    {
+      "check": "schema_migrations row records committed file checksum",
+      "cmd": "SELECT version, checksum, applied_at FROM schema_migrations",
+      "exit": 0,
+      "expect": "0001_memory_v2 f8751b76..",
+      "pass": true,
+      "out_tail": "0001_memory_v2\tf8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae\t2026-11-08 00:21:20"
+    },
+    {
+      "check": "rollback",
+      "cmd": "python3 scripts/migrate.py --env-file ... --rollback",
+      "exit": 0,
+      "expect": "ROLLBACK_OK, memory_% tables 0, migration rows 0",
+      "pass": true,
+      "out_tail": "ROLLBACK 0001_memory_v2  <- 0001_memory_v2.down.sql\n  OK  6 statement(s), schema_migrations row deleted\nROLLBACK_OK (1 migration(s) rolled back)\nmemory_% tables=0; schema_migrations rows=0; schema_migrations table=1"
+    },
+    {
+      "check": "check after rollback fails",
+      "cmd": "migrate.py --check ; check-memory-v2.py",
+      "exit": 1,
+      "expect": "MIGRATIONS_NOT_APPLIED / M1_FAIL",
+      "pass": true,
+      "out_tail": "PENDING  0001_memory_v2\nMIGRATIONS_NOT_APPLIED\n---\nFAIL  6 张表存在（5 张 memory_* + schema_migrations） -- 缺少 ...\nM1_FAIL"
+    },
+    {
+      "check": "re-apply + re-check after rollback",
+      "cmd": "migrate.py ; migrate.py --check ; check-memory-v2.py",
+      "exit": 0,
+      "expect": "6 tables; MIGRATIONS_OK; M1_OK",
+      "pass": true,
+      "out_tail": "MIGRATE_OK (1 migration(s) applied) --- MIGRATIONS_OK --- M1_OK"
+    },
+    {
+      "check": "hard refuse --database jl",
+      "cmd": "migrate.py --database jl ; check-memory-v2.py --database jl",
+      "exit": 2,
+      "expect": "exit 2 REFUSED both",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 拒绝操作生产库 'jl' ... exit 2\nFATAL: REFUSED: 拒绝检查生产库 'jl' ... exit 2"
+    },
+    {
+      "check": "jl untouched",
+      "cmd": "jl memory_% table count; jl.memory COUNT; jl table count; cmp SHOW CREATE TABLE jl.memory before/after",
+      "exit": 0,
+      "expect": "0; 39; 19; identical",
+      "pass": true,
+      "out_tail": "jl memory_% count=0; jl.memory rows=39; jl tables=19; SHOW CREATE TABLE jl.memory cmp exit=0 (byte-identical)"
+    },
+    {
+      "check": "negative tampered checksum",
+      "cmd": "UPDATE schema_migrations SET checksum=REPEAT('0',64); migrate.py --check; migrate.py",
+      "exit": 1,
+      "expect": "MISMATCH / CHECKSUM MISMATCH",
+      "pass": true,
+      "out_tail": "MISMATCH 0001_memory_v2：已应用=0000..0000 文件=f8751b76..\nMIGRATIONS_NOT_APPLIED\nFATAL: CHECKSUM MISMATCH 0001_memory_v2 ...（迁移文件被改动过，拒绝继续）"
+    },
+    {
+      "check": "negative tampered checksum restored",
+      "cmd": "UPDATE schema_migrations SET checksum='f875..'; migrate.py --check",
+      "exit": 0,
+      "expect": "MIGRATIONS_OK",
+      "pass": true,
+      "out_tail": "APPLIED 0001_memory_v2 (checksum ok)\nMIGRATIONS_OK"
+    },
+    {
+      "check": "negative dropped table",
+      "cmd": "DROP TABLE memory_variant; check-memory-v2.py",
+      "exit": 1,
+      "expect": "M1_FAIL naming memory_variant",
+      "pass": true,
+      "out_tail": "FAIL  6 张表存在（5 张 memory_* + schema_migrations） -- 缺少 memory_variant\n...\nM1_FAIL"
+    },
+    {
+      "check": "restore after dropped table",
+      "cmd": "migrate.py --rollback ; migrate.py ; check-memory-v2.py",
+      "exit": 0,
+      "expect": "6 tables; M1_OK",
+      "pass": true,
+      "out_tail": "ROLLBACK_OK (1 migration(s) rolled back) --- MIGRATE_OK (1 migration(s) applied) --- 6 tables --- M1_OK"
+    },
+    {
+      "check": "SHOW CREATE TABLE memory_item",
+      "cmd": "SHOW CREATE TABLE memory_item (jl_m1)",
+      "exit": 0,
+      "expect": "InnoDB/utf8mb4, enums, 5 indexes",
+      "pass": true,
+      "out_tail": "CREATE TABLE `memory_item` (... `kind` enum('rule','style','fact_ref') NOT NULL ... `scope` enum('global','project','project_user','user') ... `status` enum('candidate','active','superseded','archived','expired') NOT NULL DEFAULT 'candidate' ... `confidence` decimal(4,3) NOT NULL DEFAULT '0.500' ... `created_by` enum('user','model','import') ... PRIMARY KEY (`id`), KEY `idx_scope_status` (`scope`,`scope_id`,`status`), KEY `idx_project_status` (`project_id`,`status`), KEY `idx_kind_status` (`kind`,`status`), KEY `idx_expires` (`expires_at`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='记忆规则主表（v2）'"
+    },
+    {
+      "check": "columns / indexes / FKs / engine+charset",
+      "cmd": "information_schema queries on jl_m1",
+      "exit": 0,
+      "expect": "17 cols; 4 enums; 5 indexes; 3 FKs CASCADE; 6 tables InnoDB+utf8mb4",
+      "pass": true,
+      "out_tail": "memory_item columns=17; enums=4; distinct indexes=5; idx_use_item_time=(item_id,injected_at); FK count=3 CASCADE; table_meta InnoDB=6 utf8mb4=6; jl_m1 default charset=utf8mb4"
+    },
+    {
+      "check": "server hygiene: no hand edits, temp cleaned",
+      "cmd": "find /home/baize/jl-service ... -newermt '2026-11-08 00:00' ; ls -d /tmp/m1*",
+      "exit": 0,
+      "expect": "no deployed/repo files modified; verifier tmp dir gone",
+      "pass": true,
+      "out_tail": "find stdout empty (no files modified after 2026-11-08 00:00 outside data/backups/runtime); after cleanup ls -d /tmp/m1* only shows builder-retained /tmp/m1-memory-v2-evidence and /tmp/m1finish.sh; /tmp/m1-verify removed"
+    }
+  ],
+  "gates": {
+    "preflight": "not_run",
+    "deploy": "not_applicable",
+    "smoke": "not_applicable",
+    "acceptance": "not_applicable",
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "verified_by": "verifier:independent",
+  "verified_at": "2026-11-08T00:21:57+0800",
+  "notes": [
+    "Independent verifier: did not read or trust builder's evidence for any assertion; all DoD checks executed first-hand against a scratch DB recreated from zero tables.",
+    "Tested raw committed blob bytes (git show 700d3b2:<path>), not the Windows worktree copy: worktree is CRLF due to core.autocrlf=true, committed blobs are LF. Server sha256 of tested bytes equals committed blob sha256, and equals the migration checksum recorded in schema_migrations.",
+    "jl_m1 pre-existing builder state (6 tables, checksum f8751b76.. matching committed blob) was dropped and the schema recreated from scratch before apply.",
+    "Self-check harness result: 151 PASS / 0 FAIL across preflight, apply/no-op, rollback/re-apply, both negative tests, structure inspection, jl invariants and hygiene.",
+    "Verifier wrote no code and committed nothing; only write in repo is this receipt (left uncommitted for Lead). docs/BACKLOG.md and docs/state/loop.json remain the pre-existing uncommitted changes and were excluded from review.",
+    "Builder-retained /tmp/m1finish.sh and /tmp/m1-memory-v2-evidence/ (deliberate evidence, created 00:14) remain on the server; all working test copies were removed by the builder, and the verifier's /tmp/m1-verify was removed after evidence download.",
+    "Post-cleanup read-only snapshot at 2026-11-08 00:23:05 +0800 (docker exec jl-mysql mysql, after all test files removed): jl_m1 has exactly 6 tables (memory_audit, memory_item, memory_review, memory_use, memory_variant, schema_migrations); schema_migrations = 0001_memory_v2 f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae; jl memory_% tables = 0; jl.memory rows = 39; jl tables = 19; memory_item.status default = candidate."
+  ]
+}
