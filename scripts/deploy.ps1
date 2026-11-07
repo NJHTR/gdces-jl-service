@@ -62,6 +62,13 @@ bash scripts/check-process-fresh.sh
 $cmd = $cmd -replace '__DIR__', $RemoteDir
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cmd -replace "`r`n", "`n")))
 $out = ssh -o ConnectTimeout=200 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
+
+# 关键：ssh 的退出码必须检查。远程 exit 3 只让 ssh 返回 3，PowerShell 不会自动抛错；
+# 不检查的话 STALE 只是"打印一行"，部署照样成功（第三次同类假绿）
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "STALE: 进程未重启或门禁未通过（ssh 退出 $LASTEXITCODE），部署失败" -ForegroundColor Red
+  exit 3
+}
 $out.Trim().Split("`n") | ForEach-Object { "  $_" }
 
 # 4.5) 删除清单：scp 只覆盖不删除，删掉的文件必须显式清理

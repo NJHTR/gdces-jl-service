@@ -157,8 +157,17 @@ def ensure_home(user_id):
             sys.stderr.write("[home] 生成配置不合法，放弃写入 %s: %r\n" % (cfg, e))
             return home
         if os.path.exists(cfg):
-            with contextlib.suppress(OSError):
-                shutil.copyfile(cfg, cfg + ".bak")
+            # .bak 也不能留 [memories]：否则有人用 .bak 回滚，77 户的记忆配置集体复活
+            try:
+                with open(cfg, encoding="utf-8") as f:
+                    prev = f.read()
+                if not mem_on:
+                    prev = _strip_table(prev, "[memories]")
+                    prev = _cfg_stride(prev, "memories", "false") if "[features]" in prev else prev
+                with open(cfg + ".bak", "w", encoding="utf-8") as f:
+                    f.write(prev)
+            except OSError as e:
+                sys.stderr.write("[home] 写 .bak 失败 %s: %r\n" % (cfg, e))
         os.replace(tmp, cfg)
     except Exception as exc:
         sys.stderr.write("[home] 准备 %s 失败：%s\n" % (home, exc))

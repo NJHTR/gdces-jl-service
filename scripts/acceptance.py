@@ -62,9 +62,12 @@ def main():
 
     n_doc = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s'" % PROJECT)
     n_todo = sql("SELECT COUNT(*) FROM doc WHERE state='待补' AND project_id='%s'" % PROJECT)
-    n_mem = sql("SELECT COUNT(*) FROM memory WHERE status=1 AND "
-                "(owner_id='%s' OR scope='user')" % PROJECT)
-    item("数据可读", n_doc.isdigit(), "文书 %s（待补 %s）· 记忆 %s" % (n_doc, n_todo, n_mem))
+    n_mem_proj = sql("SELECT COUNT(*) FROM memory WHERE status=1 AND "
+                     "scope='project' AND owner_id='%s'" % PROJECT)
+    n_mem_user = sql("SELECT COUNT(*) FROM memory WHERE status=1 AND scope='user'")
+    item("数据可读", n_doc.isdigit(),
+         "文书 %s（待补 %s）· 项目记忆 %s · 用户级记忆(全库) %s"
+         % (n_doc, n_todo, n_mem_proj, n_mem_user))
 
     st, b = call("GET", "/api/v1/metrics/memory?projectId=" + PROJECT)
     tot = ((b.get("data") or {}).get("totals") or {})
@@ -123,6 +126,18 @@ def main():
         if "[memories]" in txt:
             seg.append(cf)
     item("[memories] 配置段已清零", not seg, "%d 份还留着" % len(seg))
+
+    # .bak 里也不能有 [memories]（否则回滚 .bak 会让记忆配置复活）
+    bad_bak = []
+    for cf in _glob.glob(os.path.join(ROOT, "data", "homes", "*", "config.toml.bak")):
+        if "[memories]" in io.open(cf, encoding="utf-8").read():
+            bad_bak.append(cf)
+    item(".bak 不含 [memories]", not bad_bak, "%d 份含" % len(bad_bak))
+
+    # 隔离目录必须独立于 homes（否则备份脚本 maxdepth 找不到）
+    q = os.path.join(ROOT, "data", "quarantine")
+    item("隔离目录在 data/quarantine", os.path.isdir(q),
+         "不存在（隔离文件可能又放在 homes 下了）" if not os.path.isdir(q) else "")
 
     # 备份
     bdir = os.path.join(ROOT, "backups")
