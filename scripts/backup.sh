@@ -14,6 +14,7 @@
 #   4) tar -xzf mem-*.tar.gz  -C data/         # homes 里的记忆与配置
 #   5) tar -xzf know-*.tar.gz -C data/         # 规范/模板/技能
 #   6) tar -xzf exports-*.tar.gz -C data/      # 已生成的巡视记录/表式 docx
+#   7) tar -xzf quarantine-*.tar.gz -C data/   # 隔离区（旧记忆产物，不删）
 set -uo pipefail
 
 R=/home/baize/jl-service
@@ -72,7 +73,14 @@ else
   say "导出备份失败（或目录不存在）"
 fi
 
-# 7) 只留 7 天
+# 7) 隔离区（不删的旧记忆产物：磁盘坏了也要能找回）
+if [ -d "$R/data/quarantine" ] && tar -czf "$B/quarantine-$STAMP.tar.gz" -C "$R/data" quarantine 2>/dev/null; then
+  say "隔离区备份 $(du -h "$B/quarantine-$STAMP.tar.gz" | cut -f1)"
+else
+  say "隔离区备份失败（或目录不存在）"
+fi
+
+# 8) 只留 7 天
 find "$B" -name '*.gz' -type f -mtime +7 -delete
 
 say "完成，当前备份 $(ls -1 "$B" | wc -l) 个"
