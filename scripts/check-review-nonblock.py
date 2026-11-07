@@ -81,7 +81,14 @@ def main():
             break
         time.sleep(2)
 
-    final_state = (call("GET", "/api/v1/tasks/%s" % tid).get("data") or {}).get("reviewStatus")
+    # review 行写完后，task.result 的更新可能晚几百毫秒：等它变 done（最多 15s）
+    final_state = None
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        final_state = (call("GET", "/api/v1/tasks/%s" % tid).get("data") or {}).get("reviewStatus")
+        if final_state in ("done", "failed", "skipped"):
+            break
+        time.sleep(1)
 
     print("  doc=%s task=%s" % (doc_id, tid))
     print("  t_done   = %.1fs (reviewStatus=%s)" % (done_at - t0, status_at_done))
