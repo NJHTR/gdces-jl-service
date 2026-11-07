@@ -97,10 +97,29 @@ def main():
         commits.append({"repo": os.path.basename(repo), "sha": short,
                         "path": repo, "files": files})
 
-    base = sh("git rev-parse %s^" % commits[0]["sha"], cwd=commits[0]["path"]) or ""
+    # 注意：Windows cmd 会把 ^ 当转义符吃掉，git rev-parse <sha>^ 会解析成 <sha> 自己，
+    # 导致 base == commit、diff 为空、diff_hash = sha256("")。改用 ~1 且用完整 sha。
+    base_full = ""
     h = hashlib.sha256()
+    per_repo = []
     for c in commits:
-        h.update(sh("git diff %s^..%s" % (c["sha"], c["sha"]), cwd=c["path"]).encode())
+        full = sh("git rev-parse %s" % c["sha"], cwd=c["path"])
+        parent = sh("git rev-parse %s~1" % full, cwd=c["path"])
+        if not parent or parent == full:
+            print("失败：%s 没有父提交（或解析不到 parent），diff_hash 无法覆盖改动" % c["sha"])
+            return 1
+        d = sh("git diff %s..%s" % (parent, full), cwd=c["path"])
+        if not d.strip():
+            print("失败：%s 的 diff 为空" % c["sha"])
+            return 1
+        h.update(d.encode())
+        per_repo.append({"repo": c["repo"], "base": parent[:7], "sha": full[:7],
+                         "diff_len": len(d)})
+        if not base_full:
+            base_full = parent
+    if not base_full:
+        print("失败：没有可用的 base_commit")
+        return 1
     diff_hash = h.hexdigest()[:16]
 
     dod = json.load(io.open(a.dod, encoding="utf-8"))
@@ -156,8 +175,9 @@ def main():
         "commit": commits[0]["sha"],
         "commits": [{k: c[k] for k in ("repo", "sha")} for c in commits],
         "files": [f for c in commits for f in c["files"]],
-        "base_commit": base[:7] if base else None,
+        "base_commit": base_full[:7],
         "diff_hash": diff_hash,
+        "diff_per_repo": per_repo,
         "dod": [{k: it.get(k) for k in ("check", "cmd", "expect")} for it in dod],
         "gates": gates,
         "verdict": "pass" if ok else "fail",
