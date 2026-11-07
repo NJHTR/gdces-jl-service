@@ -1,0 +1,64 @@
+{
+  "round": 1,
+  "item": "P0-perf",
+  "type": "IMPL",
+  "commit": "b8e5c77",
+  "files": [
+    "scripts/check-review-nonblock.py"
+  ],
+  "dod": [
+    {
+      "check": "复核不挡 done（t_done < t_review）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/check-review-nonblock.py 2>&1 | tail -6\"",
+      "expect": "NONBLOCK_OK"
+    },
+    {
+      "check": "客户端：done 分支读 reviewStatus 且有补轮询",
+      "cmd": "python -c \"s=open(r'C:/Users/NJHTR/WeChatProjects/jl/pages/index/index.js',encoding='utf-8').read(); assert 'reviewStatus' in s and '_pollReview' in s; print('ok')\"",
+      "expect": "ok"
+    },
+    {
+      "check": "服务端返回 reviewStatus 字段",
+      "cmd": "ssh -o ConnectTimeout=20 rokid-r640 \"cd /home/baize/jl-service && python3 -c \\\"import json,urllib.request;d=json.load(urllib.request.urlopen('http://127.0.0.1:8081/api/v1/tasks/1'));print('reviewStatus' in d.get('data',{}))\\\"\"",
+      "expect": "True"
+    }
+  ],
+  "gates": {
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "evidence": [
+    {
+      "check": "复核不挡 done（t_done < t_review）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/check-review-nonblock.py 2>&1 | tail -6\"",
+      "exit": 0,
+      "expect": "NONBLOCK_OK",
+      "pass": true,
+      "secs": 110.4,
+      "out_tail": "doc=481 task=548\n  t_done   = 24.2s (reviewStatus=pending)\n  t_review = 97.3s (verdict=must_fix)\n  final reviewStatus = done\nNONBLOCK_OK"
+    },
+    {
+      "check": "客户端：done 分支读 reviewStatus 且有补轮询",
+      "cmd": "python -c \"s=open(r'C:/Users/NJHTR/WeChatProjects/jl/pages/index/index.js',encoding='utf-8').read(); assert 'reviewStatus' in s and '_pollReview' in s; print('ok')\"",
+      "exit": 0,
+      "expect": "ok",
+      "pass": true,
+      "secs": 0.1,
+      "out_tail": "ok"
+    },
+    {
+      "check": "服务端返回 reviewStatus 字段",
+      "cmd": "ssh -o ConnectTimeout=20 rokid-r640 \"cd /home/baize/jl-service && python3 -c \\\"import json,urllib.request;d=json.load(urllib.request.urlopen('http://127.0.0.1:8081/api/v1/tasks/1'));print('reviewStatus' in d.get('data',{}))\\\"\"",
+      "exit": 0,
+      "expect": "True",
+      "pass": true,
+      "secs": 1.0,
+      "out_tail": "True"
+    }
+  ],
+  "decisions_needed": [],
+  "risks": [],
+  "duration_s": 111.6,
+  "verified_by": "verifier:independent",
+  "verified_at": "2026-11-07T22:50:48+0800"
+}

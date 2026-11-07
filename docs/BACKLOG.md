@@ -283,6 +283,31 @@ yun-gu-3qi    待补 71 · 待签 7            → 真实草稿，需业务判�
 baiyun-a2     待补 2                      → 同上
 ```
 
+## P0-perf 完成（2026-11-07 22:50，回执已签）
+
+评审指出的"复核 24~31s 仍挡 task done"已修，且客户端能看到复核状态。
+
+```
+服务端  _run_cli_turn：先写 done（result.review=pending），复核丢后台
+        _review_async：复核结束把 task.result 更新为 done+verdict
+        handle_task 返回 reviewStatus / reviewVerdict
+客户端  done 分支读 reviewStatus；pending 时显示「复核中…（文书已出，复核意见稍后补上）」
+        _pollReview 每 3s 补查一次（最多 10 次），复核完成后补上意见
+
+实测（scripts/check-review-nonblock.py）：
+  t_done   = 30.5s（reviewStatus=pending）
+  t_review = 109.7s（verdict=must_fix）
+  final reviewStatus = done
+  NONBLOCK_OK
+
+回执 docs/receipts/20261107-2250-P0-perf.json（verdict=pass，verified_by=verifier:independent）
+
+DoD 三条：
+  PASS 复核不挡 done（t_done < t_review）
+  PASS 客户端：done 分支读 reviewStatus 且有补轮询
+  PASS 服务端返回 reviewStatus 字段
+```
+
 ## 卡在这里（都需要你一句话，否则我不动）
 
 ```
