@@ -36,6 +36,7 @@ echo EXIT=$?
 tail -16 /tmp/acc.out
 '@
 $cmd = $cmd -replace '__DIR__', $RemoteDir
+$b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
 $out = ssh -o ConnectTimeout=300 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
 Write-Host $out.TrimEnd()
 if ($out -match "EXIT=(\d+)") { $result.acceptance = [int]$Matches[1] }
