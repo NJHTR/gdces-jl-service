@@ -301,7 +301,10 @@ baiyun-a2     待补 2                      → 同上
        仍不完美（同机可伪造），已写进 LOOP.md 的已知限制
 ```
 
-实测（回执 docs/receipts/20261107-2328-P0-perf.json）：
+实测（回执 docs/receipts/20261107-2352-P0-perf.json）：
+
+diff_hash = 0ea7d6f1a954fba0（非空，覆盖三个 commit；之前是 sha256(空) —— cmd 把 ^ 吃掉）
+base_commit = 61101b4（不是 commit 自己）
 
 ```
 commits: fe2ea84（后端）· c32faf5（小程序）· 635c17d（测试脚本）
