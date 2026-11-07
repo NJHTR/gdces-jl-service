@@ -31,6 +31,7 @@ PROD_DATABASE = "jl"
 DB_HOST = "127.0.0.1"
 DB_PORT = 3309
 DB_USER = "jl"
+PROD_ENV_VAR = "JL_ALLOW_PROD_MIGRATION"
 IDENT_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 V2_TABLES = [
@@ -190,12 +191,20 @@ def connect(env, database):
         raise
 
 
-def guard_database(name):
+def guard_database(name, allow_production=False):
     name = (name or "").strip()
     if not IDENT_RE.match(name):
         die("非法数据库名（只允许字母/数字/下划线）：%r，exit 2" % name, 2)
     if name.lower() == PROD_DATABASE:
-        die("REFUSED: 拒绝检查生产库 'jl'。本工具只允许 scratch 库（默认 jl_m1），exit 2", 2)
+        if not allow_production:
+            die("REFUSED: 拒绝检查生产库 'jl'。默认只允许 scratch 库（默认 jl_m1）；"
+                "生产结构检查需 --allow-production + %s=1，exit 2" % PROD_ENV_VAR, 2)
+        if os.environ.get(PROD_ENV_VAR) != "1":
+            die("REFUSED: 生产结构检查需要进程环境 %s=1（export，不是 .env），exit 2"
+                % PROD_ENV_VAR, 2)
+    elif allow_production:
+        die("REFUSED: --allow-production 只允许搭配 --database jl（当前 %s），exit 2"
+            % name, 2)
     return name
 
 
@@ -404,12 +413,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="M1 记忆 v2 结构校验（只读，默认 jl_m1）")
     parser.add_argument("--database", default=DEFAULT_DATABASE,
-                        help="目标库（默认 jl_m1；'jl' 会被硬拒绝）")
+                        help="目标库（默认 jl_m1；'jl' 需 --allow-production + 环境门禁）")
+    parser.add_argument("--allow-production", action="store_true",
+                        help="显式放行生产库 jl（还需 JL_ALLOW_PROD_MIGRATION=1）")
     parser.add_argument("--env-file", default=None,
                         help=".env 路径（默认 <repo>/.env，可用 M1_ENV_FILE 覆盖）")
     args = parser.parse_args(argv)
 
-    database = guard_database(args.database)
+    database = guard_database(args.database, args.allow_production)
     env_file = args.env_file or os.environ.get("M1_ENV_FILE") or os.path.join(ROOT, ".env")
     if not os.path.isfile(env_file):
         die("找不到 .env：%s（可用 --env-file 指定）" % env_file)
