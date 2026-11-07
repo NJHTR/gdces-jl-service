@@ -32,8 +32,9 @@ def fix_cmd(cmd):
 def run(cmd, timeout=900):
     cmd = fix_cmd(cmd)
     t0 = time.time()
+    # 子进程输出统一按 UTF-8 读：默认 GBK 会在中文/emoji 上抛 UnicodeDecodeError
     r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True,
-                       text=True, timeout=timeout)
+                       timeout=timeout, encoding="utf-8", errors="replace")
     out = ((r.stdout or "") + (r.stderr or "")).strip()
     return r.returncode, out[-400:], round(time.time() - t0, 1)
 

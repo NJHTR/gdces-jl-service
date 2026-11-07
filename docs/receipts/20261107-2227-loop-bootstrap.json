@@ -1,0 +1,64 @@
+{
+  "round": 0,
+  "item": "loop-bootstrap",
+  "type": "IMPL",
+  "commit": "135ffdc",
+  "files": [
+    "scripts/loop-verify.py"
+  ],
+  "dod": [
+    {
+      "check": "loop 协议文件存在",
+      "cmd": "python -c \"import os;assert os.path.isfile('docs/LOOP.md');print('ok')\"",
+      "expect": "ok"
+    },
+    {
+      "check": "决策索引条数 = 15",
+      "cmd": "python -c \"import json;print(json.load(open('docs/decisions.index.json',encoding='utf-8'))['count'])\"",
+      "expect": "15"
+    },
+    {
+      "check": "负向：未签名必须拒绝",
+      "cmd": "python scripts/loop-verify.py --item x --dod docs/state/loop.json",
+      "expect": "exit:2"
+    }
+  ],
+  "gates": {
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "evidence": [
+    {
+      "check": "loop 协议文件存在",
+      "cmd": "python -c \"import os;assert os.path.isfile('docs/LOOP.md');print('ok')\"",
+      "exit": 0,
+      "expect": "ok",
+      "pass": true,
+      "secs": 0.1,
+      "out_tail": "ok"
+    },
+    {
+      "check": "决策索引条数 = 15",
+      "cmd": "python -c \"import json;print(json.load(open('docs/decisions.index.json',encoding='utf-8'))['count'])\"",
+      "exit": 0,
+      "expect": "15",
+      "pass": true,
+      "secs": 0.1,
+      "out_tail": "15"
+    },
+    {
+      "check": "负向：未签名必须拒绝",
+      "cmd": "python scripts/loop-verify.py --item x --dod docs/state/loop.json",
+      "exit": 2,
+      "expect": "exit:2",
+      "pass": true,
+      "secs": 0.1,
+      "out_tail": "拒绝：必须由 Verifier 签名（--sign verifier:<name>），Builder 不能自签"
+    }
+  ],
+  "decisions_needed": [],
+  "risks": [],
+  "duration_s": 0.2,
+  "verified_by": "verifier:selftest",
+  "verified_at": "2026-11-07T22:27:28+0800"
+}
