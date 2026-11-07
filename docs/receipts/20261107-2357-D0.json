@@ -1,0 +1,98 @@
+{
+  "round": 3,
+  "item": "D0",
+  "type": "IMPL",
+  "commit": "6ba1358",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "6ba1358"
+    },
+    {
+      "repo": "jl-service",
+      "sha": "596ec37"
+    }
+  ],
+  "files": [
+    "scripts/d0_cleanup.py",
+    "scripts/devloop.sh",
+    "scripts/d0_check.py"
+  ],
+  "base_commit": "b90afba",
+  "diff_hash": "20407bec78f0b730",
+  "diff_per_repo": [
+    {
+      "repo": "jl-service",
+      "base": "b90afba",
+      "sha": "6ba1358",
+      "diff_len": 10172
+    },
+    {
+      "repo": "jl-service",
+      "base": "6ba1358",
+      "sha": "596ec37",
+      "diff_len": 2994
+    }
+  ],
+  "dod": [
+    {
+      "check": "D0 不变量全过（待补 0 / 总 88 / 悬空 0 / 归档 89 / manifest 81）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/d0_check.py 2>&1 | tail -10\"",
+      "expect": "D0CHECK_OK"
+    },
+    {
+      "check": "负向：真实项目未动（yun-gu 待补仍 71）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/d0_check.py 2>&1 | grep yun-gu\"",
+      "expect": "PASS"
+    },
+    {
+      "check": "负向：test-sandbox 待补复查仍为 0（没有复活）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/d0_check.py 2>&1 | grep 'test-sandbox 待补'\"",
+      "expect": "PASS"
+    }
+  ],
+  "gates": {
+    "head": "596ec37",
+    "deployed_head": "596ec37",
+    "match": true,
+    "preflight": 0,
+    "deploy": 0,
+    "smoke": 0,
+    "acceptance": 0,
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "evidence": [
+    {
+      "check": "D0 不变量全过（待补 0 / 总 88 / 悬空 0 / 归档 89 / manifest 81）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/d0_check.py 2>&1 | tail -10\"",
+      "exit": 0,
+      "expect": "D0CHECK_OK",
+      "pass": true,
+      "secs": 1.3,
+      "out_tail": "{\"total\": \"88\", \"test_sandbox\": \"8\", \"arch_docs\": 80, \"arch_orphans\": 9}\n  PASS test-sandbox 待补 = 0\n  PASS 总文书 = 88\n  PASS test-sandbox = 8\n  PASS 悬空 task.doc_id = 0\n  PASS yun-gu 待补 = 71（负向：未动真实项目）\n  PASS 归档 docs = 80\n  PASS 归档 orphans = 9\n  PASS manifest deleted_ids = 81\nD0CHECK_OK"
+    },
+    {
+      "check": "负向：真实项目未动（yun-gu 待补仍 71）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/d0_check.py 2>&1 | grep yun-gu\"",
+      "exit": 0,
+      "expect": "PASS",
+      "pass": true,
+      "secs": 1.2,
+      "out_tail": "PASS yun-gu 待补 = 71（负向：未动真实项目）"
+    },
+    {
+      "check": "负向：test-sandbox 待补复查仍为 0（没有复活）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/d0_check.py 2>&1 | grep 'test-sandbox 待补'\"",
+      "exit": 0,
+      "expect": "PASS",
+      "pass": true,
+      "secs": 1.4,
+      "out_tail": "PASS test-sandbox 待补 = 0"
+    }
+  ],
+  "verified_by": "verifier:independent",
+  "verifier_token": "28798d45",
+  "verified_at": "2026-11-07T23:57:20+0800",
+  "duration_s": 3.9
+}

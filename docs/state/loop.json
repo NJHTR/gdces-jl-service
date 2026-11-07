@@ -1,7 +1,7 @@
 {
-  "round": 2,
+  "round": 3,
   "wave": "Wave7 稳定性",
-  "pointer": "D0 数据卫生（归档语义待定：A 删测试数据 / B 加 doc.archived_at）",
+  "pointer": "M1 记忆 v2 表与状态机（需你批准 schema 变更）",
   "attempts": {},
   "budget": {
     "max_attempts_per_item": 2,
@@ -10,9 +10,9 @@
   },
   "blocked": [
     {
-      "item": "D0 归档语义（A 删 / B 加 archived_at）",
-      "type": "DECISION",
-      "reason": "state 枚举只有 待补/待签/已签，没有已归档；直接改 state 会被 PATCH 重置回待补。测试数据选 A（备份后删），真实数据要保留就选 B（schema 变更，单独一项）"
+      "item": "M1 记忆 v2（memory_item/variant/use/review/audit + 状态机）",
+      "type": "SCHEMA",
+      "reason": "改 schema 属 STOP 条件：需要你明确批准后单独一项做；P1-1 的 memory_use 事件表并入 M1，不单开一轮"
     },
     {
       "item": "F3 真实待补（yun-gu 71 + baiyun 2）",
@@ -40,6 +40,6 @@
       "reason": "A 测试栈（半天~一天）或 B 同库测试模式（1~2 小时）"
     }
   ],
-  "last_receipt": "docs/receipts/20261107-2328-P0-perf.json",
-  "updated_at": "2026-11-07T23:30:00+08:00"
+  "last_receipt": "docs/receipts/20261107-2357-D0.json",
+  "updated_at": "2026-11-08T00:00:00+08:00"
 }

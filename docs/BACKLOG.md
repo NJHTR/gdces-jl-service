@@ -317,6 +317,55 @@ DoD 四条：
   PASS 服务端返回 reviewStatus/reviewVerdict
 ```
 
+## [x] D0 数据卫生完成（2026-11-07 23:57，回执已签）
+
+执行 A（测试数据备份后删除），范围严格锁在 `project=test-sandbox AND state='待补'`：
+
+```
+备份      backups/d0-20261107-2353.sql.gz（652K）
+          backups/d0-ws-test-sandbox-20261107-2353.tar.gz（2.2M）
+删除      81 份（预估 80，实际多 1 份；按"只删待补"规则执行，id 全在 manifest）
+文件      80 份移到 records/archive/2026-11-07/docs/（1 份无 path，未移动）
+引用      task.doc_id 悬空统一置 NULL：144 个（24 个本次 + 120 个历史悬空）
+孤儿      9 份移到 records/archive/2026-11-07/orphans/
+丢失      只报告未动：yun-gu 5（id 38/41/68/69/70）+ test-sandbox 2（id 309/310）
+保留      4 待签（139/267/309/310）+ 4 已签（214/217/220/223）未动
+```
+
+前后对账：
+
+```
+总文书     169 → 88
+test-sandbox 89 → 8（待补 81 → 0）
+yun-gu     71 待补（未动）
+悬空 task.doc_id  120 → 0
+归档目录   89 个文件（80 docs + 9 orphans）
+```
+
+devloop 现在全绿：
+
+```
+[不变量] test-sandbox 孤儿 0（基线 0，到期 2026-11-14）
+[不变量] 待补文书 73 份
+结论：全部通过
+```
+
+回执：`docs/receipts/20261107-2357-D0.json`（pass，2 commits，diff_hash=20407bec78f0b730）
+
+```
+DoD 三条全 PASS：
+  不变量全过（待补 0 / 总 88 / 悬空 0 / 归档 89 / manifest 81）
+  负向：yun-gu 待补仍 71（真实项目未动）
+  负向：test-sandbox 待补复查仍 0（没复活）
+```
+
+未纳入 D0（按你的要求留给 F3）：
+```
+yun-gu 丢失 5 + 孤儿 16：只报告，不动
+4+4 保留文书：只列 id，不动
+test-sandbox 丢失 2（309/310）：属于保留的待签文书，同样留给 F3
+```
+
 ## 卡在这里（都需要你一句话，否则我不动）
 
 ```
