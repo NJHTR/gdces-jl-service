@@ -22,3 +22,5 @@ service-java/target/
 !data/knowledge/
 !data/knowledge/**
 
+
+docs/state/last-gate.json
