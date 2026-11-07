@@ -139,6 +139,14 @@ def main():
     item("隔离目录在 data/quarantine", os.path.isdir(q),
          "不存在（隔离文件可能又放在 homes 下了）" if not os.path.isdir(q) else "")
 
+    # homes/*/memories 下不得有任何残留（MEMORY/raw/rollout/projects 空壳都算）
+    residue = []
+    for d in _glob.glob(os.path.join(ROOT, "data", "homes", "*", "memories")):
+        for base, _dirs, files in os.walk(d):
+            for fn in files:
+                residue.append(os.path.join(base, fn))
+    item("homes 无记忆残留", not residue, "%d 个文件" % len(residue))
+
     # 备份
     bdir = os.path.join(ROOT, "backups")
     files = [f for f in os.listdir(bdir)] if os.path.isdir(bdir) else []

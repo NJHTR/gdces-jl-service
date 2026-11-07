@@ -248,7 +248,11 @@ def build_context(project_id, user_id, query=None):
         mine.append("摘要 `%s`" % os.path.join(mem_base, "memory_summary.md"))
     if os.path.isfile(os.path.join(mem_base, "MEMORY.md")):
         mine.append("跨项目记忆 `%s`" % os.path.join(mem_base, "MEMORY.md"))
-    proj_mem = os.path.join(mem_base, "projects", "%s.md" % project_id)
+    if os.environ.get("JL_ENGINE_MEMORY", "0") == "1":
+        proj_mem = os.path.join(mem_base, "projects", "%s.md" % project_id)
+    else:
+        proj_mem = os.path.join(WS_ROOT, "..", "memory", "projects",
+                                str(user_id), "%s.md" % project_id)
     if os.path.isfile(proj_mem):
         mine.append("本项目个人记忆 `%s`" % proj_mem)
     if mine:

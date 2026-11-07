@@ -877,7 +877,12 @@ def render_user_project_md(user_id, project_id):
     引擎只有"个人跨项目"（MEMORY.md），缺"这个人在这一个项目里的习惯"。
     文件是 memory 表的渲染视图；只有本人能看到（按家目录隔离）。
     """
-    d = os.path.join(HOMES_ROOT, str(user_id), "memories", "projects")
+    # 引擎记忆关闭时（D-记忆-04），不要往 homes/<uid>/memories 里写：
+    # 那样隔离区会被"重新长出来"（空壳 projects/ 也算）。改写到 data/memory/projects/。
+    if os.environ.get("JL_ENGINE_MEMORY", "0") == "1":
+        d = os.path.join(HOMES_ROOT, str(user_id), "memories", "projects")
+    else:
+        d = os.path.join(WS_ROOT, "..", "memory", "projects", str(user_id))
     try:
         os.makedirs(d, exist_ok=True)
     except OSError as e:
