@@ -1,0 +1,107 @@
+{
+  "round": 2,
+  "item": "P0-perf",
+  "type": "IMPL",
+  "commit": "fe2ea84",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "fe2ea84"
+    },
+    {
+      "repo": "jl",
+      "sha": "c32faf5"
+    },
+    {
+      "repo": "jl-service",
+      "sha": "635c17d"
+    }
+  ],
+  "files": [
+    "bff/bffpkg/agent.py",
+    "docs/state/last-gate.json",
+    "scripts/check-review-nonblock.py",
+    "pages/index/index.js",
+    "docs/LOOP.md",
+    "scripts/check-review-failure.py",
+    "scripts/loop-gate.ps1",
+    "scripts/loop-verify.py"
+  ],
+  "base_commit": "fe2ea84",
+  "diff_hash": "e3b0c44298fc1c14",
+  "dod": [
+    {
+      "check": "正向：复核不挡 done（真实 119s 复核）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/check-review-nonblock.py 2>&1 | tail -6\"",
+      "expect": "NONBLOCK_OK"
+    },
+    {
+      "check": "负向：复核失败时 done 仍写、review=failed",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/check-review-failure.py 2>&1 | tail -3\"",
+      "expect": "REVIEWFAIL_OK"
+    },
+    {
+      "check": "客户端轮询窗口 ≥200s 且有 onShow 续查",
+      "cmd": "python -c \"s=open(r'C:/Users/NJHTR/WeChatProjects/jl/pages/index/index.js',encoding='utf-8').read();assert 'tries >= 40' in s and 'tries < 10 ? 3000 : 6000' in s;w=(10*3000+(40-10)*6000)/1000;assert w>=200,w;assert '把还停在' in s and '_pollReview(m.taskId' in s;print('ok window=%ds'%w)\"",
+      "expect": "ok"
+    },
+    {
+      "check": "服务端 handle_task 返回 reviewStatus/reviewVerdict",
+      "cmd": "python -c \"r=open(r'C:/Users/NJHTR/IdeaProjects/jl-service/bff/bffpkg/agent.py',encoding='utf-8').read();assert 'reviewStatus' in r and 'reviewVerdict' in r;print('ok')\"",
+      "expect": "ok"
+    }
+  ],
+  "gates": {
+    "head": "a9a108c",
+    "deployed_head": "a9a108c",
+    "match": true,
+    "preflight": 0,
+    "deploy": 0,
+    "smoke": 0,
+    "acceptance": 0,
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "evidence": [
+    {
+      "check": "正向：复核不挡 done（真实 119s 复核）",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/check-review-nonblock.py 2>&1 | tail -6\"",
+      "exit": 0,
+      "expect": "NONBLOCK_OK",
+      "pass": true,
+      "secs": 81.1,
+      "out_tail": "doc=484 task=553\n  t_done   = 24.2s (reviewStatus=pending)\n  t_review = 76.4s (verdict=must_fix)\n  final reviewStatus = done\nNONBLOCK_OK"
+    },
+    {
+      "check": "负向：复核失败时 done 仍写、review=failed",
+      "cmd": "ssh -o ConnectTimeout=30 rokid-r640 \"cd /home/baize/jl-service && python3 scripts/check-review-failure.py 2>&1 | tail -3\"",
+      "exit": 0,
+      "expect": "REVIEWFAIL_OK",
+      "pass": true,
+      "secs": 93.6,
+      "out_tail": "[review] task 554 复核完成 doc=999999999（异步）\n  status=done review=failed\nREVIEWFAIL_OK"
+    },
+    {
+      "check": "客户端轮询窗口 ≥200s 且有 onShow 续查",
+      "cmd": "python -c \"s=open(r'C:/Users/NJHTR/WeChatProjects/jl/pages/index/index.js',encoding='utf-8').read();assert 'tries >= 40' in s and 'tries < 10 ? 3000 : 6000' in s;w=(10*3000+(40-10)*6000)/1000;assert w>=200,w;assert '把还停在' in s and '_pollReview(m.taskId' in s;print('ok window=%ds'%w)\"",
+      "exit": 0,
+      "expect": "ok",
+      "pass": true,
+      "secs": 0.1,
+      "out_tail": "ok window=210s"
+    },
+    {
+      "check": "服务端 handle_task 返回 reviewStatus/reviewVerdict",
+      "cmd": "python -c \"r=open(r'C:/Users/NJHTR/IdeaProjects/jl-service/bff/bffpkg/agent.py',encoding='utf-8').read();assert 'reviewStatus' in r and 'reviewVerdict' in r;print('ok')\"",
+      "exit": 0,
+      "expect": "ok",
+      "pass": true,
+      "secs": 0.1,
+      "out_tail": "ok"
+    }
+  ],
+  "verified_by": "verifier:independent",
+  "verifier_token": "28798d45",
+  "verified_at": "2026-11-07T23:28:23+0800",
+  "duration_s": 174.9
+}

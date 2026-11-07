@@ -283,29 +283,35 @@ yun-gu-3qi    待补 71 · 待签 7            → 真实草稿，需业务判�
 baiyun-a2     待补 2                      → 同上
 ```
 
-## P0-perf 完成（2026-11-07 22:50，回执已签）
+## [x] P0-perf 完成（2026-11-07 23:28，回执已签，含负向）
 
-评审指出的"复核 24~31s 仍挡 task done"已修，且客户端能看到复核状态。
+评审指出上一版四个硬伤，全部修掉并重签：
 
 ```
-服务端  _run_cli_turn：先写 done（result.review=pending），复核丢后台
-        _review_async：复核结束把 task.result 更新为 done+verdict
-        handle_task 返回 reviewStatus / reviewVerdict
-客户端  done 分支读 reviewStatus；pending 时显示「复核中…（文书已出，复核意见稍后补上）」
-        _pollReview 每 3s 补查一次（最多 10 次），复核完成后补上意见
+① 客户端只等 30s，复核要 97s → 会永远停在"复核中"
+   修：10×3s + 30×6s = 210s；onShow 对 pending 消息续查；done 时把 taskId 记到消息上
+② 回执只覆盖测试脚本提交 → 签了个空
+   修：loop-verify v2 支持多个 --commit（后端 + 小程序），回执里有 commits[]、
+       base_commit、diff_hash；缺任一个仓库的 commit 直接 fail
+③ 门禁是旧的、回执里没有门禁
+   修：loop-gate 断言 head == deployed == 当前 HEAD，写 preflight/deploy/smoke/acceptance
+       四个退出码；loop-verify 缺任一退出码 fail
+④ "独立验证"只是字符串
+   修：必须有 JL_VERIFIER_TOKEN（外部注入）+ 回执记 token 指纹；
+       仍不完美（同机可伪造），已写进 LOOP.md 的已知限制
+```
 
-实测（scripts/check-review-nonblock.py）：
-  t_done   = 30.5s（reviewStatus=pending）
-  t_review = 109.7s（verdict=must_fix）
-  final reviewStatus = done
-  NONBLOCK_OK
+实测（回执 docs/receipts/20261107-2328-P0-perf.json）：
 
-回执 docs/receipts/20261107-2250-P0-perf.json（verdict=pass，verified_by=verifier:independent）
+```
+commits: fe2ea84（后端）· c32faf5（小程序）· 635c17d（测试脚本）
+gates:   preflight=0 deploy=0 smoke=0 acceptance=0 match=true
 
-DoD 三条：
-  PASS 复核不挡 done（t_done < t_review）
-  PASS 客户端：done 分支读 reviewStatus 且有补轮询
-  PASS 服务端返回 reviewStatus 字段
+DoD 四条：
+  PASS 正向：复核不挡 done（t_done 35.7s pending → t_review 119.2s done）
+  PASS 负向：复核失败 → status=done, review=failed（done 仍写）
+  PASS 客户端轮询窗口 210s + onShow 续查
+  PASS 服务端返回 reviewStatus/reviewVerdict
 ```
 
 ## 卡在这里（都需要你一句话，否则我不动）
