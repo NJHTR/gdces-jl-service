@@ -237,9 +237,40 @@ deploy 门禁链现在是：`UPLOADED_AT` → 重启 → `check-process-fresh.sh
 验收：五条各有一条可执行命令与结果；负向测试必须红在"写之前"
 ```
 
+## P1 收口（2026-11-07 20:50）
+
+评审指出"记忆污染只清了文件、没清 DB；隔离会被重新长出来；测试钩子会污染生产"。三条都已修：
+
+```
+① DB 记忆污染：停用 13 条（原文保留，写 data/quarantine/2026-11-07/db-disabled.md）
+   - 53/58/60/62/64/89：owner 是测试用户或标题含 smoke-
+   - 18/19/35/39/41/45/49：owner（501/940/991/995）在 app_user 里不存在 = 孤儿用户
+   实测：active 记忆里 smoke 标题 / 孤儿 owner = 0
+
+② 隔离被"重新长出来"：render_user_project_md 在引擎记忆关闭时改写到
+   data/memory/projects/<uid>/<pid>.md（不再往 homes/<uid>/memories 写）
+   build_context 的指针同步；homes 下空壳 projects/ 已清
+   并把其余 68 个家目录的 memories/（含 raw/rollout/.git）整目录移到
+   data/quarantine/2026-11-07/homes/（15M，附 homes-manifest.md）
+   实测：homes/*/memories 0 个；acceptance「homes 无记忆残留」通过
+
+③ -SimulateStale 是生产钩子：现在必须 JL_ALLOW_TEST_HOOKS=1 才允许
+   （不带 → 退出 2）；simulate 时用 trap 恢复真实 UPLOADED_AT
+   实测：不带 opt-in 退出 2；带 opt-in 跑完整管线退出 3；UA 已恢复、.orig 已清
+
+acceptance 12 项全绿：
+  服务/数据(88·待补80·项目记忆6·用户级2)/影像索引/待确认规矩/省统表4×4/
+  [memories]段0/.bak 0/隔离目录/homes无残留/active记忆无污染/备份41包/引擎记忆0-77
+```
+
 ## 卡在这里（都需要你一句话，否则我不动）
 
 ```
+T6.5 测试隔离落点（M1 之前必须定）
+     A（推荐）独立测试库 jl_test，smoke 连它，业务库完全不碰
+     B 同库 + JL_TEST_MODE 下的 test-only 清理端点，所有写操作校验 project.code=TEST-
+     不定的话 T6.5 会一直“在改”
+
 F3  137 份「待补」文书怎么清理？
     可选：A. 补全字段 B. 归档到 records/archive/ C. 直接删（不可逆）
 D1b 历史照片补描述：yun-gu 14 张 place/caption 全空，要不要现在让模型看图补？
