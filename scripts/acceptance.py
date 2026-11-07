@@ -148,9 +148,11 @@ def main():
     item("homes 无记忆残留", not residue, "%d 个文件" % len(residue))
 
     # active 记忆里不许有测试污染：孤儿用户（app_user 里没有）或 smoke 标题
+    # 只对 user scope 校验 owner 是否存在；project scope 的 owner_id 是项目 id，不是用户
     bad_mem = sql(
         "SELECT COUNT(*) FROM memory m WHERE m.status=1 AND ("
-        "m.text LIKE '%smoke-%' OR m.owner_id NOT IN (SELECT CAST(id AS CHAR) FROM app_user))")
+        "m.text LIKE '%smoke-%' OR "
+        "(m.scope='user' AND m.owner_id NOT IN (SELECT CAST(id AS CHAR) FROM app_user)))")
     item("active 记忆无测试污染", bad_mem.strip() == "0", "可疑 %s 条" % bad_mem.strip())
 
     # 备份
