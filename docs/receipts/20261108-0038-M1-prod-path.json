@@ -1,0 +1,439 @@
+{
+  "round": 3,
+  "item": "M1-prod-path",
+  "type": "IMPL",
+  "commit": "f628b7a",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "f628b7a"
+    }
+  ],
+  "files": [
+    "scripts/migrate.py",
+    "scripts/check-memory-v2.py",
+    "scripts/check-prod-migration.py",
+    "docs/M1-PROD-MIGRATION.md"
+  ],
+  "file_sha256": {
+    "scripts/migrate.py": "162631ffc2359fb51fbeb2b73910dbd9ef5b60a79dc7283ea21f92ca1f7c5fee",
+    "scripts/check-memory-v2.py": "f3c4d6d6ce7bc4d12f9cd8519b037b15518e2b59b451aebe9aaeae6d26b2e99e",
+    "scripts/check-prod-migration.py": "2b144712385acc30d8b0291127aad48bbb271cd2f09be6deddd8f8fb71e587ec",
+    "docs/M1-PROD-MIGRATION.md": "aba845c1eda74ece2555809ecd5df2daabc75910a48d165293886cde69cb0478"
+  },
+  "base_commit": "858d761",
+  "diff_hash": "80e55165da51994d",
+  "diff_hash_algo": "sha256(git diff 858d7614ce0d71695e58cd570568197c95d13db1..f628b7a1a15851bbb7bac6f6b3330774196d4a22 raw bytes)[:16]",
+  "diff_len": 45404,
+  "diff_per_repo": [
+    {
+      "repo": "jl-service",
+      "base": "858d761",
+      "sha": "f628b7a",
+      "diff_len": 45404,
+      "files_changed": 4
+    }
+  ],
+  "scope_check": {
+    "git_show_stat_files": [
+      "docs/M1-PROD-MIGRATION.md",
+      "scripts/check-memory-v2.py",
+      "scripts/check-prod-migration.py",
+      "scripts/migrate.py"
+    ],
+    "only_allowed_files": true,
+    "forbidden_hits": [],
+    "notes": "A docs/M1-PROD-MIGRATION.md; A scripts/check-prod-migration.py; M scripts/check-memory-v2.py; M scripts/migrate.py. No db/migrations, bff/*, BACKLOG, loop.json, receipts or deploy changes in f628b7a.",
+    "code_edits_by_verifier": false
+  },
+  "not_executed": [
+    "non-dry-run production apply against jl",
+    "non-dry-run production rollback against jl",
+    "any DDL or DML against jl",
+    "deploy / server repo edit"
+  ],
+  "environment": {
+    "host": "baize-R640 via ssh rokid-r640",
+    "python": "3.14.4",
+    "gzip": "1.14",
+    "mysql_driver": "pymysql 2.2.8",
+    "db": "127.0.0.1:3309 user=jl",
+    "scratch_db": "jl_m1",
+    "production_db": "jl (read-only + dry-run only)",
+    "test_dir": "/tmp/m1b-verify (removed after evidence download)",
+    "server_time_at_run": "2026-11-08 00:35:05 +0800",
+    "self_check": {
+      "checks": 167,
+      "pass": 167,
+      "fail": 0
+    }
+  },
+  "baseline": {
+    "jl_table_count": 19,
+    "jl_tables": [
+      "app_user",
+      "audit_log",
+      "auth_token",
+      "citation",
+      "doc",
+      "memory",
+      "message",
+      "observation",
+      "photo",
+      "project",
+      "project_member",
+      "review",
+      "review_appeal",
+      "rule_proposal",
+      "service_job",
+      "standard",
+      "task",
+      "tenant",
+      "thread_map"
+    ],
+    "jl_v2_tables": 0,
+    "jl_schema_migrations_table": false,
+    "jl_memory_rows": 39,
+    "jl_memory_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc",
+    "jl_m1_tables": [
+      "memory_audit",
+      "memory_item",
+      "memory_review",
+      "memory_use",
+      "memory_variant",
+      "schema_migrations"
+    ],
+    "jl_m1_migration_checksum": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+    "test_backup_fixture": {
+      "path": "/tmp/m1b-verify/dummy-valid.sql.gz",
+      "sha256": "313b44177059517cf9fa54dd022addf3234760fcda73606c6f3fb4d7801f3c9a",
+      "size": 25,
+      "note": "dummy gzip fixture, NOT a database backup; Lead must generate a real mysqldump per docs/M1-PROD-MIGRATION.md §2"
+    }
+  },
+  "dod": [
+    {
+      "check": "commit f628b7a contains only the 4 allowed files",
+      "cmd": "git show --stat --name-status f628b7a",
+      "expect": "A docs/M1-PROD-MIGRATION.md; A scripts/check-prod-migration.py; M scripts/check-memory-v2.py; M scripts/migrate.py. No bff/migrations/BACKLOG/loop/receipt/deploy changes.",
+      "pass": true
+    },
+    {
+      "check": "diff anchored to non-empty base != commit",
+      "cmd": "git diff 858d761..f628b7a",
+      "expect": "4 files, diff_len=45404, diff_hash=80e55165da51994d, base 858d761 != commit f628b7a",
+      "pass": true
+    },
+    {
+      "check": "scripts compile; tested bytes equal committed blobs",
+      "cmd": "sha256sum on server /tmp/m1b-verify; python3 -m py_compile",
+      "expect": "migrate 162631ff.., checker f3c4d6d6.., prod-checker 2b144712..; py_compile exit 0",
+      "pass": true
+    },
+    {
+      "check": "default scratch path (jl_m1) still works with new scripts",
+      "cmd": "python3 scripts/migrate.py (no flags); --check; check-memory-v2.py",
+      "expect": "apply exit 0 MIGRATE_OK (no-op); check exit 0 MIGRATIONS_OK; checker exit 0 M1_OK",
+      "pass": true
+    },
+    {
+      "check": "production flags with non-production database are refused (exit 2)",
+      "cmd": "migrate.py --database jl_m1 --allow-production; migrate.py --database jl_m1 --backup <gzip>",
+      "expect": "both exit 2: --allow-production only with --database jl; --backup only for production path",
+      "pass": true
+    },
+    {
+      "check": "--allow-production without process env is refused (exit 2)",
+      "cmd": "python3 scripts/migrate.py --database jl --allow-production --backup dummy-valid.sql.gz (env unset)",
+      "expect": "exit 2 REFUSED: requires process env JL_ALLOW_PROD_MIGRATION=1 (not .env)",
+      "pass": true
+    },
+    {
+      "check": "with env, backup gate refuses missing/empty/non-gzip backup (exit 2)",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production [--backup variants]",
+      "expect": "no --backup -> exit 2 必须提供; nonexistent -> 2 文件不存在; empty -> 2 文件为空; non-gzip -> 2 不是有效 gzip",
+      "pass": true
+    },
+    {
+      "check": "backup gate runs before DB connection / any DDL",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --env-file wrong.env --database jl --allow-production --backup missing.gz",
+      "expect": "exit 2 on backup-file gate only; no connection/access-denied error in output; code order validate_backup() before connect()/apply",
+      "pass": true
+    },
+    {
+      "check": "jl dry-run: exit 0 PROD_DRY_RUN_OK, full plan, backup path/hash/size, invariants pre, no DDL",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 python3 scripts/migrate.py --env-file <deploy>/.env --database jl --allow-production --backup dummy-valid.sql.gz --dry-run",
+      "expect": "PROD PLAN (dry-run apply); new tables = 5 v2 tables; backup path + sha256 + size printed; invariants pre memory present=True rows=39 create_sha256=25e3bb99..; PROD_DRY_RUN_OK (no DDL executed; jl unchanged)",
+      "pass": true
+    },
+    {
+      "check": "jl --check is read-only and reports PENDING (exit 1)",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 python3 scripts/migrate.py --database jl --allow-production --check",
+      "expect": "PROD CHECK (read-only); PENDING (schema_migrations 不存在); MIGRATIONS_NOT_APPLIED; exit 1; no write",
+      "pass": true
+    },
+    {
+      "check": "jl pre-phase independent check PROD_CHECK_OK and baseline recorded",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 python3 scripts/check-prod-migration.py --database jl --allow-production --phase pre --write-baseline /tmp/m1b-verify/baseline.json",
+      "expect": "exit 0; PROD_CHECK_OK phase=pre database=jl; no v2 tables; memory rows=39 create_sha256=25e3bb99..; BASELINE_WRITTEN; baseline JSON database=jl phase=pre present=true rows=39",
+      "pass": true
+    },
+    {
+      "check": "jl invariants unchanged before vs after all read-only/dry-run checks",
+      "cmd": "information_schema table list/counts; SELECT COUNT(*) FROM jl.memory; SHOW CREATE TABLE jl.memory; cmp before/after",
+      "expect": "identical 19-table list; 0 memory_% tables; 0 schema_migrations; 0 v2 tables; memory rows 39; SHOW CREATE byte-identical",
+      "pass": true
+    },
+    {
+      "check": "negative fake pending migration with ALTER TABLE memory rejected before DDL",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --backup <gzip> --dry-run --migrations-dir fake-alt",
+      "expect": "exit 2 REFUSED: production path only allows CREATE TABLE IF NOT EXISTS / SET NAMES; unsafe statement shown; no plan/no DDL",
+      "pass": true
+    },
+    {
+      "check": "negative fake pending migration with CREATE TABLE IF NOT EXISTS memory rejected before DDL",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py ... --dry-run --migrations-dir fake-create-memory",
+      "expect": "exit 2 REFUSED: target table already exists: memory (IF NOT EXISTS would silently skip); no plan/no DDL",
+      "pass": true
+    },
+    {
+      "check": "negative fake pending migration with DROP TABLE memory rejected; allowlist positive control accepted",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py ... --dry-run --migrations-dir fake-drop / fake-newtable",
+      "expect": "DROP -> exit 2 REFUSED; CREATE TABLE IF NOT EXISTS absent new table -> exit 0 PROD_DRY_RUN_OK accepted in dry-run; jl table m1_verifier_probe_table not created",
+      "pass": true
+    },
+    {
+      "check": "allowlist implementation covers all pending statements before execution",
+      "cmd": "code inspection scripts/migrate.py analyze_pending_safety() + cmd_prod_apply() ordering; analyze_down_safety() for rollback",
+      "expect": "apply: each pending statement must be SET NAMES or CREATE TABLE IF NOT EXISTS <absent>; anything else or existing target => exit 2; called before memory snapshot/plan/apply (dry-run and real share same gate); rollback: down statements restricted to DROP TABLE IF EXISTS of the 5 v2 tables",
+      "pass": true
+    },
+    {
+      "check": "error exit codes as specified (0 success / 1 state failure / 2 safety refusal)",
+      "cmd": "guard matrix; migrate --check; check-prod-migration post on pre-state; extra combo/baseline gates",
+      "expect": "gates exit 2; --check PENDING exit 1; post-phase on pre-state exit 1 PROD_CHECK_FAIL; dry-run ok exit 0; --dry-run+--check combo exit 2; post baseline missing/wrong-db/not-JSON exit 2",
+      "pass": true
+    },
+    {
+      "check": "production apply/rollback were never executed; jl final state equals pre state",
+      "cmd": "final information_schema + memory checks; no apply/rollback command without --dry-run was run against jl",
+      "expect": "jl unchanged (19 tables, 0 v2, 0 schema_migrations, memory rows 39); only Lead may run the real apply",
+      "pass": true
+    },
+    {
+      "check": "no server hand edits; tests only in /tmp and cleaned; no code edits by verifier",
+      "cmd": "find /home/baize/jl-service ... -newermt '2026-11-08 00:25'; rm -rf /tmp/m1b-verify; ls /tmp/m1*",
+      "expect": "empty find output; verifier /tmp/m1b-verify + tgz removed; no repo/code change by verifier; builder evidence dirs left untouched",
+      "pass": true
+    }
+  ],
+  "evidence": [
+    {
+      "check": "commit scope",
+      "cmd": "git show --stat f628b7a",
+      "exit": 0,
+      "expect": "4 allowed files",
+      "pass": true,
+      "out_tail": "docs/M1-PROD-MIGRATION.md | 104 ++\nscripts/check-memory-v2.py | 19 +-\nscripts/check-prod-migration.py | 394 ++\nscripts/migrate.py | 380 ++--\n4 files changed, 852 insertions(+), 45 deletions(-)"
+    },
+    {
+      "check": "tested bytes",
+      "cmd": "sha256sum scripts/*.py db/migrations/*.sql on server /tmp/m1b-verify",
+      "exit": 0,
+      "expect": "committed blob hashes",
+      "pass": true,
+      "out_tail": "162631ffc2359fb51fbeb2b73910dbd9ef5b60a79dc7283ea21f92ca1f7c5fee  scripts/migrate.py\nf3c4d6d6ce7bc4d12f9cd8519b037b15518e2b59b451aebe9aaeae6d26b2e99e  scripts/check-memory-v2.py\n2b144712385acc30d8b0291127aad48bbb271cd2f09be6deddd8f8fb71e587ec  scripts/check-prod-migration.py\nf8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae  db/migrations/0001_memory_v2.sql\nae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527  db/migrations/0001_memory_v2.down.sql"
+    },
+    {
+      "check": "jl_m1 default path",
+      "cmd": "migrate.py ; migrate.py --check ; check-memory-v2.py",
+      "exit": 0,
+      "expect": "no-op / MIGRATIONS_OK / M1_OK",
+      "pass": true,
+      "out_tail": "SKIP  0001_memory_v2 (already applied, checksum ok)\nMIGRATE_OK (no-op: all migrations already applied) --- MIGRATIONS_OK --- M1_OK"
+    },
+    {
+      "check": "prod dry-run",
+      "cmd": "JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --backup dummy-valid.sql.gz --dry-run",
+      "exit": 0,
+      "expect": "PROD_DRY_RUN_OK, no DDL",
+      "pass": true,
+      "out_tail": "PROD PLAN (dry-run apply)\n  database        : jl (production)\n  migrations      : 0001_memory_v2\n  new tables      : memory_item, memory_variant, memory_use, memory_review, memory_audit\n  backup          : /tmp/m1b-verify/dummy-valid.sql.gz\n  backup sha256   : 313b44177059517cf9fa54dd022addf3234760fcda73606c6f3fb4d7801f3c9a\n  backup size     : 25 bytes (gzip -t ok)\n  env guard       : JL_ALLOW_PROD_MIGRATION=1 (process env)\n  invariants pre  : memory present=True rows=39 create_sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc\n  safety          : CREATE TABLE IF NOT EXISTS only; target tables absent; legacy memory table untouched\nPROD_DRY_RUN_OK (no DDL executed; jl unchanged)"
+    },
+    {
+      "check": "prod --check read-only",
+      "cmd": "JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --check",
+      "exit": 1,
+      "expect": "PENDING / MIGRATIONS_NOT_APPLIED",
+      "pass": true,
+      "out_tail": "database=jl env_file=.env migrations=1\nPROD CHECK (read-only) database=jl\nPENDING  (schema_migrations 不存在，所有迁移未应用)\nMIGRATIONS_NOT_APPLIED"
+    },
+    {
+      "check": "prod pre-check",
+      "cmd": "JL_ALLOW_PROD_MIGRATION=1 check-prod-migration.py --database jl --allow-production --phase pre --write-baseline ...",
+      "exit": 0,
+      "expect": "PROD_CHECK_OK",
+      "pass": true,
+      "out_tail": "phase=pre database=jl host=127.0.0.1:3309 user=jl (read-only)\nPASS  pre: 尚无 v2 表（5 张都不存在）\nPASS  pre: schema_migrations 尚不存在（或为空表）\nPASS  pre: legacy memory 表存在\nPASS  pre: 记录 memory 基线 rows=39 create_sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc\nPROD_CHECK_OK phase=pre database=jl\nBASELINE_WRITTEN /tmp/m1b-verify/baseline.json"
+    },
+    {
+      "check": "baseline json",
+      "cmd": "cat /tmp/m1b-verify/baseline.json",
+      "exit": 0,
+      "expect": "database jl, phase pre, memory present rows 39",
+      "pass": true,
+      "out_tail": "{\"database\": \"jl\", \"phase\": \"pre\", \"checked_at\": \"2026-11-08T00:35:09.490376+08:00\", \"memory\": {\"present\": true, \"rows\": 39, \"create_sha256\": \"25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc\"}, \"v2_tables_present\": false, \"migration_version\": \"0001_memory_v2\"}"
+    },
+    {
+      "check": "guard: default jl refused",
+      "cmd": "migrate.py --database jl",
+      "exit": 2,
+      "expect": "REFUSED default",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 拒绝操作生产库 'jl'。默认只允许 scratch 库（默认 jl_m1）；生产迁移必须显式 --allow-production + JL_ALLOW_PROD_MIGRATION=1 + --backup，exit 2"
+    },
+    {
+      "check": "guard: wrong-db flags",
+      "cmd": "migrate.py --database jl_m1 --allow-production ; migrate.py --database jl_m1 --backup <gzip>",
+      "exit": 2,
+      "expect": "exit 2 both",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: --allow-production 只允许搭配 --database jl（当前 jl_m1），exit 2\nFATAL: REFUSED: --backup 只用于生产路径（--database jl --allow-production），exit 2"
+    },
+    {
+      "check": "guard: env required",
+      "cmd": "migrate.py --database jl --allow-production --backup <gzip> (env unset)",
+      "exit": 2,
+      "expect": "exit 2 env",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 生产路径需要进程环境 JL_ALLOW_PROD_MIGRATION=1（export，不是 .env），exit 2"
+    },
+    {
+      "check": "guard: backup variants refused before connect",
+      "cmd": "env + --backup none / missing / empty / not-gzip ; wrong-password env + missing backup",
+      "exit": 2,
+      "expect": "exit 2 on backup gate only",
+      "pass": true,
+      "out_tail": "必须提供 --backup ... exit 2 | --backup 文件不存在 ... exit 2 | --backup 文件为空 ... exit 2 | --backup 不是有效 gzip（gzip -t 失败）... exit 2 | gate-before-connect case output only: FATAL: REFUSED: --backup 文件不存在（no connection/access-denied error）"
+    },
+    {
+      "check": "jl invariants after read-only/dry-run",
+      "cmd": "table list cmp; count; memory rows; SHOW CREATE cmp",
+      "exit": 0,
+      "expect": "identical",
+      "pass": true,
+      "out_tail": "jl table list identical; count=19; memory_%=0; schema_migrations=0; memory rows=39; SHOW CREATE TABLE jl.memory cmp exit=0 (byte-identical)"
+    },
+    {
+      "check": "negative fake migration: ALTER TABLE memory",
+      "cmd": "env + --dry-run --migrations-dir fake-alt",
+      "exit": 2,
+      "expect": "REFUSED before DDL",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 生产路径只允许 'CREATE TABLE IF NOT EXISTS' / 'SET NAMES'；迁移 9901_alter 含不安全语句，exit 2\n-- 语句：\nALTER TABLE memory ADD COLUMN evil_shadow INT NULL"
+    },
+    {
+      "check": "negative fake migration: CREATE TABLE IF NOT EXISTS memory",
+      "cmd": "env + --dry-run --migrations-dir fake-create-memory",
+      "exit": 2,
+      "expect": "REFUSED before DDL",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 待应用迁移要创建的表已存在：memory（IF NOT EXISTS 会静默跳过；拒绝制造 schema_migrations 与实际结构不一致），exit 2"
+    },
+    {
+      "check": "negative fake migration: DROP TABLE memory ; allowlist positive control",
+      "cmd": "env + --dry-run --migrations-dir fake-drop / fake-newtable",
+      "exit": 0,
+      "expect": "DROP refused exit 2; new-table create accepted exit 0 dry-run",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 生产路径只允许 'CREATE TABLE IF NOT EXISTS' / 'SET NAMES'；迁移 9903_drop_memory 含不安全语句，exit 2\n---\nPROD PLAN (dry-run apply) ... new tables      : m1_verifier_probe_table ... PROD_DRY_RUN_OK (no DDL executed; jl unchanged); probe table count in jl = 0"
+    },
+    {
+      "check": "state-failure exit 1 cases",
+      "cmd": "check-prod-migration --database jl_m1 --phase pre ; --database jl --phase post --baseline <pre baseline> (pre-state)",
+      "exit": 1,
+      "expect": "PROD_CHECK_FAIL exit 1",
+      "pass": true,
+      "out_tail": "FAIL  pre: 尚无 v2 表 ... FAIL  pre: schema_migrations 无 0001_memory_v2 记录 ... PROD_CHECK_FAIL phase=pre database=jl_m1\n---\nPROD_CHECK_FAIL phase=post database=jl (v2 tables / schema_migrations still missing)"
+    },
+    {
+      "check": "extra error-code gates exit 2",
+      "cmd": "--dry-run+--check combo; post missing baseline; baseline wrong db; baseline not JSON",
+      "exit": 2,
+      "expect": "exit 2 each",
+      "pass": true,
+      "out_tail": "--dry-run 不能与 --check / --rollback 同时使用，exit 2 | 基线文件不存在 ... exit 2 | 基线数据库 'jl_m1' 与当前 --database 'jl' 不一致，exit 2 | 基线不是合法 JSON ... exit 2"
+    },
+    {
+      "check": "final jl invariants + jl_m1 unchanged",
+      "cmd": "final information_schema/memory checks; check-memory-v2.py on jl_m1",
+      "exit": 0,
+      "expect": "jl unchanged; jl_m1 M1_OK",
+      "pass": true,
+      "out_tail": "jl: 19 tables (identical list); v2=0; memory_%=0; schema_migrations=0; memory rows=39; SHOW CREATE cmp identical. jl_m1: 6 tables unchanged, migration f8751b76..; final checker M1_OK"
+    },
+    {
+      "check": "hygiene",
+      "cmd": "find /home/baize/jl-service ... -newermt '2026-11-08 00:25'; ls -d /tmp/m1*",
+      "exit": 0,
+      "expect": "no server edits; verifier tmp removed",
+      "pass": true,
+      "out_tail": "find stdout empty (no deployed/repo file modified during verification); after cleanup /tmp/m1-verify-family gone; builder evidence /tmp/m1-memory-v2-evidence and /tmp/m1-prod-evidence remain"
+    },
+    {
+      "check": "post-cleanup snapshot (read-only, 2026-11-08 00:38:17 +0800)",
+      "cmd": "docker exec jl-mysql mysql (read-only SELECT/SHOW CREATE)",
+      "exit": 0,
+      "expect": "jl pre-state intact; jl_m1 schema intact",
+      "pass": true,
+      "out_tail": "jl tables: app_user,audit_log,auth_token,citation,doc,memory,message,observation,photo,project,project_member,review,review_appeal,rule_proposal,service_job,standard,task,tenant,thread_map; jl table_count=19; jl v2_tables=0; jl memory_like_tables=0; jl schema_migrations=0; jl memory_rows=39; jl_m1 tables=memory_audit,memory_item,memory_review,memory_use,memory_variant,schema_migrations; jl_m1 migration=0001_memory_v2 f8751b76..; verifier dirs GONE"
+    }
+  ],
+  "gates": {
+    "preflight": "not_run",
+    "deploy": "not_applicable",
+    "smoke": "not_applicable",
+    "acceptance": "not_applicable",
+    "negative": "pass"
+  },
+  "production_command": {
+    "status": "NOT EXECUTED by verifier; Lead runs after this PASS",
+    "backup_generation": [
+      "cd /home/baize/jl-service",
+      "STAMP=$(date +%Y%m%d-%H%M)",
+      "mkdir -p backups",
+      "docker exec jl-mysql mysqldump -uroot -p\"$(grep '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)\" --default-character-set=utf8mb4 --single-transaction --routines jl | gzip > \"backups/db-pre-m1-$STAMP.sql.gz\"",
+      "ls -l \"backups/db-pre-m1-$STAMP.sql.gz\""
+    ],
+    "copy_scripts_to_tmp": [
+      "ssh rokid-r640 'rm -rf /tmp/m1-prod && mkdir -p /tmp/m1-prod/scripts /tmp/m1-prod/db/migrations'",
+      "scp scripts/migrate.py scripts/check-prod-migration.py scripts/check-memory-v2.py rokid-r640:/tmp/m1-prod/scripts/",
+      "scp db/migrations/0001_memory_v2.sql db/migrations/0001_memory_v2.down.sql rokid-r640:/tmp/m1-prod/db/migrations/",
+      "ssh rokid-r640 'sha256sum /tmp/m1-prod/db/migrations/0001_memory_v2.sql'  # MUST be f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae (LF blob; CRLF copy would record a different checksum)"
+    ],
+    "pre_check": "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/check-prod-migration.py --env-file /home/baize/jl-service/.env --database jl --allow-production --phase pre --write-baseline /tmp/m1-prod-baseline.json\"",
+    "dry_run": "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/migrate.py --env-file /home/baize/jl-service/.env --database jl --allow-production --backup /home/baize/jl-service/backups/db-pre-m1-<STAMP>.sql.gz --dry-run\"",
+    "apply_single_write": "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/migrate.py --env-file /home/baize/jl-service/.env --database jl --allow-production --backup /home/baize/jl-service/backups/db-pre-m1-<STAMP>.sql.gz\"",
+    "post_checks": [
+      "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/migrate.py --env-file /home/baize/jl-service/.env --database jl --allow-production --check\"",
+      "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/check-prod-migration.py --env-file /home/baize/jl-service/.env --database jl --allow-production --phase post --baseline /tmp/m1-prod-baseline.json\"",
+      "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/check-memory-v2.py --env-file /home/baize/jl-service/.env --database jl --allow-production\""
+    ],
+    "expected": "pre PROD_CHECK_OK; dry-run PROD_DRY_RUN_OK with backup sha256/size + invariants pre rows=39; apply PROD_APPLY_OK (memory rows/create_sha256 unchanged); post PROD_CHECK_OK; --check MIGRATIONS_OK; check-memory-v2 M1_OK",
+    "rollback_optional": "ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/migrate.py --env-file /home/baize/jl-service/.env --database jl --allow-production --backup /home/baize/jl-service/backups/db-pre-m1-<STAMP>.sql.gz --rollback\" (only if needed; DROP 5 v2 tables only)"
+  },
+  "verdict": "pass",
+  "verified_by": "verifier:independent",
+  "verified_at": "2026-11-08T00:38:17+0800",
+  "notes": [
+    "Independent verifier: every check below was executed first-hand; builder /tmp/m1-prod-evidence was not trusted or used as evidence.",
+    "SAFETY: no non-dry-run apply/rollback was ever executed against jl. All jl interactions were read-only SELECT/SHOW CREATE or --dry-run; guard-refusal cases exit before DB connection/DDL. jl was byte-identical before and after (19-table list, memory rows=39, SHOW CREATE cmp exit 0, no v2/schema_migrations tables).",
+    "Backup used for testing was only a dummy gzip fixture (/tmp/m1b-verify/dummy-valid.sql.gz, sha256 313b4417.., 25 bytes). The Lead MUST generate and use a real mysqldump backup per docs/M1-PROD-MIGRATION.md §2 before the single apply.",
+    "Backup gate is provably before any connection/DDL: with a wrong MYSQL_PASSWORD env-file plus a missing --backup, the run failed only on '--backup 文件不存在' with no access-denied/connection error; code order is validate_backup() then connect() then prod apply.",
+    "Apply allowlist semantics (by test + code inspection): only SET NAMES and CREATE TABLE IF NOT EXISTS <target absent> are admitted; any ALTER/DROP/other statement is refused (exit 2), and an IF NOT EXISTS targeting an existing table (e.g. legacy memory) is refused (exit 2). Any new-table name is admitted by design (the documented rule is 'CREATE TABLE IF NOT EXISTS only; target absent'), and the repo has only 0001_memory_v2 pending for the Lead's apply. Rollback allowlist (DROP TABLE IF EXISTS restricted to the 5 v2 tables) was verified by code inspection only, because prod rollback is not executed pre-apply.",
+    "Line-ending caution for the Lead's copy step: /tmp/m1-prod/db/migrations/0001_memory_v2.sql must hash to f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae (committed LF blob). The Windows worktree currently has that LF blob; a CRLF-converted copy would record a different schema_migrations checksum. Verify with sha256sum after scp.",
+    "Self-check harness totals: main suite 146 PASS / 0 FAIL; supplementary error-code suite 21 PASS / 0 FAIL (167 total, 0 failures).",
+    "Verifier wrote no code and committed nothing; only write in the repo is this receipt (left uncommitted for Lead). Builder evidence dirs /tmp/m1-memory-v2-evidence and /tmp/m1-prod-evidence remain on the server; verifier /tmp/m1b-verify and /tmp/m1b-evidence.tgz were removed after download.",
+    "Post-cleanup read-only snapshot at 2026-11-08 00:38:17 +0800: jl 19 tables (app_user,audit_log,auth_token,citation,doc,memory,message,observation,photo,project,project_member,review,review_appeal,rule_proposal,service_job,standard,task,tenant,thread_map), 0 v2 tables, 0 memory_% tables, 0 schema_migrations, memory rows=39; jl_m1 6 tables + 0001_memory_v2 checksum f8751b76.."
+  ]
+}

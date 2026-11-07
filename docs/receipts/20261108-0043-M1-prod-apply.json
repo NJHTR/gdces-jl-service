@@ -1,0 +1,371 @@
+{
+  "round": 3,
+  "item": "M1-prod-apply",
+  "type": "IMPL",
+  "commit": "f628b7a",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "f628b7a"
+    }
+  ],
+  "files": [
+    "scripts/migrate.py",
+    "scripts/check-memory-v2.py",
+    "scripts/check-prod-migration.py",
+    "docs/M1-PROD-MIGRATION.md"
+  ],
+  "file_sha256": {
+    "scripts/migrate.py": "162631ffc2359fb51fbeb2b73910dbd9ef5b60a79dc7283ea21f92ca1f7c5fee",
+    "scripts/check-memory-v2.py": "f3c4d6d6ce7bc4d12f9cd8519b037b15518e2b59b451aebe9aaeae6d26b2e99e",
+    "scripts/check-prod-migration.py": "2b144712385acc30d8b0291127aad48bbb271cd2f09be6deddd8f8fb71e587ec",
+    "docs/M1-PROD-MIGRATION.md": "aba845c1eda74ece2555809ecd5df2daabc75910a48d165293886cde69cb0478"
+  },
+  "migration_files_used": {
+    "db/migrations/0001_memory_v2.sql": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+    "db/migrations/0001_memory_v2.down.sql": "ae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527",
+    "introduced_in_commit": "700d3b2"
+  },
+  "base_commit": "858d761",
+  "diff_hash": "80e55165da51994d",
+  "diff_hash_algo": "sha256(git diff 858d7614ce0d71695e58cd570568197c95d13db1..f628b7a1a15851bbb7bac6f6b3330774196d4a22 raw bytes)[:16]",
+  "diff_len": 45404,
+  "diff_per_repo": [
+    {
+      "repo": "jl-service",
+      "base": "858d761",
+      "sha": "f628b7a",
+      "diff_len": 45404,
+      "files_changed": 4
+    }
+  ],
+  "scope_check": {
+    "git_show_stat_files": [
+      "docs/M1-PROD-MIGRATION.md",
+      "scripts/check-memory-v2.py",
+      "scripts/check-prod-migration.py",
+      "scripts/migrate.py"
+    ],
+    "only_allowed_files": true,
+    "forbidden_hits": [],
+    "notes": "HEAD at verification time = f628b7a. Apply ran with the f628b7a scripts (byte-identical server copies in /tmp/m1-prod) and the repo's 0001_memory_v2 migration files (introduced in 700d3b2).",
+    "code_edits_by_verifier": false
+  },
+  "environment": {
+    "host": "baize-R640 via ssh rokid-r640",
+    "python": "3.14.4",
+    "gzip": "1.14",
+    "db": "127.0.0.1:3309 user=jl",
+    "database": "jl (production, read-only verification)",
+    "verifier_test_dir": "/tmp/m1v5-verify (removed after evidence download)",
+    "server_time_at_run": "2026-11-08 00:41:17 +0800",
+    "self_check": {
+      "checks": 126,
+      "pass": 126,
+      "fail": 0
+    }
+  },
+  "production_apply": {
+    "applied_by": "Lead (after task-4 pre-apply PASS; verifier did not execute apply/rollback)",
+    "backup": {
+      "path": "/home/baize/jl-service/backups/db-pre-m1-20261108-0039.sql.gz",
+      "sha256": "48f235e6f2a4e715594572d774fc33d1f016d4d0355e9e806076059da32e7969",
+      "size_bytes": 660349,
+      "gzip_test": "ok",
+      "contents": "1 x CREATE TABLE `memory`; 0 x memory_item; 19 x CREATE TABLE (pre-migration dump)"
+    },
+    "pre_baseline": {
+      "path": "/tmp/m1-prod-baseline.json",
+      "checked_at": "2026-11-08T00:40:23.752136+08:00",
+      "database": "jl",
+      "phase": "pre",
+      "memory_present": true,
+      "memory_rows": 39,
+      "memory_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc",
+      "v2_tables_present": false
+    },
+    "schema_migrations_row": {
+      "version": "0001_memory_v2",
+      "checksum": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+      "applied_at": "2026-11-08 00:40:27",
+      "committed_blob_sha256": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+      "match": true
+    },
+    "ordering_evidence": "backup mtime 00:39 -> pre baseline checked_at 00:40:23 -> schema_migrations.applied_at 00:40:27 (baseline captured before DDL)"
+  },
+  "post_state": {
+    "jl_table_count": 25,
+    "pre_table_count": 19,
+    "table_delta": 6,
+    "delta_explanation": "19 pre-existing tables + 5 v2 tables (memory_item/memory_variant/memory_use/memory_review/memory_audit) + schema_migrations = 25; only additions, pre table names all preserved",
+    "pre_tables_preserved": 19,
+    "v2_tables": [
+      "memory_item",
+      "memory_variant",
+      "memory_use",
+      "memory_review",
+      "memory_audit"
+    ],
+    "v2_row_counts": {
+      "memory_item": 0,
+      "memory_variant": 0,
+      "memory_use": 0,
+      "memory_review": 0,
+      "memory_audit": 0
+    },
+    "legacy_memory_rows": 39,
+    "legacy_memory_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc",
+    "legacy_memory_unchanged_vs_baseline": true,
+    "schema_migrations_rows": 1,
+    "structure": "memory_item: 17 columns, 4 exact ENUMs, status default candidate, confidence 0.500, 5 indexes, 3 FKs item_id->memory_item.id ON DELETE CASCADE; all 6 new tables InnoDB + utf8mb4 + table comments"
+  },
+  "stated_expectation_discrepancy": {
+    "lead_stated": "total tables 19 -> 20",
+    "actual_first_hand": "total tables 19 -> 25 (+6: 5 v2 tables + schema_migrations)",
+    "assessment": "The applied state is exactly what 0001_memory_v2 defines (5 CREATE TABLE + schema_migrations); the '19->20' figure in the request appears to be a miscount. No extra or missing tables beyond the 6 expected additions; all 19 pre-existing tables remain."
+  },
+  "not_executed": [
+    "production rollback / DROP / ALTER / any DDL or DML on jl",
+    "migrate.py apply against jl",
+    "bff/deploy/repo edits",
+    "deploy"
+  ],
+  "dod": [
+    {
+      "check": "code commit under verification contains only the allowed files",
+      "cmd": "git show --stat --name-status f628b7a (HEAD=f628b7a)",
+      "expect": "4 allowed files: scripts/migrate.py, scripts/check-memory-v2.py, scripts/check-prod-migration.py, docs/M1-PROD-MIGRATION.md; no forbidden changes",
+      "pass": true
+    },
+    {
+      "check": "the apply used the tested f628b7a artifacts (server copies byte-identical to committed blobs)",
+      "cmd": "sha256sum /tmp/m1-prod/scripts/*.py /tmp/m1-prod/db/migrations/*.sql; find /tmp/m1-prod -type f",
+      "expect": "5 files only; migrate.py 162631ff.., checker f3c4d6d6.., prod-checker 2b144712.., 0001 up f8751b76.., down ae9f4cf5..",
+      "pass": true
+    },
+    {
+      "check": "jl has exactly 5 v2 tables + schema_migrations and only expected additions",
+      "cmd": "information_schema table list/count on jl",
+      "expect": "25 tables = 19 pre + 5 v2 + schema_migrations; all 19 pre names preserved; 6 new names exactly",
+      "pass": true
+    },
+    {
+      "check": "memory_item structure: columns/enums/indexes/FKs; all new tables InnoDB + utf8mb4",
+      "cmd": "check-memory-v2.py --database jl --allow-production + information_schema queries + SHOW CREATE TABLE memory_item",
+      "expect": "M1_OK (99 PASS, 0 FAIL); 17 columns, 4 exact ENUMs, 5 indexes, 3 FKs CASCADE; 6/6 InnoDB + utf8mb4",
+      "pass": true
+    },
+    {
+      "check": "schema_migrations has exactly one row 0001_memory_v2 with committed checksum",
+      "cmd": "SELECT version, checksum, applied_at FROM schema_migrations; SELECT COUNT(*)",
+      "expect": "1 row: 0001_memory_v2 / f8751b76.. / 2026-11-08 00:40:27; no other rows",
+      "pass": true
+    },
+    {
+      "check": "legacy jl.memory unchanged: rows=39 and SHOW CREATE sha256 equals pre baseline",
+      "cmd": "SELECT COUNT(*) FROM memory; SHOW CREATE TABLE memory sha256; memory-sha.py --expect-rows 39 --expect-create-sha256 25e3bb99..",
+      "expect": "rows=39; create sha256 25e3bb99.. (baseline) -> MEMORY_INVARIANT_OK",
+      "pass": true
+    },
+    {
+      "check": "no v2 table contains data (migration is schema-only)",
+      "cmd": "SELECT COUNT(*) for memory_item/variant/use/review/audit",
+      "expect": "0,0,0,0,0",
+      "pass": true
+    },
+    {
+      "check": "backup file is a valid pre-migration gzip dump usable for restore",
+      "cmd": "stat, sha256sum, gzip -t, zcat | grep CREATE TABLE",
+      "expect": "660349 bytes; sha256 48f235e6..; gzip -t OK; contains CREATE TABLE `memory` (1), no memory_item (0), 19 CREATE TABLE statements",
+      "pass": true
+    },
+    {
+      "check": "independent post-apply checkers pass on jl",
+      "cmd": "check-memory-v2.py --database jl --allow-production; migrate.py --database jl --allow-production --check; check-prod-migration.py --phase post --baseline /tmp/m1-prod-baseline.json",
+      "expect": "M1_OK; APPLIED 0001_memory_v2 (checksum ok) MIGRATIONS_OK; PROD_CHECK_OK phase=post database=jl (7 PASS incl. memory rows 39->39 and SHOW CREATE identical, v2 empty)",
+      "pass": true
+    },
+    {
+      "check": "read-only guards still refuse unsafe access (exit 2, no write)",
+      "cmd": "check-memory-v2.py --database jl (no flags); with allow but no env; migrate.py --database jl --allow-production (env=1, no backup); rollback+dry-run combo",
+      "expect": "all exit 2 with specified messages; state unchanged after them",
+      "pass": true
+    },
+    {
+      "check": "no server hand edits / no bff or repo code changed by the apply; /tmp/m1-prod contains only tested scripts",
+      "cmd": "find /home/baize/jl-service -maxdepth 4 (excl data/backups/runtime) -newermt '2026-11-08 00:39:00'; find /tmp/m1-prod -type f",
+      "expect": "empty find output; /tmp/m1-prod = 5 expected files only; verifier /tmp/m1v5-verify removed after download",
+      "pass": true
+    },
+    {
+      "check": "no rollback executed; migration state persists",
+      "cmd": "post-state queries; rollback dry-run combo attempt",
+      "expect": "5 v2 tables present + schema_migrations row present (rollback would remove them); --dry-run --rollback rejected exit 2 (not executed)",
+      "pass": true
+    },
+    {
+      "check": "verifier wrote no code and committed nothing",
+      "cmd": "git status",
+      "expect": "HEAD f628b7a; only untracked receipt(s) from verifier; no code edits",
+      "pass": true
+    }
+  ],
+  "evidence": [
+    {
+      "check": "apply artifacts byte-identical to commit f628b7a",
+      "cmd": "sha256sum /tmp/m1-prod/... on server",
+      "exit": 0,
+      "expect": "committed blob hashes",
+      "pass": true,
+      "out_tail": "162631ffc2359fb51fbeb2b73910dbd9ef5b60a79dc7283ea21f92ca1f7c5fee  /tmp/m1-prod/scripts/migrate.py\nf3c4d6d6ce7bc4d12f9cd8519b037b15518e2b59b451aebe9aaeae6d26b2e99e  /tmp/m1-prod/scripts/check-memory-v2.py\n2b144712385acc30d8b0291127aad48bbb271cd2f09be6deddd8f8fb71e587ec  /tmp/m1-prod/scripts/check-prod-migration.py\nf8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae  /tmp/m1-prod/db/migrations/0001_memory_v2.sql\nae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527  /tmp/m1-prod/db/migrations/0001_memory_v2.down.sql"
+    },
+    {
+      "check": "pre baseline file",
+      "cmd": "cat /tmp/m1-prod-baseline.json",
+      "exit": 0,
+      "expect": "jl pre, rows 39, create sha 25e3bb99.., no v2",
+      "pass": true,
+      "out_tail": "{\"database\": \"jl\", \"phase\": \"pre\", \"checked_at\": \"2026-11-08T00:40:23.752136+08:00\", \"memory\": {\"present\": true, \"rows\": 39, \"create_sha256\": \"25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc\"}, \"v2_tables_present\": false, \"migration_version\": \"0001_memory_v2\"}"
+    },
+    {
+      "check": "backup stat/sha/gzip",
+      "cmd": "stat -c %s ; sha256sum ; gzip -t",
+      "exit": 0,
+      "expect": "660349 / 48f235e6.. / ok",
+      "pass": true,
+      "out_tail": "660349\n48f235e6f2a4e715594572d774fc33d1f016d4d0355e9e806076059da32e7969  /home/baize/jl-service/backups/db-pre-m1-20261108-0039.sql.gz\ngzip -t exit 0"
+    },
+    {
+      "check": "backup dump contents",
+      "cmd": "zcat backup | grep -c 'CREATE TABLE `memory`' ; grep -c 'CREATE TABLE `memory_item`' ; grep -c '^CREATE TABLE'",
+      "exit": 0,
+      "expect": "1 / 0 / 19",
+      "pass": true,
+      "out_tail": "1\n0\n19"
+    },
+    {
+      "check": "jl table list / count",
+      "cmd": "information_schema tables for jl",
+      "exit": 0,
+      "expect": "25 tables; 19 pre preserved + 6 new",
+      "pass": true,
+      "out_tail": "app_user,audit_log,auth_token,citation,doc,memory,memory_audit,memory_item,memory_review,memory_use,memory_variant,message,observation,photo,project,project_member,review,review_appeal,rule_proposal,schema_migrations,service_job,standard,task,tenant,thread_map (25)"
+    },
+    {
+      "check": "schema_migrations row",
+      "cmd": "SELECT version, checksum, applied_at FROM schema_migrations",
+      "exit": 0,
+      "expect": "0001_memory_v2 f8751b76.. applied 00:40:27",
+      "pass": true,
+      "out_tail": "0001_memory_v2\tf8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae\t2026-11-08 00:40:27"
+    },
+    {
+      "check": "legacy memory invariant",
+      "cmd": "memory-sha.py --expect-rows 39 --expect-create-sha256 25e3bb99..",
+      "exit": 0,
+      "expect": "MEMORY_INVARIANT_OK",
+      "pass": true,
+      "out_tail": "memory_rows=39\nmemory_create_sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc\nMEMORY_INVARIANT_OK"
+    },
+    {
+      "check": "post-apply structure checker",
+      "cmd": "JL_ALLOW_PROD_MIGRATION=1 check-memory-v2.py --database jl --allow-production",
+      "exit": 0,
+      "expect": "M1_OK",
+      "pass": true,
+      "out_tail": "database=jl host=127.0.0.1:3309 user=jl tables=6\n... 99 x PASS ...\nPASS  0001_memory_v2 已应用且 checksum 与仓库文件一致\nM1_OK"
+    },
+    {
+      "check": "post-apply migrate --check",
+      "cmd": "JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --check",
+      "exit": 0,
+      "expect": "MIGRATIONS_OK",
+      "pass": true,
+      "out_tail": "PROD CHECK (read-only) database=jl\nAPPLIED  0001_memory_v2 (checksum ok)\nMIGRATIONS_OK"
+    },
+    {
+      "check": "post-apply independent pre/post comparator",
+      "cmd": "JL_ALLOW_PROD_MIGRATION=1 check-prod-migration.py --database jl --allow-production --phase post --baseline /tmp/m1-prod-baseline.json",
+      "exit": 0,
+      "expect": "PROD_CHECK_OK",
+      "pass": true,
+      "out_tail": "PASS  post: 5 张 v2 表都在\nPASS  post: schema_migrations 存在\nPASS  post: 0001_memory_v2 已记录且 checksum 与仓库文件一致\nPASS  post: legacy memory 表存在性与 pre 一致\nPASS  post: memory 行数不变（39 -> 39）\nPASS  post: memory SHOW CREATE 与 pre 逐字节一致（sha256）\nPASS  post: v2 表无数据（迁移只建结构）\nPROD_CHECK_OK phase=post database=jl"
+    },
+    {
+      "check": "v2 tables empty + engine/charset",
+      "cmd": "COUNT rows; information_schema.tables engine/collation",
+      "exit": 0,
+      "expect": "0,0,0,0,0; InnoDB/utf8mb4 6/6",
+      "pass": true,
+      "out_tail": "v2 row counts = 0,0,0,0,0; memory_* + schema_migrations all InnoDB + utf8mb4 (6/6)"
+    },
+    {
+      "check": "structure details",
+      "cmd": "information_schema columns/statistics/referential_constraints; SHOW CREATE TABLE memory_item",
+      "exit": 0,
+      "expect": "17 cols / 4 enums / 5 indexes / 3 FKs CASCADE",
+      "pass": true,
+      "out_tail": "memory_item columns=17; enums: kind enum('rule','style','fact_ref'), scope enum('global','project','project_user','user'), status enum('candidate','active','superseded','archived','expired'), created_by enum('user','model','import'); distinct indexes=5; FK count=3 all item_id->memory_item.id CASCADE; ENGINE=InnoDB CHARSET=utf8mb4"
+    },
+    {
+      "check": "read-only guards",
+      "cmd": "negative guard matrix",
+      "exit": 2,
+      "expect": "exit 2 each, no writes",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: 拒绝检查生产库 'jl' ... exit 2 | FATAL: REFUSED: 生产结构检查需要进程环境 JL_ALLOW_PROD_MIGRATION=1 ... exit 2 | FATAL: REFUSED: 生产路径必须提供 --backup ... exit 2 | FATAL: --dry-run 不能与 --check / --rollback 同时使用，exit 2"
+    },
+    {
+      "check": "state unchanged after guard attempts",
+      "cmd": "post-negative table count/v2/sm/memory queries",
+      "exit": 0,
+      "expect": "25 / 5 / 1 / 39 / 0,0,0,0,0",
+      "pass": true,
+      "out_tail": "table_count=25; v2=5; schema_migrations rows=1; memory rows=39; v2 row counts=0,0,0,0,0"
+    },
+    {
+      "check": "no server hand edits",
+      "cmd": "find /home/baize/jl-service -maxdepth 4 (excl data/backups/runtime) -newermt '2026-11-08 00:39:00'",
+      "exit": 0,
+      "expect": "empty",
+      "pass": true,
+      "out_tail": "(empty output; no deployed/bff/repo file modified during backup/apply)"
+    },
+    {
+      "check": "tmp artifacts",
+      "cmd": "ls -d /tmp/m1*; find /tmp/m1-prod -type f",
+      "exit": 0,
+      "expect": "/tmp/m1-prod only 5 tested files; verifier tmp cleaned",
+      "pass": true,
+      "out_tail": "/tmp/m1-memory-v2-evidence /tmp/m1-prod /tmp/m1-prod-baseline.json /tmp/m1-prod-evidence /tmp/m1prod.tar; /tmp/m1-prod = 5 expected files; verifier /tmp/m1v5-verify removed"
+    },
+    {
+      "check": "post-cleanup final snapshot (read-only, 2026-11-08 00:43:14 +0800)",
+      "cmd": "docker exec jl-mysql mysql (read-only SELECT)",
+      "exit": 0,
+      "expect": "migration state persists",
+      "pass": true,
+      "out_tail": "jl_table_count=25; jl_v2_tables=memory_audit,memory_item,memory_review,memory_use,memory_variant; jl_v2_rowcounts=item=0 variant=0 use=0 review=0 audit=0; jl_sm_rows=1; jl_sm_row=0001_memory_v2|f8751b76..|2026-11-08 00:40:27; jl_memory_rows=39; jl_memory_like_other=0; verifier_dir GONE"
+    }
+  ],
+  "gates": {
+    "preflight": "not_run",
+    "deploy": "not_applicable",
+    "smoke": "not_applicable",
+    "acceptance": "not_applicable",
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "verified_by": "verifier:independent",
+  "verified_at": "2026-11-08T00:43:14+0800",
+  "notes": [
+    "Independent post-apply verification: all assertions executed first-hand on the live jl database via read-only SELECT/SHOW and the repo's own read-only checkers (f628b7a bytes verified by sha256). No non-dry-run apply/rollback, no DDL/DML, no deploy.",
+    "Lead-stated expectation 'total tables 19 -> 20' does not match the observed state: jl went 19 -> 25, i.e. +5 v2 tables + schema_migrations = +6, exactly what 0001_memory_v2 defines. All 19 pre-existing tables are preserved. The migrated state is internally consistent and correct; the figure in the request appears to be a miscount (reported to Lead).",
+    "Apply ordering evidence: backup file mtime 00:39 -> pre baseline checked_at 00:40:23 -> schema_migrations.applied_at 00:40:27. Backup is a valid pre-migration dump (19 CREATE TABLE, contains legacy memory, no memory_item), so a restore path exists if ever needed.",
+    "schema_migrations checksum f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae equals the committed 0001_memory_v2.sql blob sha256 and equals the value /tmp/m1-prod migration file, so the recorded version matches the tested artifact.",
+    "memory invariant independently recomputed with pymysql: rows=39 and SHOW CREATE sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc = pre baseline; check-prod-migration post also asserts 39->39 and byte-identical SHOW CREATE.",
+    "Rollback was not executed (and --dry-run --rollback is rejected with exit 2 by design, so no rollback plan was run); the 5 v2 tables and the migration row are present, confirming no rollback occurred.",
+    "Self-check harness totals: 126 PASS / 0 FAIL across preflight, backup evidence, post state, checkers, structure, negatives, hygiene and final state.",
+    "Verifier wrote no code and committed nothing; the only repo write is this receipt (uncommitted). Working tree still has the untracked M1-prod-path receipt from the previous task. Builder/Lead evidence dirs /tmp/m1-memory-v2-evidence, /tmp/m1-prod, /tmp/m1-prod-baseline.json, /tmp/m1-prod-evidence, /tmp/m1prod.tar remain on the server (not verifier artifacts); verifier /tmp/m1v5-verify and its tgz were removed after evidence download."
+  ]
+}

@@ -1,11 +1,13 @@
 {
-  "round": 4,
+  "round": 5,
   "wave": "Wave7 稳定性",
-  "pointer": "CHECKPOINT · M1-schema 完成；M1b 双写/影子读待批（需定 0001 应用到 jl 或测试 BFF）",
+  "pointer": "M1b 双写 + 影子读（jl 已应用 0001；先补 legacy 映射列/回填）",
   "attempts": {
     "P0-perf": 3,
     "D0": 1,
-    "M1": 1
+    "M1-schema": 1,
+    "M1-prod": 1,
+    "M1b": 0
   },
   "budget": {
     "max_attempts_per_item": 2,
@@ -24,14 +26,27 @@
       ],
       "expires": "2026-11-10",
       "consumed_at": "2026-11-08T00:24:00+08:00"
+    },
+    "M1-prod": {
+      "approved_by": "human (a)",
+      "scope": [
+        "apply 0001_memory_v2 to production jl",
+        "backup first; only CREATE TABLE IF NOT EXISTS; no changes to legacy memory"
+      ],
+      "consumed_at": "2026-11-08T00:40:27+08:00"
+    },
+    "M1b": {
+      "approved_by": "lead (human-delegated)",
+      "scope": [
+        "runtime dual-write behind JL_MEMORY_V2=0 default",
+        "shadow read only; no prompt change",
+        "no cutover",
+        "no production data backfill without separate approval"
+      ],
+      "expires": "2026-11-11"
     }
   },
   "blocked": [
-    {
-      "item": "M1b 双写 + 影子读",
-      "type": "DECISION",
-      "reason": "需要先定 0001 应用目标：应用到生产 jl（需人批）或起测试 BFF 连 jl_m1；当前只完成 schema"
-    },
     {
       "item": "F3 真实待补（yun-gu 71 + baiyun 2）",
       "type": "DECISION",
@@ -53,15 +68,31 @@
       "reason": "A 测试栈 / B 同库测试模式；M1 用 jl_m1 影子库绕开，暂缓"
     }
   ],
-  "last_receipt": "docs/receipts/20261108-0021-M1-schema.json",
+  "last_receipt": "docs/receipts/20261108-0043-M1-prod-apply.json",
   "checkpoint": {
-    "at": "2026-11-08T00:24:00+08:00",
-    "item": "M1-schema",
+    "at": "2026-11-08T00:45:00+08:00",
+    "item": "M1-prod-apply",
     "verdict": "pass",
-    "builder_commit": "700d3b2",
-    "receipt": "docs/receipts/20261108-0021-M1-schema.json",
+    "commit": "f628b7a",
+    "receipts": [
+      "docs/receipts/20261108-0038-M1-prod-path.json",
+      "docs/receipts/20261108-0043-M1-prod-apply.json"
+    ],
     "verified_by": "verifier:independent",
-    "evidence": "jl_m1 6 tables (5 v2 + schema_migrations); apply/re-apply/rollback/re-apply; checksum tamper + drop negative; --database jl exit 2; jl.memory 39 rows unchanged; diff_hash aec5861d3a72b9f8",
+    "production_state": {
+      "database": "jl",
+      "tables": 25,
+      "v2_tables": 5,
+      "schema_migrations": 1,
+      "memory_rows": 39,
+      "v2_rows": 0,
+      "memory_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc"
+    },
+    "backup": {
+      "path": "/home/baize/jl-service/backups/db-pre-m1-20261108-0039.sql.gz",
+      "sha256": "48f235e6f2a4e715594572d774fc33d1f016d4d0355e9e806076059da32e7969",
+      "bytes": 660349
+    },
     "gates": {
       "preflight": "not_run",
       "deploy": "not_applicable",
@@ -70,5 +101,5 @@
       "negative": "pass"
     }
   },
-  "updated_at": "2026-11-08T00:24:00+08:00"
+  "updated_at": "2026-11-08T00:45:00+08:00"
 }
