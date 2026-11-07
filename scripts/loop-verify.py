@@ -112,7 +112,7 @@ def main():
 
     gates = {}
     if os.path.isfile(a.gates):
-        gates = json.load(io.open(a.gates, encoding="utf-8"))
+        gates = json.load(io.open(a.gates, encoding="utf-8-sig"))
     missing = [k for k in GATES_REQUIRED if k not in gates]
     if missing:
         print("失败：门禁缺少 %s（回执必须带四个退出码）" % missing)

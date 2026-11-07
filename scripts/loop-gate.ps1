@@ -48,7 +48,7 @@ $result.match = ($result.deployed_head -eq $head)
 Write-Host ("  HEAD=" + $head + "  DEPLOYED=" + $result.deployed_head + "  match=" + $result.match)
 
 $json = $result | ConvertTo-Json -Compress
-$json | Out-File -Encoding UTF8 "$Local\docs\state\last-gate.json"
+[IO.File]::WriteAllText("$Local\docs\state\last-gate.json", $json, (New-Object Text.UTF8Encoding($false)))
 Write-Host ("=== 汇总: " + $json) -ForegroundColor Green
 
 if ($result.deploy -ne 0 -or $result.acceptance -ne 0 -or -not $result.match) { exit 1 }
