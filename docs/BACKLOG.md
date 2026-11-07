@@ -253,6 +253,36 @@ deploy 门禁链现在是：`UPLOADED_AT` → 重启 → `check-process-fresh.sh
 [x] acceptance 的 homes 残留检查按"文件"数（不是只看目录存在）：0 个文件
 ```
 
+## LOOP 已落地（2026-11-07 22:30）
+
+按"双环 + 三闸 + 五件套"做成可执行文件，每轮只做一项、由独立回执签字：
+
+```
+docs/LOOP.md                 协议（读回执不读全量日志 / STOP / BLOCKED / 每 5 轮对账）
+docs/state/loop.json         指针、尝试次数、预算、blocked 清单
+docs/decisions.index.json    从 BACKLOG 的 D-* 生成（15 条，含"禁止词"）
+scripts/loop-sync.py         每轮 SYNC：查决策冲突 / 回执签名 / 线上版本 / 待拍板（≤60 行）
+scripts/loop-verify.py       独立验证：只读 DoD+diff，跑命令，签回执；Builder 不能自签
+scripts/loop-gate.ps1        preflight→deploy→smoke→acceptance→DEPLOYED 汇总
+```
+
+实测：
+
+```
+SYNC        指针 P0-perf、无决策冲突、8 处未提交、HEAD/线上版本
+独立验证    loop-bootstrap 自测 3/3 PASS（含"未签名必须拒绝"负向，退出 2）
+            回执 docs/receipts/20261107-2227-loop-bootstrap.json（pass）
+门禁        {"head":"a19ed04","deploy":0,"acceptance":0,"deployed":"a19ed04"}
+```
+
+**F3 数字改为按项目拆开（DB 实算，不再手抄）：**
+
+```
+test-sandbox  待补 80 · 待签 4 · 已签 4   → 测试数据，可整批归档（DATA，需一句话）
+yun-gu-3qi    待补 71 · 待签 7            → 真实草稿，需业务判断（DECISION）
+baiyun-a2     待补 2                      → 同上
+```
+
 ## 卡在这里（都需要你一句话，否则我不动）
 
 ```
@@ -265,7 +295,7 @@ F3  137 份「待补」文书怎么清理？
     可选：A. 补全字段 B. 归档到 records/archive/ C. 直接删（不可逆）
 D1b 历史照片补描述：yun-gu 14 张 place/caption 全空，要不要现在让模型看图补？
 B6.5 监理检查记录：省统表里没有这张，A 复用平行检查 / B 你给文件 / C 不做
-F3 数字更新：清理测试文书后是 **152**（原 137；已签 4 / 待签 11）
+F3 数字：按项目实算见「LOOP 已落地」段（test-sandbox 80 待补可整批归档；yun-gu 71 + baiyun 2 才需业务判断）
 丢失文件 6 份：库里有、磁盘没有（早期 smoke 删过）。要 A 标记为"待补-需重出"，
                还是 B 直接把这几条归档/删除？我倾向 A（保留记录，提示重出）
 孤儿文件 25 份：磁盘有、库没有（多是测试产物+归档前的旧文件）。A 补登记 / B 归档 / C 删
