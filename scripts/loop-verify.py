@@ -22,7 +22,15 @@ RECEIPTS = os.path.join(ROOT, "docs", "receipts")
 STATE = os.path.join(ROOT, "docs", "state", "loop.json")
 
 
+def fix_cmd(cmd):
+    """DoD 里写 `python` 时用当前解释器，避免机器上没配 python 命令。"""
+    if cmd.startswith("python "):
+        return '"%s" %s' % (sys.executable, cmd[len("python "):])
+    return cmd
+
+
 def run(cmd, timeout=900):
+    cmd = fix_cmd(cmd)
     t0 = time.time()
     r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True,
                        text=True, timeout=timeout)
@@ -36,6 +44,10 @@ def git_out(cmd):
 
 
 def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser()
     ap.add_argument("--item", required=True)
     ap.add_argument("--dod", required=True, help="json: [{check,cmd,expect}]")
@@ -69,7 +81,7 @@ def main():
         else:
             good = (code == 0 and expect in out)
         ok = ok and good
-        print(("  ✓ " if good else "  ✗ ") + "%s（%ss）" % (it["check"], secs))
+        print(("  PASS " if good else "  FAIL ") + "%s (%ss)" % (it["check"], secs))
         if not good:
             print("    尾部: " + out.replace("\n", " ")[-260:])
         evidence.append({"check": it["check"], "cmd": it["cmd"], "exit": code,
