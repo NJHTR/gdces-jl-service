@@ -28,8 +28,14 @@ $result.preflight = if ($result.deploy -eq 0) { 0 } else { 1 }
 $result.smoke = $result.deploy
 
 Write-Host "=== gate 3) acceptance ===" -ForegroundColor Cyan
-$cmd = "cd $RemoteDir && python3 scripts/acceptance.py > /tmp/acc.out 2>&1; echo EXIT=`$?; grep -c '✗' /tmp/acc.out; tail -16 /tmp/acc.out"
-$b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($cmd))
+# 单引号 here-string：bash 的 $? 不能被 PowerShell 展开
+$cmd = @'
+cd __DIR__
+python3 scripts/acceptance.py > /tmp/acc.out 2>&1
+echo EXIT=$?
+tail -16 /tmp/acc.out
+'@
+$cmd = $cmd -replace '__DIR__', $RemoteDir
 $out = ssh -o ConnectTimeout=300 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
 Write-Host $out.TrimEnd()
 if ($out -match "EXIT=(\d+)") { $result.acceptance = [int]$Matches[1] }
