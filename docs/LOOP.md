@@ -82,6 +82,16 @@ INIT → SYNC → PICK → PLAN → BUILD → VERIFY ─┬─ PASS → RECORD �
 }
 ```
 
+验证器 v2 的硬约束（缺一条 fail）：
+
+```
+1. JL_VERIFIER_TOKEN 必须由外部注入（Builder 会话不放）—— 不能靠 --sign 字符串自称 verifier
+2. 跨仓库项必须传多个 --commit（后端一个、小程序一个），每个 commit 都要有文件改动
+3. DoD 至少一条负向（防止只测 happy path）
+4. gates 必须含 preflight/deploy/smoke/acceptance 四个退出码，且 gate.head == 当前 HEAD
+5. 回执带 base_commit + diff_hash，把"验的是哪段 diff"钉死
+```
+
 生成与签名：
 
 ```bash

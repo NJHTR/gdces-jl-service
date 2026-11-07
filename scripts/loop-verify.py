@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""独立验证器：只读 DoD + git diff，跑命令，签回执。
+"""独立验证器 v2：DoD + 多仓库 commit + 门禁 + 负向用例，全部落进回执。
 
-Builder 不能用它给自己盖章：--sign 必须由 Verifier 传入，且不能以 builder 开头。
-缺 commit / files 为空 → 直接 fail（防"改了个空提交"）。
+硬约束（缺一条就 fail）：
+  1. JL_VERIFIER_TOKEN 必须由外部注入（Builder 会话里不设就没有）
+  2. 至少一个 commit；跨仓库项要传多个 --commit（后端、小程序各一）
+  3. 每个 commit 必须真有文件改动
+  4. DoD 里至少一条负向（check 含"负向"或 kind=negative）
+  5. gates 文件必须含 preflight/deploy/smoke/acceptance 四个退出码，
+     且 gate.head 必须等于当前 HEAD（防用旧门禁签新代码）
 
-用法：
+用法（在 Verifier 会话里）：
+  设置 JL_VERIFIER_TOKEN
   python3 scripts/loop-verify.py --item P0-perf --dod dod.json \
-          --sign "verifier:independent" [--commit HEAD] [--gates gates.json]
+      --commit <后端sha> --commit <小程序sha> --gates docs/state/last-gate.json \
+      --sign "verifier:independent" --round 1
 """
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -19,29 +27,42 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RECEIPTS = os.path.join(ROOT, "docs", "receipts")
-STATE = os.path.join(ROOT, "docs", "state", "loop.json")
+MINIAPP = os.environ.get("JL_MINIAPP_REPO") or r"C:\Users\NJHTR\WeChatProjects\jl"
+GATES_REQUIRED = ("preflight", "deploy", "smoke", "acceptance")
+
+
+def sh(cmd, cwd=ROOT):
+    return subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True,
+                          encoding="utf-8", errors="replace").stdout.strip()
 
 
 def fix_cmd(cmd):
-    """DoD 里写 `python` 时用当前解释器，避免机器上没配 python 命令。"""
     if cmd.startswith("python "):
         return '"%s" %s' % (sys.executable, cmd[len("python "):])
     return cmd
 
 
 def run(cmd, timeout=900):
-    cmd = fix_cmd(cmd)
     t0 = time.time()
-    # 子进程输出统一按 UTF-8 读：默认 GBK 会在中文/emoji 上抛 UnicodeDecodeError
-    r = subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True,
+    r = subprocess.run(fix_cmd(cmd), shell=True, cwd=ROOT, capture_output=True,
                        timeout=timeout, encoding="utf-8", errors="replace")
     out = ((r.stdout or "") + (r.stderr or "")).strip()
-    return r.returncode, out[-400:], round(time.time() - t0, 1)
+    return r.returncode, out[-500:], round(time.time() - t0, 1)
 
 
-def git_out(cmd):
-    return subprocess.run(cmd, shell=True, cwd=ROOT, capture_output=True,
-                          text=True).stdout.strip()
+def resolve_commit(ref):
+    """返回 (repo, full_sha, short, files)；先找后端，再找小程序。"""
+    for repo in (ROOT, MINIAPP):
+        if not os.path.isdir(os.path.join(repo, ".git")):
+            continue
+        sha = sh("git rev-parse %s" % ref, cwd=repo)
+        if not sha:
+            continue
+        files = [f for f in sh("git show --name-only --pretty=format: %s" % sha,
+                               cwd=repo).splitlines() if f.strip()]
+        if files:
+            return repo, sha, sha[:7], files
+    return None, None, None, []
 
 
 def main():
@@ -49,27 +70,60 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--item", required=True)
-    ap.add_argument("--dod", required=True, help="json: [{check,cmd,expect}]")
-    ap.add_argument("--sign", default="", help="verifier:<name>")
-    ap.add_argument("--commit", default="HEAD")
-    ap.add_argument("--gates", default="", help="json: {preflight:0,...}")
+    ap.add_argument("--dod", required=True)
+    ap.add_argument("--commit", action="append", required=True)
+    ap.add_argument("--gates", required=True)
+    ap.add_argument("--sign", default="verifier")
     ap.add_argument("--round", type=int, default=0)
     a = ap.parse_args()
 
-    if not a.sign or a.sign.lower().startswith("builder"):
-        print("拒绝：必须由 Verifier 签名（--sign verifier:<name>），Builder 不能自签")
+    token = os.environ.get("JL_VERIFIER_TOKEN", "")
+    if not token:
+        print("拒绝：没有 JL_VERIFIER_TOKEN（验证器必须在独立会话里由外部注入）")
+        return 2
+    if a.sign.lower().startswith("builder"):
+        print("拒绝：Builder 不能签")
         return 2
 
-    commit = git_out("git rev-parse --short %s" % a.commit)
-    files = [f for f in git_out(
-        "git show --name-only --pretty=format: %s" % a.commit).splitlines() if f.strip()]
-    if not commit or not files:
-        print("失败：commit=%r files=%r（没有实际改动不能算完成）" % (commit, files))
-        return 1
+    commits = []
+    for ref in a.commit:
+        repo, sha, short, files = resolve_commit(ref)
+        if not sha:
+            print("失败：commit %r 不存在或没有文件改动" % ref)
+            return 1
+        commits.append({"repo": os.path.basename(repo), "sha": short,
+                        "path": repo, "files": files})
+
+    base = sh("git rev-parse %s^" % commits[0]["sha"], cwd=commits[0]["path"]) or ""
+    h = hashlib.sha256()
+    for c in commits:
+        h.update(sh("git diff %s^..%s" % (c["sha"], c["sha"]), cwd=c["path"]).encode())
+    diff_hash = h.hexdigest()[:16]
 
     dod = json.load(io.open(a.dod, encoding="utf-8"))
+    has_negative = any(("负向" in str(it.get("check", "")) or it.get("kind") == "negative")
+                       for it in dod)
+    if not has_negative:
+        print("失败：DoD 里没有负向用例（防止只测 happy path）")
+        return 1
+
+    gates = {}
+    if os.path.isfile(a.gates):
+        gates = json.load(io.open(a.gates, encoding="utf-8"))
+    missing = [k for k in GATES_REQUIRED if k not in gates]
+    if missing:
+        print("失败：门禁缺少 %s（回执必须带四个退出码）" % missing)
+        return 1
+    head_now = sh("git rev-parse --short HEAD")
+    gate_head = (gates.get("head") or "").strip()
+    if gate_head and gate_head != head_now:
+        print("失败：门禁是旧代码跑的（gate.head=%s，当前 HEAD=%s），先重跑 loop-gate"
+              % (gate_head, head_now))
+        return 1
+
     evidence, ok = [], True
     t0 = time.time()
     for it in dod:
@@ -80,7 +134,7 @@ def main():
         elif expect in ("ok", "OK"):
             good = code == 0 and "FAIL" not in out
         else:
-            good = (code == 0 and expect in out)
+            good = code == 0 and expect in out
         ok = ok and good
         print(("  PASS " if good else "  FAIL ") + "%s (%ss)" % (it["check"], secs))
         if not good:
@@ -89,9 +143,6 @@ def main():
                          "expect": expect, "pass": good, "secs": secs,
                          "out_tail": out})
 
-    gates = {}
-    if a.gates and os.path.isfile(a.gates):
-        gates = json.load(io.open(a.gates, encoding="utf-8"))
     gates = dict(gates)
     gates["negative"] = "pass" if ok else "fail"
 
@@ -102,21 +153,24 @@ def main():
         "round": a.round,
         "item": a.item,
         "type": "IMPL",
-        "commit": commit,
-        "files": files,
+        "commit": commits[0]["sha"],
+        "commits": [{k: c[k] for k in ("repo", "sha")} for c in commits],
+        "files": [f for c in commits for f in c["files"]],
+        "base_commit": base[:7] if base else None,
+        "diff_hash": diff_hash,
         "dod": [{k: it.get(k) for k in ("check", "cmd", "expect")} for it in dod],
         "gates": gates,
         "verdict": "pass" if ok else "fail",
         "evidence": evidence,
-        "decisions_needed": [],
-        "risks": [],
-        "duration_s": round(time.time() - t0, 1),
         "verified_by": a.sign,
+        "verifier_token": hashlib.sha256(token.encode()).hexdigest()[:8],
         "verified_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "duration_s": round(time.time() - t0, 1),
     }
     io.open(fp, "w", encoding="utf-8").write(
         json.dumps(rec, ensure_ascii=False, indent=2) + "\n")
-    print("  回执: docs/receipts/%s（%s）" % (os.path.basename(fp), rec["verdict"]))
+    print("  回执: docs/receipts/%s（%s，%d 个 commit）"
+          % (os.path.basename(fp), rec["verdict"], len(commits)))
     return 0 if ok else 1
 
 
