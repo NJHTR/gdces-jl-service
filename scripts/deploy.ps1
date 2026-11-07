@@ -16,6 +16,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# 测试钩子不能随手可用：它会重启服务并把 UPLOADED_AT 写成未来时间
+
+if ($SimulateStale -and $env:JL_ALLOW_TEST_HOOKS -ne "1") {
+
+  Write-Host "拒绝：-SimulateStale 需要 JL_ALLOW_TEST_HOOKS=1" -ForegroundColor Red
+
+  exit 2
+
+}
 $Local = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $Local
 
@@ -58,7 +68,11 @@ scripts/start-bff.sh | tail -2
 sleep 3
 curl -s -m 5 http://127.0.0.1:8081/healthz; echo
 # 关键断言：进程必须比代码新（locale 无关，见脚本头注释）
-if [ "__STALE__" = "1" ]; then date -d "+1 hour" +%s > runtime/UPLOADED_AT; fi
+if [ "__STALE__" = "1" ]; then
+  cp -f runtime/UPLOADED_AT runtime/UPLOADED_AT.orig 2>/dev/null || true
+  date -d "+1 hour" +%s > runtime/UPLOADED_AT
+  trap 'mv -f runtime/UPLOADED_AT.orig runtime/UPLOADED_AT 2>/dev/null || true' EXIT
+fi
 bash scripts/check-process-fresh.sh
 '@
 $cmd = $cmd -replace '__DIR__', $RemoteDir

@@ -147,6 +147,12 @@ def main():
                 residue.append(os.path.join(base, fn))
     item("homes 无记忆残留", not residue, "%d 个文件" % len(residue))
 
+    # active 记忆里不许有测试污染：孤儿用户（app_user 里没有）或 smoke 标题
+    bad_mem = sql(
+        "SELECT COUNT(*) FROM memory m WHERE m.status=1 AND ("
+        "m.text LIKE '%smoke-%' OR m.owner_id NOT IN (SELECT CAST(id AS CHAR) FROM app_user))")
+    item("active 记忆无测试污染", bad_mem.strip() == "0", "可疑 %s 条" % bad_mem.strip())
+
     # 备份
     bdir = os.path.join(ROOT, "backups")
     files = [f for f in os.listdir(bdir)] if os.path.isdir(bdir) else []
