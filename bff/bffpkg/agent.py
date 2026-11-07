@@ -1131,12 +1131,24 @@ def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text
     except Exception as exc:
         sys.stderr.write("[review] 异步复核失败 task %s：%s\n" % (task_id, exc))
     finally:
+        # 复核结果写成 task.result，客户端轮询 /tasks/<id> 就能看到"复核中→复核完成"
+        state = {"review": "failed"}
+        try:
+            rv = q("SELECT verdict FROM review WHERE doc_id=%s ORDER BY id DESC LIMIT 1",
+                   (doc_id,)) if doc_id else []
+            if rv:
+                state = {"review": "done", "verdict": rv[0]["verdict"]}
+            elif not doc_id:
+                state = {"review": "skipped"}
+        except Exception:
+            traceback.print_exc()
         try:
             # doc_id 必须在这里写：走复核分支时主路径已经 return 了，
             # 那边那条 UPDATE 根本不会执行 → task.doc_id 永远 NULL
             # → /api/v1/tasks/<id> 的 artifact 永远为空（客户端拿不到这一单的文书）。
-            exec_sql("UPDATE task SET status='done', doc_id=%s, finished_at=NOW(3) WHERE id=%s",
-                     (doc_id, task_id))
+            exec_sql("UPDATE task SET status='done', doc_id=COALESCE(doc_id, %s), "
+                     "result=%s, finished_at=COALESCE(finished_at, NOW(3)) WHERE id=%s",
+                     (doc_id, json.dumps(state, ensure_ascii=False), task_id))
         except Exception:
             traceback.print_exc()
         try:
@@ -1515,10 +1527,19 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
              json.dumps(cites, ensure_ascii=False) if cites else None,
              json.dumps(answer, ensure_ascii=False) if answer else None))
 
-        # 有文书且开复核 → 交给后台，任务等复核完成后才置 done（前端会一直轮询到那时）
-        # 不再用 ENGINE_MODE 判断：只要这一轮出了文书就该复核。
-        # 以前写 == appserver，配置改成 cli 时复核会静默消失。
-        if (doc_row and (os.environ.get("REVIEW_PASS") or "1") != "0" and message_id):
+        # 有文书且开复核 → 复核是加分项，**不能挡 done**：
+        # 先落 done（用户马上能拿到文书），再把复核丢后台；结果回写 message.answer.review
+        # 和 task.result.review（客户端据此显示"复核中/复核通过/需修改"）。
+        review_on = bool(doc_row and (os.environ.get("REVIEW_PASS") or "1") != "0" and message_id)
+        done_doc = doc_row["id"] if doc_row else (new_doc[0]["id"] if new_doc else None)
+        exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, result=%s, "
+                 "finished_at=NOW(3) WHERE id=%s",
+                 (thread_id, done_doc,
+                  json.dumps({"review": "pending"}) if review_on else None, task_id))
+        sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令, "
+                         f"review={'pending' if review_on else 'off'})\n")
+
+        if review_on:
             threading.Thread(target=_review_async,
                              args=(task_id, project_id, user_id, text, images, doc_row["id"],
                                    final_text, message_id, answer, trace, ms, trace_sum,
@@ -1527,9 +1548,6 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
             sys.stderr.write("[review] task %s 复核已转后台（message=%s doc=%s）\n"
                              % (task_id, message_id, doc_row["id"]))
             return
-        exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, finished_at=NOW(3) WHERE id=%s",
-                 (thread_id, new_doc[0]["id"] if new_doc else None, task_id))
-        sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令)\n")
 
         learn_from_turn(project_id, user_id, text, final_text, trace)
 
@@ -1855,8 +1873,20 @@ def handle_task(task_id, user=None):
                         "path": d["path"], "commit": (d["git_commit"] or "")[:10],
                         "name": f"{d['kind']}" + (f" · {d['obj']}" if d["obj"] else "")}
 
+    # 复核状态：pending（已转后台）/ done（带 verdict）/ failed / skipped / off（没开复核）
+    review_state, review_verdict = "off", None
+    raw = t.get("result")
+    try:
+        rr = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        review_state = (rr.get("review") or "off").strip() or "off"
+        review_verdict = rr.get("verdict")
+    except (ValueError, TypeError):
+        review_state = "off"
+
     return 200, {"code": 0, "data": {
         "progress": progress,
+        "reviewStatus": review_state,
+        "reviewVerdict": review_verdict,
         "queueAhead": queue_ahead,
         "artifact": artifact,
         "noSource": _no_source(msgs),
