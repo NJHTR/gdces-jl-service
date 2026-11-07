@@ -226,41 +226,31 @@ data       workspaces 2.7MB · blobs 5.2MB · exports 0.2MB · knowledge 1.1MB
 deploy 门禁链现在是：`UPLOADED_AT` → 重启 → `check-process-fresh.sh` → `$LASTEXITCODE` → exit 3。
 四环在同一条路上，任何一环坏掉部署就红。
 
-## T6 · 测试隔离（M1 的前置，正式条目）
+## T6 · 测试隔离（M1 的前置）
 
 ```
-[ ] T6.1 smoke 只允许 JL_SMOKE_PROJECT=test-sandbox，且 project.code 必须以 TEST- 开头
-[ ] T6.2 记录本次创建的 doc/task/memory id，按 id 精确删；彻底去掉 obj LIKE 清理
-[ ] T6.3 跑前对 memory.status 做快照、跑后恢复（防 C7 那种"测试改业务状态"）
-[ ] T6.4 负向测试：JL_SMOKE_PROJECT=yun-gu-3qi 跑 smoke -> 必须在任何写操作前退出 2
-[ ] T6.5 不再直连业务表；必须直连时只允许测试 schema/库（或加 DB 级硬标记）
-验收：五条各有一条可执行命令与结果；负向测试必须红在"写之前"
+[x] T6.1 smoke 只允许 test-sandbox：PROJECT 从 JL_SMOKE_PROJECT 读，跑前断言
+         库里真有 test-sandbox（project.code=TEST-000）
+[x] T6.2 按 id 精确删：本次创建的 doc id + 本次任务的 task_id 两轮删除；
+         彻底去掉 obj LIKE；残留断言改成"按任务归属查"
+         实测：smoke 全绿，残留 0
+[x] T6.3 记忆快照：跑前记录 memory(id,status)，跑后恢复状态并删除测试新建条目
+         实测：smoke 跑完记忆条数/状态与跑前一致
+[x] T6.4 负向：JL_SMOKE_PROJECT=yun-gu-3qi 跑 smoke
+         实测：退出码 2、doc 总数 168 → 168（任何写操作前退出）
+[ ] T6.5 不直连业务表（A/B 未定，见待拍板）
+         A = 测试栈（jl_test + test-workspaces/blobs/homes + 8083 第二个 BFF +
+             mcp-jl.sh 参数化挂载 + smoke BASE=8083）：半天~一天
+         B = 同库 + JL_TEST_MODE 下的 test-only 端点 + 写操作校验 TEST-：
+             1~2 小时，但"测试与生产同库"的风险仍在，且需设到期日切 A
 ```
 
-## P1 收口（2026-11-07 20:50）
-
-评审指出"记忆污染只清了文件、没清 DB；隔离会被重新长出来；测试钩子会污染生产"。三条都已修：
-
+顺带补的两处（评审指出）：
 ```
-① DB 记忆污染：停用 13 条（原文保留，写 data/quarantine/2026-11-07/db-disabled.md）
-   - 53/58/60/62/64/89：owner 是测试用户或标题含 smoke-
-   - 18/19/35/39/41/45/49：owner（501/940/991/995）在 app_user 里不存在 = 孤儿用户
-   实测：active 记忆里 smoke 标题 / 孤儿 owner = 0
-
-② 隔离被"重新长出来"：render_user_project_md 在引擎记忆关闭时改写到
-   data/memory/projects/<uid>/<pid>.md（不再往 homes/<uid>/memories 写）
-   build_context 的指针同步；homes 下空壳 projects/ 已清
-   并把其余 68 个家目录的 memories/（含 raw/rollout/.git）整目录移到
-   data/quarantine/2026-11-07/homes/（15M，附 homes-manifest.md）
-   实测：homes/*/memories 0 个；acceptance「homes 无记忆残留」通过
-
-③ -SimulateStale 是生产钩子：现在必须 JL_ALLOW_TEST_HOOKS=1 才允许
-   （不带 → 退出 2）；simulate 时用 trap 恢复真实 UPLOADED_AT
-   实测：不带 opt-in 退出 2；带 opt-in 跑完整管线退出 3；UA 已恢复、.orig 已清
-
-acceptance 12 项全绿：
-  服务/数据(88·待补80·项目记忆6·用户级2)/影像索引/待确认规矩/省统表4×4/
-  [memories]段0/.bak 0/隔离目录/homes无残留/active记忆无污染/备份41包/引擎记忆0-77
+[x] data/memory（个人×项目记忆视图）进备份：memview-<stamp>.tar.gz，实测 155B
+[x] -SimulateStale 需要 JL_ALLOW_TEST_HOOKS=1 **且** -Environment test
+    实测：不带 test 退出 2；带 test 跑完整管线退出 3；UPLOADED_AT 已恢复
+[x] acceptance 的 homes 残留检查按"文件"数（不是只看目录存在）：0 个文件
 ```
 
 ## 卡在这里（都需要你一句话，否则我不动）
