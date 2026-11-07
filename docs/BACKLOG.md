@@ -291,7 +291,7 @@ T6.5 测试隔离落点（M1 之前必须定）
      B 同库 + JL_TEST_MODE 下的 test-only 清理端点，所有写操作校验 project.code=TEST-
      不定的话 T6.5 会一直“在改”
 
-F3  137 份「待补」文书怎么清理？
+F3  待补文书怎么清理？（test-sandbox 80 可整批归档；yun-gu 71 + baiyun 2 需业务判断）
     可选：A. 补全字段 B. 归档到 records/archive/ C. 直接删（不可逆）
 D1b 历史照片补描述：yun-gu 14 张 place/caption 全空，要不要现在让模型看图补？
 B6.5 监理检查记录：省统表里没有这张，A 复用平行检查 / B 你给文件 / C 不做
