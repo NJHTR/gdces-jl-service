@@ -1,0 +1,45 @@
+{
+  "round": 0,
+  "wave": "Wave7 稳定性",
+  "pointer": "P0-perf 复核不挡 task done",
+  "attempts": {},
+  "budget": {
+    "max_attempts_per_item": 2,
+    "max_items_per_wave": 6,
+    "max_rounds": 24
+  },
+  "blocked": [
+    {
+      "item": "D0 数据卫生（test-sandbox 80 份待补归档、丢失 6 标记、孤儿 25 归档）",
+      "type": "DATA",
+      "reason": "需要人一句话：test-sandbox 整批归档我照做；yun-gu/baiyun 的待补仍需业务判断"
+    },
+    {
+      "item": "F3 真实待补（yun-gu 71 + baiyun 2）",
+      "type": "DECISION",
+      "reason": "补全 / 归档 / 删除，三选一"
+    },
+    {
+      "item": "D1b 历史照片补描述（22 张无 caption、27 无 place）",
+      "type": "DECISION",
+      "reason": "是否花模型调用补历史数据"
+    },
+    {
+      "item": "B6.5 监理检查记录",
+      "type": "DECISION",
+      "reason": "决策写的是「不做省统表 + 走非正式导出」，但代码没有非正式导出；要么补实现，要么清掉待拍板"
+    },
+    {
+      "item": "M1 记忆 v2 表与状态机",
+      "type": "SCHEMA",
+      "reason": "改 schema 属于 STOP 条件，需要人批准后单独一项做"
+    },
+    {
+      "item": "T6.5 测试隔离落点",
+      "type": "DECISION",
+      "reason": "A 测试栈（半天~一天）或 B 同库测试模式（1~2 小时）"
+    }
+  ],
+  "last_receipt": null,
+  "updated_at": null
+}

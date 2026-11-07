@@ -1,0 +1,108 @@
+{
+  "generated_from": "docs/BACKLOG.md",
+  "count": 15,
+  "decisions": [
+    {
+      "id": "D-环境-01",
+      "text": "服务器 python-docx 用 pip --user 安装；重装系统要补（写进 DEPLOY 文档）",
+      "forbids": []
+    },
+    {
+      "id": "D-表式-01",
+      "text": "表式几乎不变 → 原件模板原位填字 + 结构签名校验；不手绘、不让模型画",
+      "forbids": [
+        "手绘表格",
+        "模型生成 ooxml",
+        "程序画表"
+      ]
+    },
+    {
+      "id": "D-表式-02",
+      "text": "B6.5「监理检查记录」不做省统表表式：省统表 1~25 无此表，",
+      "forbids": [
+        "监理检查记录 省统表"
+      ]
+    },
+    {
+      "id": "D-记忆-01",
+      "text": "记忆只有单一写者：项目规矩 = memory 表（rules.md 是渲染视图）；",
+      "forbids": []
+    },
+    {
+      "id": "D-记忆-02",
+      "text": "不做“纯人写”（负担）；不做“模型自动写项目规矩”（失控）；",
+      "forbids": []
+    },
+    {
+      "id": "D-记忆-03",
+      "text": "排序上全公式 rel×U×D+UCB，但分三段启用：",
+      "forbids": [
+        "hits 排序",
+        "按 hits 排序",
+        "hits 作为复用"
+      ]
+    },
+    {
+      "id": "D-记忆-04",
+      "text": "引擎记忆走 A：关闭自动注入；MEMORY.md/summary 只作候选来源与审计，",
+      "forbids": [
+        "JL_ENGINE_MEMORY=1",
+        "memories = true",
+        "自动注入"
+      ]
+    },
+    {
+      "id": "D-记忆-05",
+      "text": "切读：影子并行 3 天或 50 轮（先到为准），比较 top-3 重合率与注入差异；",
+      "forbids": []
+    },
+    {
+      "id": "D-记忆-06",
+      "text": "迁移：38 条全量降级 candidate（不直接 active）；去重后按",
+      "forbids": []
+    },
+    {
+      "id": "D-记忆-07",
+      "text": "记忆唯一写者 = memory 表（memory_item）。引擎只做“抽取器”；",
+      "forbids": [
+        "引擎写 memory",
+        "engine writes memory",
+        "第二写者"
+      ]
+    },
+    {
+      "id": "D-记忆-08",
+      "text": "user 记忆默认 project_user（必须带 project_id）；只有显式",
+      "forbids": []
+    },
+    {
+      "id": "D-记忆-09",
+      "text": "新记忆默认 candidate；只有“用户显式动作”可直接 active：",
+      "forbids": [
+        "默认 active",
+        "直接写入 active"
+      ]
+    },
+    {
+      "id": "D-记忆-10",
+      "text": "保留：每 scope active 上限 50；candidate 14 天过期；D 的 τ=30 天；",
+      "forbids": []
+    },
+    {
+      "id": "D-记忆-11",
+      "text": "测试污染立即清：test-sandbox 的「只回：记住」、smoke-78#楼、",
+      "forbids": [
+        "test 数据进业务",
+        "smoke 直写业务表"
+      ]
+    },
+    {
+      "id": "D-部署-01",
+      "text": "删文件必须写进 scripts/deploy-clean.txt（scp 不删远端）",
+      "forbids": [
+        "服务器手改",
+        "直接改服务器文件"
+      ]
+    }
+  ]
+}
