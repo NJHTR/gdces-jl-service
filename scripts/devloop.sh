@@ -81,8 +81,25 @@ files = [f for p,_,fs in os.walk(root) for f in fs if f.endswith('.md')]
 print(len([f for f in files if f not in known]))
 PY
 )
-say "[不变量] test-sandbox 孤儿文书 $ORPHAN 份（应为 0）"
-[ "$ORPHAN" != "0" ] && FAIL=1
+# 孤儿基线：允许已知数量，但必须有到期日；到期仍未清零就红
+BASELINE=$R/runtime/orphan-baseline.json
+if [ -f "$BASELINE" ]; then
+  LIMIT=$(python3 -c "import json;print(json.load(open('$BASELINE')).get('test_sandbox',0))" 2>/dev/null || echo 0)
+  EXPIRES=$(python3 -c "import json;print(json.load(open('$BASELINE')).get('expires',''))" 2>/dev/null || echo "")
+  TODAY=$(date +%F)
+  if [ -n "$EXPIRES" ] && [ "$TODAY" \> "$EXPIRES" ]; then
+    say "[不变量] 孤儿基线已过期（$EXPIRES）：必须清零后更新基线"
+    FAIL=1
+  elif [ "$ORPHAN" -gt "$LIMIT" ]; then
+    say "[不变量] test-sandbox 孤儿 $ORPHAN > 基线 $LIMIT（到期 $EXPIRES）"
+    FAIL=1
+  else
+    say "[不变量] test-sandbox 孤儿 $ORPHAN（基线 $LIMIT，到期 $EXPIRES）"
+  fi
+else
+  say "[不变量] test-sandbox 孤儿文书 $ORPHAN 份（应为 0）"
+  [ "$ORPHAN" != "0" ] && FAIL=1
+fi
 
 PENDING=$(Q "select count(*) from doc where state='待补'")
 if [ "$PENDING" = "ERR" ] || [ -z "$PENDING" ]; then
