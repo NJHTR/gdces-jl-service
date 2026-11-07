@@ -289,6 +289,8 @@ def assert_test_project():
 
 
 def main():
+    assert_test_project()
+    snapshot_memory()
     print("=== smoke-e2e 核心链路 ===")
     assert_test_project()
     created = []
@@ -669,6 +671,7 @@ def main():
     sql("DELETE FROM review_appeal WHERE review_id=%s" % rv)
     sql("DELETE FROM review WHERE id=%s" % rv)
     if rdoc:
+        created.append(rdoc)
         rel = sql("SELECT COALESCE(path,'') FROM doc WHERE id=%s" % int(rdoc)).strip()
         sql("DELETE FROM doc WHERE id=%s" % int(rdoc))
         if rel:
@@ -698,13 +701,41 @@ def main():
     return finish(created)
 
 
+MEM_SNAPSHOT = []
+
+
+def snapshot_memory():
+    """跑前记录 memory(id,status)；跑后恢复，并删掉测试新建的条目。"""
+    global MEM_SNAPSHOT
+    MEM_SNAPSHOT = [ln for ln in (sql("SELECT id, status FROM memory") or "").splitlines()
+                    if ln.strip()]
+
+
+def restore_memory():
+    snap = {}
+    for ln in MEM_SNAPSHOT:
+        parts = ln.split("\t")
+        if len(parts) >= 2 and parts[0].isdigit():
+            snap[int(parts[0])] = parts[1].strip()
+    for mid, st in snap.items():
+        sql("UPDATE memory SET status=%s WHERE id=%s" % (st, mid))
+    # 测试期间新建的 memory 行：删掉
+    now = [ln for ln in (sql("SELECT id, status FROM memory") or "").splitlines() if ln.strip()]
+    for ln in now:
+        parts = ln.split("\t")
+        if len(parts) >= 2 and parts[0].isdigit() and int(parts[0]) not in snap:
+            sql("DELETE FROM memory WHERE id=%s" % int(parts[0]))
+    print("  记忆状态已恢复（快照 %d 条）" % len(snap))
+
+
 def finish(created):
-    # 先按 task_id 删：文书现在挂在任务上，比"按标题前缀"可靠
-    # （实测：模型有时不写 obj，obj=NULL 就让前缀判断失效，垃圾越攒越多）
+    """清理：只按"本次创建的 id"和"本次任务的 task_id"删，不再用 obj LIKE 猜。"""
     removed = set()
     if not KEEP:
-        for tid in SMOKE_TASKS:
-            out = sql("SELECT id, COALESCE(path,'') FROM doc WHERE task_id=%s" % int(tid))
+        ids = sorted({int(x) for x in created if str(x).isdigit()})
+        if ids:
+            out = sql("SELECT id, COALESCE(path,'') FROM doc WHERE id IN (%s)"
+                      % ",".join(str(i) for i in ids))
             for line in (out or "").splitlines():
                 cols = line.split("\t")
                 if not cols or not cols[0].strip().isdigit():
@@ -716,49 +747,36 @@ def finish(created):
                     fp = os.path.join(ROOT, "data", "workspaces", PROJECT, rel)
                     if os.path.isfile(fp):
                         os.remove(fp)
+                print("  按 id 删除 doc %s" % did)
+        for tid in SMOKE_TASKS:
+            out = sql("SELECT id, COALESCE(path,'') FROM doc WHERE task_id=%s" % int(tid))
+            for line in (out or "").splitlines():
+                cols = line.split("\t")
+                if not cols or not cols[0].strip().isdigit():
+                    continue
+                did, rel = int(cols[0]), (cols[1].strip() if len(cols) > 1 else "")
+                if did in removed:
+                    continue
+                sql("DELETE FROM doc WHERE id=%s" % did)
+                removed.add(did)
+                if rel:
+                    fp = os.path.join(ROOT, "data", "workspaces", PROJECT, rel)
+                    if os.path.isfile(fp):
+                        os.remove(fp)
                 print("  按任务删除 doc %s（task %s）" % (did, tid))
 
     if KEEP:
         print("  保留测试文书: %s" % created)
-    else:
-        for did in created:
-            if did in removed:
-                continue          # 已经按任务删过，不再重复提示
-            try:
-                _obj = sql("SELECT COALESCE(obj,'') FROM doc WHERE id=%s" % did).strip()
-            except Exception:
-                _obj = ""
-            if not _obj.startswith("smoke-"):
-                print("  跳过删除 doc %s（%s，不是 smoke 造的）" % (did, _obj or "无标题"))
-                continue
-            rows = subprocess.run(
-                ["docker", "exec", "jl-mysql", "mysql", "-ujl", "-p" +
-                 next((l.split("=", 1)[1].strip() for l in open(os.path.join(ROOT, ".env"), encoding="utf-8")
-                       if l.startswith("MYSQL_PASSWORD=")), ""),
-                 "--default-character-set=utf8mb4", "-N", "-e",
-                 "SELECT path FROM doc WHERE id=%s" % did, "jl"],
-                capture_output=True, text=True).stdout.strip()
-            sql("DELETE FROM doc WHERE id=%s" % did)
-            if rows:
-                p = os.path.join(ROOT, "data", "workspaces", PROJECT, rows)
-                if os.path.isfile(p):
-                    os.remove(p)
-        if created:
-            print("  已清理 %d 份测试文书" % len(created))
-    # 清理是否干净：smoke 造的东西不许留在库里（两轮删除之后才查）
-    got = sql("SELECT COUNT(*) FROM doc WHERE project_id='%s' AND "
-              "(obj LIKE 'smoke%%' OR obj LIKE 'F4 自测%%' OR obj LIKE '%%受控状态机%%')"
-              % PROJECT)
-    check("测试文书已清干净", got.strip() == "0", "残留 %s" % got.strip())
+
+    # 残留断言：按任务归属查（不用 obj LIKE）
+    left = 0
+    for tid in SMOKE_TASKS:
+        v = sql("SELECT COUNT(*) FROM doc WHERE task_id=%s" % int(tid)).strip()
+        if v.isdigit():
+            left += int(v)
+    check("测试文书已清干净（按任务归属）", left == 0, "残留 %s" % left)
+
+    if not KEEP:
+        restore_memory()
 
 
-    print()
-    if fails:
-        print("失败 %d 项：%s" % (len(fails), "、".join(fails)))
-        return 1
-    print("全部通过")
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

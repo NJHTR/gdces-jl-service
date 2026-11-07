@@ -12,16 +12,17 @@ param(
   [string]$RemoteDir = "/home/baize/jl-service",
   [switch]$SkipSmoke,
   [switch]$Acceptance,
-  [switch]$SimulateStale
+  [switch]$SimulateStale,
+  [string]$Environment = "prod"
 )
 
 $ErrorActionPreference = "Stop"
 
 # 测试钩子不能随手可用：它会重启服务并把 UPLOADED_AT 写成未来时间
 
-if ($SimulateStale -and $env:JL_ALLOW_TEST_HOOKS -ne "1") {
+if ($SimulateStale -and ($env:JL_ALLOW_TEST_HOOKS -ne "1" -or $Environment -ne "test")) {
 
-  Write-Host "拒绝：-SimulateStale 需要 JL_ALLOW_TEST_HOOKS=1" -ForegroundColor Red
+  Write-Host "拒绝：-SimulateStale 需要 JL_ALLOW_TEST_HOOKS=1 且 -Environment test" -ForegroundColor Red
 
   exit 2
 

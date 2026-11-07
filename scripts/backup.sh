@@ -15,6 +15,7 @@
 #   5) tar -xzf know-*.tar.gz -C data/         # 规范/模板/技能
 #   6) tar -xzf exports-*.tar.gz -C data/      # 已生成的巡视记录/表式 docx
 #   7) tar -xzf quarantine-*.tar.gz -C data/   # 隔离区（旧记忆产物，不删）
+#   8) tar -xzf memview-*.tar.gz  -C data/      # 个人×项目记忆视图
 set -uo pipefail
 
 R=/home/baize/jl-service
@@ -71,6 +72,13 @@ if [ -d "$R/data/exports" ] && tar -czf "$B/exports-$STAMP.tar.gz" -C "$R/data" 
   say "导出备份 $(du -h "$B/exports-$STAMP.tar.gz" | cut -f1)"
 else
   say "导出备份失败（或目录不存在）"
+fi
+
+# 6.5) 个人×项目记忆的渲染视图（data/memory；可从 memory 表重建，但一并备）
+if [ -d "$R/data/memory" ] && tar -czf "$B/memview-$STAMP.tar.gz" -C "$R/data" memory 2>/dev/null; then
+  say "记忆视图备份 $(du -h "$B/memview-$STAMP.tar.gz" | cut -f1)"
+else
+  say "记忆视图备份失败（或目录不存在）"
 fi
 
 # 7) 隔离区（不删的旧记忆产物：磁盘坏了也要能找回）
