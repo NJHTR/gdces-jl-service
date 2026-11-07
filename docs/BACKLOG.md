@@ -51,9 +51,9 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = Wave 3.5 / M1  记忆 v2 表与状态机（memory_item / memory_variant /
-       memory_use / memory_review / memory_audit）—— P1-1 事件表并入 M1，不单开一轮
-       并在 M1 之前先做「测试隔离」：smoke 按 id 精确删、不再 LIKE + 直连业务表
+next = T6 测试隔离（M1 前置；五条验收见下）
+       之后 M1：memory_item / variant / use / review / audit + 状态机
+       （P1-1 事件表并入 M1，不单开一轮）
        仍等你：F3 待补清理 / D1b 补照片描述 / D2 真机验收
 ```
 
@@ -190,6 +190,51 @@ data       workspaces 2.7MB · blobs 5.2MB · exports 0.2MB · knowledge 1.1MB
 ✓ 服务健康 ✓ 数据可读（文书 88 / 待补 80）✓ 影像索引 ✓ 待确认规矩
 ✓ 省统表出表 ✓ [memories] 段清零（0 份）✓ 备份 ✓ 引擎记忆已关闭（0/77）
 · 记忆指标(v1) 条目 12 / hits 524 —— 仅供参考
+```
+
+## P0 接线（2026-11-07 10:05，第三轮，已闭环）
+
+前两轮的问题是同一个：**检查写了但没有接线**。这轮只做接线与负向测试。
+
+```
+① deploy 不检查 ssh 退出码 -> STALE 只打印、部署照样成功
+   修：重启后 if ($LASTEXITCODE -ne 0) { exit 3 }
+   管线级负向测试（不是"脚本能返回 3"，而是"deploy 会失败"）：
+     .\scripts\deploy.ps1 -SkipSmoke -SimulateStale
+     -> STALE: 进程未重启或门禁未通过（ssh 退出 3），部署失败
+     -> deploy 退出码 = 3   （实测 PASS）
+   正常 deploy -> 进程比代码新（OK），退出码 0
+
+② 隔离只搬了产物（MEMORY/summary），没搬原料（raw/rollout/projects/.git）
+   修：整目录搬到 data/quarantine/2026-11-07/<uid>/memories/
+       manifest 写明"phase2 的原料在这里，重开引擎记忆会长回测试污染"
+   实测：501 292K / 980 660K；旧 homes/_quarantine 剩 0 个文件
+   备份：backup.sh 新增 quarantine-<stamp>.tar.gz
+        实测 185K，含 quarantine/2026-11-07/980/memories/raw_memories.md
+
+③ acceptance 记忆计数混口径（21 = project + 全部 user）
+   修：拆成「项目记忆 6 · 用户级记忆(全库) 15」
+   新增：.bak 不含 [memories]（0 份）、隔离目录在 data/quarantine
+
+④ .bak 里还有 75 份 [memories]
+   修：ensure_home 写 .bak 前先剥离；重跑迁移后 .bak 含 [memories] = 0 份
+
+⑤ 过程再犯一次"服务器手改"：quarantine 备份段只改在服务器上，
+   deploy 一 scp 就覆盖回去 -> 已改到本地源码并重新部署验证
+```
+
+deploy 门禁链现在是：`UPLOADED_AT` → 重启 → `check-process-fresh.sh` → `$LASTEXITCODE` → exit 3。
+四环在同一条路上，任何一环坏掉部署就红。
+
+## T6 · 测试隔离（M1 的前置，正式条目）
+
+```
+[ ] T6.1 smoke 只允许 JL_SMOKE_PROJECT=test-sandbox，且 project.code 必须以 TEST- 开头
+[ ] T6.2 记录本次创建的 doc/task/memory id，按 id 精确删；彻底去掉 obj LIKE 清理
+[ ] T6.3 跑前对 memory.status 做快照、跑后恢复（防 C7 那种"测试改业务状态"）
+[ ] T6.4 负向测试：JL_SMOKE_PROJECT=yun-gu-3qi 跑 smoke -> 必须在任何写操作前退出 2
+[ ] T6.5 不再直连业务表；必须直连时只允许测试 schema/库（或加 DB 级硬标记）
+验收：五条各有一条可执行命令与结果；负向测试必须红在"写之前"
 ```
 
 ## 卡在这里（都需要你一句话，否则我不动）
