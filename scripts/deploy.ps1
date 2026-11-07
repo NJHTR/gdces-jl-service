@@ -11,7 +11,8 @@ param(
   [string]$Remote = "rokid-r640",
   [string]$RemoteDir = "/home/baize/jl-service",
   [switch]$SkipSmoke,
-  [switch]$Acceptance
+  [switch]$Acceptance,
+  [switch]$SimulateStale
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,9 +58,12 @@ scripts/start-bff.sh | tail -2
 sleep 3
 curl -s -m 5 http://127.0.0.1:8081/healthz; echo
 # 关键断言：进程必须比代码新（locale 无关，见脚本头注释）
+if [ "__STALE__" = "1" ]; then date -d "+1 hour" +%s > runtime/UPLOADED_AT; fi
 bash scripts/check-process-fresh.sh
 '@
 $cmd = $cmd -replace '__DIR__', $RemoteDir
+$staleFlag = if ($SimulateStale) { '1' } else { '0' }
+$cmd = $cmd -replace '__STALE__', $staleFlag
 $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($cmd -replace "`r`n", "`n")))
 $out = ssh -o ConnectTimeout=200 $Remote "echo $b64 | base64 -d | bash -s" 2>&1 | Out-String
 
