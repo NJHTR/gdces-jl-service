@@ -36,6 +36,8 @@ def handle_project_list(params, user=None):
                     meta = json.loads(meta)
                 except Exception:
                     meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
             cnt = q("SELECT COUNT(*) AS n FROM message WHERE project_id=%s", (r["id"],))
             out.append({
                 "id": r["id"], "name": r["name"], "code": r["code"], "addr": r["addr"],
