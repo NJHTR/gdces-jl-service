@@ -465,7 +465,7 @@ def build_form_docx(project_id, doc_id):
     # 但必须给空串，否则 str.format 直接 KeyError，整张表导不出来。
     for slot in spec.get("slots") or []:
         for tpl in ("text",):
-            for name in re.findall(r"\{([a-zA-Z0-9_]+)\}", slot.get(tpl) or ""):
+            for name in re.findall(r"\{([^{}]+)\}", slot.get(tpl) or ""):
                 if not isinstance(data.get(name), str):
                     data[name] = ""
 
