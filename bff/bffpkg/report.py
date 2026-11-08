@@ -497,6 +497,27 @@ def build_form_docx(project_id, doc_id):
     # 勾选框：只有结论明确时才勾（不做模糊判断）
     if form_kind == "平行检查记录":
         _mark_checkbox(path, fields.get("检查结论"))
+
+    # 监理日志/记录类：省统表正文没有附件栏，但现场影像必须能跟着文件走。
+    # 在正文后追加一页「附件清单」，不篡改省统表表格本身。
+    try:
+        photos = q("SELECT sha256, place, caption, note, work, created_at FROM photo "
+                   "WHERE project_id=%s AND DATE(created_at)=DATE(%s) "
+                   "ORDER BY created_at", (project_id, d.get("created_at")))
+    except Exception:
+        photos = []
+    if photos:
+        from docx import Document
+        doc = Document(path)
+        doc.add_page_break()
+        doc.add_paragraph("附件：现场影像（%d 张，非省统表正文）" % len(photos))
+        for i, p in enumerate(photos, 1):
+            at = str(p.get("created_at") or "")[:19].replace("T", " ")
+            desc = (p.get("caption") or p.get("note") or p.get("work") or "").strip()
+            place = (p.get("place") or "").strip()
+            bits = [x for x in (at, place, desc) if x]
+            doc.add_paragraph("%d. %s  sha %s" % (i, " · ".join(bits), (p.get("sha256") or "")[:12]))
+        doc.save(path)
     with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
         json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
     return {"path": path, "name": display, "url_name": url_name,

@@ -1534,6 +1534,28 @@ def handle_doc_get(doc_id, user=None):
 
     bases = [nb for nb, _, _ in norm_bases]
 
+    # 记录类文书自动带出当天现场影像：省统表正文没有附件栏，但记录详情
+    # 必须能看到“今天拍了哪些图”，否则用户会觉得图片没有收进来。
+    if d["kind"] in ("监理日志", "旁站记录", "平行检查记录", "监理检查记录"):
+        try:
+            have = {str(x.get("ref") or "") for x in bases if isinstance(x, dict)}
+            rows_p = q("SELECT sha256, place, caption, note, work, created_at FROM photo "
+                       "WHERE project_id=%s AND DATE(created_at)=DATE(%s) "
+                       "ORDER BY created_at", (d["project_id"], d.get("created_at")))
+            for p in rows_p:
+                sha = p.get("sha256") or ""
+                if not sha or sha in have:
+                    continue
+                at = str(p.get("created_at") or "")[:16].replace("T", " ")
+                desc = (p.get("caption") or p.get("note") or p.get("work") or "").strip()
+                place = (p.get("place") or "").strip()
+                bases.append({
+                    "kind": "photo", "ref": sha,
+                    "text": " · ".join(x for x in (at, place, desc) if x) or ("现场影像 " + sha[:12]),
+                })
+        except Exception as e:
+            sys.stderr.write("[doc] 取当天影像失败 %s: %r\n" % (doc_id, e))
+
     return 200, {"code": 0, "data": {
         "id": d["id"], "projectId": d["project_id"], "kind": d["kind"], "obj": d["obj"],
         "state": d["state"], "fields": fields or {}, "missing": missing,
