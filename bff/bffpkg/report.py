@@ -380,7 +380,7 @@ def build_form_docx(project_id, doc_id):
     """
     from .formfill import build as fill_forms, load_spec
 
-    rows = q("SELECT id, kind, obj, fields, project_id, created_at FROM doc WHERE id=%s",
+    rows = q("SELECT id, kind, obj, fields, bases, project_id, created_at FROM doc WHERE id=%s",
              (doc_id,))
     if not rows:
         raise RuntimeError("文书不存在: %s" % doc_id)
@@ -389,7 +389,35 @@ def build_form_docx(project_id, doc_id):
         raise PermissionError("文书不属于该项目")
     fields = _loads(d.get("fields"))
     kind = d.get("kind") or ""
-    spec = load_spec(kind)          # 没有 fields.json 会抛错（这也是"未接入"的明确信号）
+    # 「监理检查记录」在库里是独立 kind，但省统表对应的是 15 平行检查记录。
+    # 这里做字段搬运，不新建另一套模板；否则用户点导出永远提示"没接模板"。
+    form_kind = kind
+    if kind == "监理检查记录":
+        raw_bases = _loads(d.get("bases"))
+        basis_parts = []
+        for b in (raw_bases or []):
+            if isinstance(b, dict):
+                v = (b.get("quote") or b.get("text") or b.get("ref") or "").strip()
+            else:
+                v = str(b or "").strip()
+            if v:
+                basis_parts.append(v.replace("standard://", ""))
+        mapped = dict(fields)
+        mapped.update({
+            "检查时间": fields.get("检查日期") or fields.get("检查时间") or "",
+            "检查部位": fields.get("检查部位") or fields.get("部位") or "",
+            "检查项目": fields.get("检查事项") or fields.get("检查内容") or "",
+            "检查方法": fields.get("检查方法") or "",
+            "检查依据": "；".join(basis_parts) or fields.get("依据") or fields.get("检查依据") or "",
+            "检查记录": fields.get("检查情况") or fields.get("检查记录") or "",
+            "检查结论": fields.get("检查结论") or "",
+            "处理记录": fields.get("处理意见") or fields.get("处理记录") or fields.get("备注") or "",
+            "检查人": fields.get("检查人") or fields.get("监理人员") or "",
+            "复核人": fields.get("复核人") or "",
+        })
+        fields = mapped
+        form_kind = "平行检查记录"
+    spec = load_spec(form_kind)          # 没有 fields.json 会抛错（这也是"未接入"的明确信号）
     proj_rows = q("SELECT name FROM project WHERE id=%s", (project_id,))
     proj_name = (proj_rows[0]["name"] if proj_rows else project_id)
 
@@ -433,6 +461,14 @@ def build_form_docx(project_id, doc_id):
         src = key[:-5] if key.endswith("lines") else key
         data[key] = _wrap(fields.get(src) or "")
 
+    # 模板里可能引用库里没有的字段（签发人/受检单位/事由……）。不编内容，
+    # 但必须给空串，否则 str.format 直接 KeyError，整张表导不出来。
+    for slot in spec.get("slots") or []:
+        for tpl in ("text",):
+            for name in re.findall(r"\{([a-zA-Z0-9_]+)\}", slot.get(tpl) or ""):
+                if not isinstance(data.get(name), str):
+                    data[name] = ""
+
     display = "%s-%s-%s.docx" % (proj_name, kind, d.get("obj") or doc_id)
     # URL 必须纯 ASCII：带中文时 urllib / wx.downloadFile 都会在请求行编码失败（踩过两次）
     url_name = "form-doc%s.docx" % doc_id
@@ -440,11 +476,11 @@ def build_form_docx(project_id, doc_id):
     os.makedirs(dest, exist_ok=True)
     path = os.path.join(dest, url_name)
 
-    got = fill_forms(kind, [data], path)
+    got = fill_forms(form_kind, [data], path)
     if not got.get("labels_ok"):
         raise RuntimeError("模板校验未通过，拒绝交付")
     # 勾选框：只有结论明确时才勾（不做模糊判断）
-    if kind == "平行检查记录":
+    if form_kind == "平行检查记录":
         _mark_checkbox(path, fields.get("检查结论"))
     with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
         json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
