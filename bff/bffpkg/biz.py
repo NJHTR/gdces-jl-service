@@ -546,12 +546,70 @@ def handle_docs_list(project_id, user=None):
 
 
 # ---------------------------------------------------------------- handle_geo_reverse
-def handle_geo_reverse(params):
-    """逆地理：先把项目地址回给它，接第三方后替换"""
-    pid = q1(params, "projectId") or default_project_id()
+_GEO_CACHE = {}
+
+
+def _project_addr(pid):
     proj = get_project(pid) if pid else {}
-    addr = proj.get("addr") or (proj.get("meta") or {}).get("addr") or "当前位置"
-    return 200, {"code": 0, "data": {"address": addr, "stub": True}}
+    meta = proj.get("meta") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return proj.get("addr") or meta.get("addr") or ""
+
+
+def handle_geo_reverse(params):
+    """坐标 → 中文地址（BigDataCloud 逆地理，无 key）。
+
+    取不到就回项目地址，并明确 source=project，绝不把项目地址伪装成 GPS 地址。
+    """
+    import urllib.parse
+    import urllib.request
+
+    pid = q1(params, "projectId") or default_project_id()
+    lat = (q1(params, "lat") or "").strip()
+    lng = (q1(params, "lng") or "").strip()
+    fallback = _project_addr(pid) or "当前位置"
+    if not lat or not lng:
+        return 200, {"code": 0, "data": {"address": fallback, "source": "project"}}
+
+    key = lat + "," + lng
+    hit = _GEO_CACHE.get(key)
+    if hit and time.time() - hit[0] < 600:
+        return 200, {"code": 0, "data": hit[1]}
+
+    url = ("https://api.bigdatacloud.net/data/reverse-geocode-client?"
+           + urllib.parse.urlencode({
+               "latitude": lat, "longitude": lng, "localityLanguage": "zh",
+           }))
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "jl-service/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            raw = json.loads(r.read().decode("utf-8"))
+        parts = []
+        for k in ("principalSubdivision", "city", "locality"):
+            v = (raw.get(k) or "").strip()
+            if v and v not in "".join(parts):
+                parts.append(v)
+        address = "".join(parts) or fallback
+        data = {
+            "address": address,
+            "province": raw.get("principalSubdivision") or "",
+            "city": raw.get("city") or "",
+            "district": raw.get("locality") or "",
+            "postcode": raw.get("postcode") or "",
+            "plusCode": raw.get("plusCode") or "",
+            "source": "bigdatacloud" if parts else "project",
+        }
+        _GEO_CACHE[key] = (time.time(), data)
+        return 200, {"code": 0, "data": data}
+    except Exception as exc:
+        sys.stderr.write("[geo] 逆地理失败 %s,%s: %r\n" % (lat, lng, exc))
+        return 200, {"code": 0, "data": {"address": fallback, "source": "project"}}
 
 
 # ---------------------------------------------------------------- handle_weather
@@ -568,7 +626,28 @@ WMO_TEXT = {
     85: "阵雪", 86: "强阵雪",
     95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "强雷雨伴冰雹",
 }
+_WIND_DIR = ["北", "东北", "东", "东南", "南", "西南", "西", "西北"]
 _WX_CACHE = {}
+
+
+def _wind_dir_text(deg):
+    try:
+        d = float(deg) % 360
+        return _WIND_DIR[int((d + 22.5) // 45) % 8] + "风"
+    except Exception:
+        return ""
+
+
+def _wind_level(kmh):
+    """km/h → 大致风力级（只用于水印，不用于气象结论）。"""
+    try:
+        v = float(kmh)
+    except Exception:
+        return ""
+    for i, top in enumerate([1, 5, 11, 19, 28, 38, 49, 61, 74, 88, 102, 117], 0):
+        if v <= top:
+            return str(i) + "级"
+    return "12级"
 
 
 def handle_weather(params):
@@ -594,7 +673,9 @@ def handle_weather(params):
     url = ("https://api.open-meteo.com/v1/forecast?"
            + urllib.parse.urlencode({
                "latitude": lat, "longitude": lng,
-               "current": "temperature_2m,weather_code",
+               "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
+                          "precipitation,weather_code,cloud_cover,pressure_msl,"
+                          "wind_speed_10m,wind_direction_10m,wind_gusts_10m,visibility",
                "timezone": "Asia/Shanghai",
            }))
     try:
@@ -604,9 +685,20 @@ def handle_weather(params):
         cur = raw.get("current") or {}
         code = cur.get("weather_code")
         temp = cur.get("temperature_2m")
+        num = lambda v: (int(round(v)) if isinstance(v, (int, float)) else None)
         data = {
             "text": WMO_TEXT.get(int(code), "") if code is not None else "",
-            "temp": int(round(temp)) if isinstance(temp, (int, float)) else None,
+            "temp": num(temp),
+            "humidity": num(cur.get("relative_humidity_2m")),
+            "apparent": num(cur.get("apparent_temperature")),
+            "precipitation": cur.get("precipitation"),
+            "wind_speed": cur.get("wind_speed_10m"),
+            "wind_dir": cur.get("wind_direction_10m"),
+            "wind_dir_text": _wind_dir_text(cur.get("wind_direction_10m")),
+            "wind_level": _wind_level(cur.get("wind_speed_10m")),
+            "cloud": num(cur.get("cloud_cover")),
+            "pressure": cur.get("pressure_msl"),
+            "visibility": cur.get("visibility"),
             "source": "open-meteo",
             "at": cur.get("time") or "",
         }
