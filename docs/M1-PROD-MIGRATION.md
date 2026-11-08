@@ -19,10 +19,25 @@
 1. `--allow-production`（显式意图；只能搭配 `--database jl`，配 jl_m1 会 exit 2）；
 2. 进程环境 `JL_ALLOW_PROD_MIGRATION=1`（`export`，**不读 .env**）；
 3. `--backup <path>`：存在、非空、`gzip -t` 通过；输出备份绝对路径、sha256、字节数；
-4. pending SQL 只允许 `CREATE TABLE IF NOT EXISTS` / `SET NAMES`，且目标表在库中**不存在**
-   （拒绝“IF NOT EXISTS 静默跳过”造成的状态不一致）；
+4. pending SQL 只允许以下三类，其它一律 exit 2：
+   - `CREATE TABLE IF NOT EXISTS`：目标表在库中必须**不存在**（拒绝“IF NOT EXISTS 静默跳过”
+     造成的状态不一致）；
+   - `SET NAMES`；
+   - 对 **`memory_item`** 的窄 ALTER（M1b-1b，对应 0002）：仅允许
+     `ADD COLUMN legacy_memory_id BIGINT UNSIGNED NULL [COMMENT ...]` 与
+     `ADD UNIQUE KEY uk_legacy_memory (legacy_memory_id)`；目标表必须是 `memory_item`
+     且已存在；列/键已存在或同一计划内重复 → exit 2；任何其它 ALTER
+     （`DROP`/`MODIFY`/`ADD` 其它列/其它表/legacy `memory`）→ exit 2；
+     含 MySQL 可执行注释 `/*! ... */` → exit 2（可能绕过 allowlist）。
+     允许的 ALTER 会在 `PROD PLAN` 的 `narrow ALTER` 行逐条打印。
 5. 执行前后 `memory` 不变量：行数不变、`SHOW CREATE TABLE memory` 逐字节一致；
 6. 备份/门禁校验在**任何 DDL 之前**完成；备份缺失/损坏直接 exit 2。
+
+当前生产 `jl` 状态：0001 已应用、v2 空、legacy memory 39 行；pending 只有
+`0002_memory_v2_legacy_map`（上述窄 ALTER）。`--dry-run` 应打印
+`narrow ALTER : memory_item (ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory)`
+并输出 `PROD_DRY_RUN_OK`，**不执行 DDL**。真正 apply 的命令与 0001 相同
+（migrations 目录含 0001+0002，0001 会 SKIP）。
 
 `migrate.py --check` 与 `check-prod-migration.py` 都是只读（后者额外
 `SET SESSION transaction_read_only=1`），不需要备份；`--dry-run` 需要备份并打印完整

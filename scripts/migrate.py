@@ -343,8 +343,111 @@ def memory_invariant(before, after):
     return True, ""
 
 
+# ---------------------------------------------------------------- prod allowlist
+# 生产路径允许的最小集合：
+#   · CREATE TABLE IF NOT EXISTS（目标表必须不存在）
+#   · SET NAMES
+#   · 恰好一条对 memory_item 的窄 ALTER：ADD COLUMN legacy_memory_id +
+#     ADD UNIQUE KEY uk_legacy_memory（列/键必须不存在）
+# 其余 ALTER / DROP / MODIFY / 其它表 / 可执行注释一律拒绝。
+ALLOWED_ALTER_TABLE = "memory_item"
+ALLOWED_ALTER_COLUMN = "legacy_memory_id"
+ALLOWED_ALTER_KEY = "uk_legacy_memory"
+ALTER_TABLE_RE = re.compile(
+    r"^ALTER\s+TABLE\s+`?([A-Za-z0-9_]+)`?\s+(.+)$", re.I | re.S)
+ADD_COLUMN_CLAUSE_RE = re.compile(
+    r"^ADD\s+COLUMN\s+`?legacy_memory_id`?\s+BIGINT\s+UNSIGNED\s+NULL"
+    r"(?:\s+DEFAULT\s+NULL)?"
+    r"(?:\s+COMMENT\s+'(?:[^'\\]|\\.|'')*')?$",
+    re.I | re.S,
+)
+ADD_UNIQUE_CLAUSE_RE = re.compile(
+    r"^ADD\s+UNIQUE\s+(?:KEY|INDEX)\s+`?uk_legacy_memory`?\s*"
+    r"\(\s*`?legacy_memory_id`?\s*\)$",
+    re.I | re.S,
+)
+
+
+def split_alter_clauses(body):
+    """按顶层逗号切 ALTER 子句（尊重引号/反引号/括号），避免子句被伪装合并。"""
+    clauses = []
+    buf = []
+    depth = 0
+    quote = None
+    i, size = 0, len(body)
+    while i < size:
+        ch = body[i]
+        nxt = body[i + 1] if i + 1 < size else ""
+        if quote is not None:
+            buf.append(ch)
+            if ch == "\\" and quote in ("'", '"') and nxt:
+                buf.append(nxt)
+                i += 2
+                continue
+            if ch == quote:
+                if nxt == quote:
+                    buf.append(nxt)
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"', "`"):
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "(":
+            depth += 1
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == ")":
+            depth = max(0, depth - 1)
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "," and depth == 0:
+            clause = "".join(buf).strip()
+            if clause:
+                clauses.append(clause)
+            buf = []
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        clauses.append(tail)
+    return clauses
+
+
+def column_exists(conn, table, column):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = %s "
+            "  AND column_name = %s", (table, column))
+        return cur.fetchone()[0] > 0
+
+
+def index_exists(conn, table, index_name):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.statistics "
+            "WHERE table_schema = DATABASE() AND table_name = %s "
+            "  AND index_name = %s", (table, index_name))
+        return cur.fetchone()[0] > 0
+
+
 def analyze_pending_safety(conn, migrations, applied, pending):
-    """生产 apply 前置：已应用 checksum 必须一致；pending 只允许建新表。"""
+    """生产 apply 前置：已应用 checksum 必须一致；pending 只允许
+    CREATE TABLE IF NOT EXISTS / SET NAMES / 对 memory_item 的 0002 窄 ALTER。
+
+    返回 (created, alters)：
+      created = [(version, table), ...]
+      alters  = [{"version", "table", "clauses"}, ...]
+    """
     for migration in migrations:
         if migration.version in applied and applied[migration.version] != migration.checksum:
             die(
@@ -352,7 +455,16 @@ def analyze_pending_safety(conn, migrations, applied, pending):
                 % (migration.version, applied[migration.version], migration.checksum)
             )
     created = []
+    alters = []
+    planned_columns = set()   # (table, column) 本计划内已规划的列
+    planned_indexes = set()   # (table, index)  本计划内已规划的键
     for migration in pending:
+        # MySQL 可执行注释 /*! ... */ 会被服务器执行但会被普通解析器当注释剥掉，
+        # 可能绕过 allowlist —— 直接拒绝。
+        if "/*!" in migration.sql_text:
+            die(
+                "REFUSED: 迁移 %s 含 MySQL 可执行注释 '/*! ... */'（可绕过 allowlist），"
+                "exit 2" % migration.version, 2)
         statements = split_sql(migration.sql_text)
         if not statements:
             die("REFUSED: 迁移 %s 中没有可执行语句，exit 2" % migration.version, 2)
@@ -360,26 +472,88 @@ def analyze_pending_safety(conn, migrations, applied, pending):
             stripped = statement.strip()
             if re.match(r"^SET\s+NAMES\b", stripped, re.I):
                 continue
-            match = re.match(
+            create_match = re.match(
                 r"^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+`?([A-Za-z0-9_]+)`?",
                 stripped, re.I,
             )
-            if not match:
-                die(
-                    "REFUSED: 生产路径只允许 'CREATE TABLE IF NOT EXISTS' / 'SET NAMES'；"
-                    "迁移 %s 含不安全语句，exit 2\n-- 语句：\n%s"
-                    % (migration.version, stripped[:800]),
-                    2,
-                )
-            table = match.group(1)
-            if table_exists(conn, table):
-                die(
-                    "REFUSED: 待应用迁移要创建的表已存在：%s（IF NOT EXISTS 会静默跳过；"
-                    "拒绝制造 schema_migrations 与实际结构不一致），exit 2" % table,
-                    2,
-                )
-            created.append((migration.version, table))
-    return created
+            if create_match:
+                table = create_match.group(1)
+                if table_exists(conn, table):
+                    die(
+                        "REFUSED: 待应用迁移要创建的表已存在：%s（IF NOT EXISTS 会静默跳过；"
+                        "拒绝制造 schema_migrations 与实际结构不一致），exit 2" % table,
+                        2,
+                    )
+                created.append((migration.version, table))
+                continue
+            alter_match = ALTER_TABLE_RE.match(stripped)
+            if alter_match:
+                table = alter_match.group(1)
+                body = alter_match.group(2)
+                if table != ALLOWED_ALTER_TABLE:
+                    die(
+                        "REFUSED: 生产路径只允许对 memory_item 的窄 ALTER；"
+                        "迁移 %s 试图 ALTER 表 %s，exit 2\n-- 语句：\n%s"
+                        % (migration.version, table, stripped[:800]), 2)
+                if ";" in body:
+                    die(
+                        "REFUSED: ALTER 语句体含 ';'（疑似多语句伪装），迁移 %s，exit 2"
+                        % migration.version, 2)
+                if not table_exists(conn, ALLOWED_ALTER_TABLE):
+                    die(
+                        "REFUSED: 目标表 memory_item 不存在（0001 未应用？）；"
+                        "拒绝生产 ALTER，exit 2", 2)
+                clauses = split_alter_clauses(body)
+                if not clauses:
+                    die("REFUSED: 迁移 %s 的 ALTER 没有子句，exit 2"
+                        % migration.version, 2)
+                added_column = False
+                added_key = False
+                for clause in clauses:
+                    if ADD_COLUMN_CLAUSE_RE.match(clause):
+                        if added_column or (
+                                ALLOWED_ALTER_TABLE, ALLOWED_ALTER_COLUMN) in planned_columns \
+                                or column_exists(conn, ALLOWED_ALTER_TABLE,
+                                                 ALLOWED_ALTER_COLUMN):
+                            die(
+                                "REFUSED: memory_item.%s 列已存在/重复（拒绝重复 "
+                                "ADD COLUMN），迁移 %s，exit 2"
+                                % (ALLOWED_ALTER_COLUMN, migration.version), 2)
+                        planned_columns.add(
+                            (ALLOWED_ALTER_TABLE, ALLOWED_ALTER_COLUMN))
+                        added_column = True
+                        continue
+                    if ADD_UNIQUE_CLAUSE_RE.match(clause):
+                        if added_key or (
+                                ALLOWED_ALTER_TABLE, ALLOWED_ALTER_KEY) in planned_indexes \
+                                or index_exists(conn, ALLOWED_ALTER_TABLE,
+                                                ALLOWED_ALTER_KEY):
+                            die(
+                                "REFUSED: memory_item 唯一键 %s 已存在/重复（拒绝重复 "
+                                "ADD UNIQUE KEY），迁移 %s，exit 2"
+                                % (ALLOWED_ALTER_KEY, migration.version), 2)
+                        planned_indexes.add(
+                            (ALLOWED_ALTER_TABLE, ALLOWED_ALTER_KEY))
+                        added_key = True
+                        continue
+                    die(
+                        "REFUSED: 生产路径只允许 'ADD COLUMN legacy_memory_id' / "
+                        "'ADD UNIQUE KEY uk_legacy_memory'；迁移 %s 含不允许的 ALTER "
+                        "子句，exit 2\n-- 子句：\n%s"
+                        % (migration.version, clause[:800]), 2)
+                if not (added_column or added_key):
+                    die("REFUSED: 迁移 %s 的 ALTER 没有允许的子句，exit 2"
+                        % migration.version, 2)
+                alters.append({"version": migration.version, "table": table,
+                               "clauses": list(clauses)})
+                continue
+            die(
+                "REFUSED: 生产路径只允许 'CREATE TABLE IF NOT EXISTS' / 'SET NAMES' / "
+                "memory_item 窄 ALTER；迁移 %s 含不安全语句，exit 2\n-- 语句：\n%s"
+                % (migration.version, stripped[:800]),
+                2,
+            )
+    return created, alters
 
 
 def analyze_down_safety(migrations, applied):
@@ -413,20 +587,39 @@ def analyze_down_safety(migrations, applied):
 
 
 # ------------------------------------------------------------------ plan
-def print_prod_plan(mode, database, pending, created, backup, before):
+def format_alter_summary(alters):
+    parts = []
+    for alter in alters:
+        tags = []
+        for clause in alter["clauses"]:
+            if ADD_COLUMN_CLAUSE_RE.match(clause):
+                tags.append("ADD COLUMN legacy_memory_id")
+            elif ADD_UNIQUE_CLAUSE_RE.match(clause):
+                tags.append("ADD UNIQUE KEY uk_legacy_memory")
+            else:  # pragma: no cover - analyze 已拦截
+                tags.append(clause[:60])
+        parts.append("%s (%s) [%s]" % (
+            alter["table"], ", ".join(tags), alter["version"]))
+    return "; ".join(parts)
+
+
+def print_prod_plan(mode, database, pending, created, alters, backup, before):
     print("PROD PLAN (%s)" % mode)
     print("  database        : %s (production)" % database)
     print("  migrations      : %s" % (
         ", ".join(m.version for m in pending) if pending else "(none)"))
     print("  new tables      : %s" % (
         ", ".join(table for _version, table in created) if created else "(none)"))
+    print("  narrow ALTER    : %s" % (
+        format_alter_summary(alters) if alters else "(none)"))
     print("  backup          : %s" % backup["path"])
     print("  backup sha256   : %s" % backup["sha256"])
     print("  backup size     : %d bytes (gzip -t ok)" % backup["size"])
     print("  env guard       : %s=1 (process env)" % PROD_ENV_VAR)
     print("  invariants pre  : memory present=%s rows=%s create_sha256=%s" % (
         before["present"], before["rows"], before["create_sha256"]))
-    print("  safety          : CREATE TABLE IF NOT EXISTS only; target tables absent; "
+    print("  safety          : CREATE TABLE IF NOT EXISTS + narrow ALTER on "
+          "memory_item only; target tables absent; duplicate column/key rejected; "
           "legacy memory table untouched")
 
 
@@ -585,9 +778,9 @@ def cmd_prod_apply(conn, migrations, database, backup, dry_run):
     mode = "dry-run apply" if dry_run else "apply"
     applied = read_applied(conn)
     pending = [m for m in migrations if m.version not in applied]
-    created = analyze_pending_safety(conn, migrations, applied, pending)
+    created, alters = analyze_pending_safety(conn, migrations, applied, pending)
     before = memory_snapshot(conn, require=True)
-    print_prod_plan(mode, database, pending, created, backup, before)
+    print_prod_plan(mode, database, pending, created, alters, backup, before)
     if dry_run:
         print("PROD_DRY_RUN_OK (no DDL executed; %s unchanged)" % database)
         return 0
