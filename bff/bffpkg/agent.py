@@ -1315,8 +1315,13 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         # 两种后端共用后面的解析：事件来源不同，事件形状一样
         proc = None
         if ENGINE_MODE == "appserver":
+            prev_thread = q("SELECT thread_id FROM task WHERE project_id=%s AND user_id=%s "
+                            "AND thread_id IS NOT NULL AND thread_id<>'' "
+                            "ORDER BY id DESC LIMIT 1", (project_id, user_id))
+            thread_hint = prev_thread[0]["thread_id"] if prev_thread else None
             line_iter = (json.dumps(ev, ensure_ascii=False) + "\n"
-                         for ev in run_stream(project_id, text + hint, images, user_id=user_id))
+                         for ev in run_stream(project_id, text + hint, images,
+                                              user_id=user_id, thread_id=thread_hint))
         else:
             cmd = [ENGINE, "exec", "-C", ws,
                    "--dangerously-bypass-approvals-and-sandbox",

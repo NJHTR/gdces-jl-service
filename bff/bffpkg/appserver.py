@@ -329,9 +329,22 @@ class _Client:
             time.sleep(0.05)
         raise AppServerError("复核超过 %d 秒还没结束" % timeout)
 
-    def ensure_thread(self, model=None):
+    def ensure_thread(self, model=None, thread_id=None):
         if self.thread_id:
             return self.thread_id
+        if thread_id:
+            try:
+                params = {"threadId": str(thread_id), "cwd": self.ws}
+                if model:
+                    params["model"] = model
+                res = self.call("thread/resume", params, timeout=120)
+                tid = res.get("threadId") or (res.get("thread") or {}).get("id")
+                if tid:
+                    self.thread_id = tid
+                    sys.stderr.write("[engine] 恢复会话 thread=%s\n" % tid)
+                    return tid
+            except Exception as e:
+                sys.stderr.write("[engine] 恢复会话 %s 失败，改开新线程: %r\n" % (thread_id, e))
         params = {
             "cwd": self.ws,          # 必须绝对路径，否则工具起不来
             "approvalPolicy": "never",
@@ -402,14 +415,17 @@ def _client(project_id, user_id=1):
         return c
 
 
-def run_stream(project_id, prompt, images=None, timeout=600, user_id=1):
+def run_stream(project_id, prompt, images=None, timeout=600, user_id=1, thread_id=None):
     """跑一轮，边跑边吐事件。
 
     事件形状和 `exec --json` 对齐（{"type":"item.completed","item":{...}}），
     这样 agent.py 里那套解析两个后端共用。
     """
     c = _client(project_id, user_id)
-    c.ensure_thread(model=os.environ.get("ENGINE_MODEL") or None)
+    c.ensure_thread(model=os.environ.get("ENGINE_MODEL") or None, thread_id=thread_id)
+
+    # 告诉 BFF 这轮用的是哪条 thread，好落库，下次 BFF 重启后 resume
+    yield {"type": "thread.started", "thread_id": c.thread_id}
 
     inputs = [{"type": "text", "text": prompt}]
     for img in images or []:
