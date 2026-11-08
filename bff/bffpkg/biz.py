@@ -1438,6 +1438,29 @@ def handle_doc_register(body, user=None):
 
 
 # ---------------------------------------------------------------- handle_doc_get
+_FIELD_ALIASES = {
+    "监理日志": {
+        "当日施工进展情况": "当日施工进展",
+        "当日监理工作情况": "当日监理工作",
+        "当日存在问题及处理情况": "当日存在问题及处理",
+        "其他有关事项": "其他事项",
+    },
+}
+
+
+def normalize_fields(kind, fields):
+    """模型/旧模板有时写旧字段名，旧键会和 schema 的新键并存，页面就出现
+    “明明填了，下面还有一堆待补”。读文书时把旧键并到新键并删掉旧键。"""
+    f = dict(fields or {})
+    for old, new in (_FIELD_ALIASES.get(kind) or {}).items():
+        if old not in f:
+            continue
+        val = str(f.get(old) or "").strip()
+        cur = str(f.get(new) or "").strip()
+        if val and (not cur or cur in ("待补", "待定", "待填写", "待确认")):
+            f[new] = f[old]
+        del f[old]
+    return f
 def handle_doc_get(doc_id, user=None):
     rows = q("SELECT id, project_id, kind, obj, state, fields, bases, path, git_commit, "
              "created_at, updated_at FROM doc WHERE id=%s", (doc_id,))
@@ -1459,6 +1482,7 @@ def handle_doc_get(doc_id, user=None):
             bases = json.loads(bases)
         except Exception:
             bases = []
+    fields = normalize_fields(d["kind"], fields)
     check = validate_fields(d["kind"], fields)
     missing = list(check["missing"]) + list(check["placeholder"])
 

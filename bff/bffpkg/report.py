@@ -453,13 +453,28 @@ def build_form_docx(project_id, doc_id):
             body.append("依据：%s" % fields["依据"].strip())
         data["内容lines"] = [_wrap1(x) for x in body][:12] or ["（待补）"]
 
-    # block 槽：把对应字段折行
+    # block / lines 槽：把对应字段折行。
+    # 监理日志的模板槽是 target=below + kind=lines，不是 block；以前只在
+    # block 槽里建 lines，导致日志四块正文全空、导出后看起来全部待补。
+    _line_src = {
+        "施工进展": "当日施工进展",
+        "监理工作": "当日监理工作",
+        "问题处理": "当日存在问题及处理",
+        "其他": "其他事项",
+    }
     for slot in spec.get("slots") or []:
-        if slot.get("kind") != "block":
+        kind_slot = slot.get("kind")
+        if kind_slot not in ("block", "lines"):
             continue
-        key = slot.get("lines_key") or "lines"
+        key = slot.get("lines_key") or ""
+        if not key:
+            continue
         src = key[:-5] if key.endswith("lines") else key
-        data[key] = _wrap(fields.get(src) or "")
+        src = _line_src.get(src, src)
+        val = fields.get(src) or ""
+        if "待补" in str(val):
+            val = ""
+        data[key] = _wrap(val)
 
     # 模板里可能引用库里没有的字段（签发人/受检单位/事由……）。不编内容，
     # 但必须给空串，否则 str.format 直接 KeyError，整张表导不出来。
