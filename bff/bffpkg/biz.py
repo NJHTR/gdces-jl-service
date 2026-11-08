@@ -304,6 +304,12 @@ def handle_upload(project_id, params, data, user=None):
     if commit:
         exec_sql("UPDATE photo SET git_commit=%s WHERE id=%s", (commit, photo_id))
 
+    # 上传即刷新影像索引：否则 AI 读 records/photos.md 会以为项目里没有照片
+    try:
+        render_photos_md(project_id)
+    except Exception as e:
+        sys.stderr.write("[photos] 上传后刷新索引失败: %r\n" % (e,))
+
     return 200, {"code": 0, "data": {"photoId": photo_id, "sha256": sha, "size": size,
                                     "commit": commit, "path": entry["path"]}}
 
@@ -347,9 +353,8 @@ def render_photos_md(project_id):
     根本没法回答"这个部位以前查过什么"。现在 DB 是账本，文件是视图（同 rules.md）。
     """
     ws = f"{WS_ROOT}/{project_id}"
-    rows = q("SELECT sha256, place, caption, shot_at, created_at FROM photo "
-             "WHERE project_id=%s AND COALESCE(caption,'')<>'' "
-             "ORDER BY COALESCE(shot_at, created_at)", (project_id,))
+    rows = q("SELECT sha256, place, caption, note, work, shot_at, created_at FROM photo "
+             "WHERE project_id=%s ORDER BY COALESCE(shot_at, created_at)", (project_id,))
     latest = {}
     for r in rows:
         latest[r["sha256"]] = r
@@ -366,8 +371,8 @@ def render_photos_md(project_id):
         lines.append("## %s（%d 张）" % (place, len(items)))
         for sha, r in items:
             at = str(r.get("shot_at") or r.get("created_at") or "")[:16].replace("T", " ")
-            cap = (r.get("caption") or "").strip().replace("\n", " ")[:160]
-            lines.append("- %s · %s · sha %s" % (at, cap, sha[:12]))
+            cap = (r.get("caption") or r.get("note") or r.get("work") or "").strip().replace("\n", " ")[:160]
+            lines.append("- %s · %s · sha %s" % (at, cap or "（未描述）", sha[:12]))
         lines.append("")
     body = "\n".join(lines).rstrip() + "\n"
     path = os.path.join(ws, "records", "photos.md")
