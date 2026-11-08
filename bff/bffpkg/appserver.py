@@ -166,7 +166,8 @@ def ensure_home(user_id, project_id=None):
             for k, v in (("max_rollouts_per_startup", "20"),
                          ("extract_model", _mem_model),
                          ("consolidation_model", _cons)):
-                base = _cfg_stride(base, k, '"%s"' % v, table="[memories]")
+                rendered = v if k == "max_rollouts_per_startup" else '"%s"' % v
+                base = _cfg_stride(base, k, rendered, table="[memories]")
 
         # 原子写 + 备份 + 校验：写一半崩掉会把整份配置废掉（出过一次事故）
         import tempfile
