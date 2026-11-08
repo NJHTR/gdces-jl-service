@@ -267,6 +267,12 @@ def build_context(project_id, user_id, query=None):
     if here:
         parts.append("【在哪找】" + " · ".join(here))
 
+    parts.append("【侦查纪律】出文书前先自己找证据：get_context 看项目；"
+                 "读 records/rules.md 和 records/photos.md；"
+                 "search_records/search_photos 查同一部位/同类文书；"
+                 "search_standards 查规范；缺关键信息先问，不要空稿。"
+                 "历史同类文书就是模板，别等别人喂。")
+
     parts.append(f"【当前】项目 {project_id} · 用户 {user_id}")
     return "\n\n".join(parts)
 
