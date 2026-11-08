@@ -16,6 +16,9 @@ export ENGINE_MODEL=${ENGINE_MODEL:-qwen3.7-plus}
 export REVIEW_MODEL=${REVIEW_MODEL:-qwen3.8-flash}
 export JL_APPSERVER_LOG=${JL_APPSERVER_LOG:-1}
 export JL_ENGINE_LOG=${JL_ENGINE_LOG:-warn}
+# 实验：只给 clean-demo-01 开引擎记忆；该项目用独立 EASYCODE_HOME
+export JL_ENGINE_MEMORY=${JL_ENGINE_MEMORY:-1}
+export JL_MEMORY_PROJECTS=${JL_MEMORY_PROJECTS:-clean-demo-01}
 export BIND_HOST=${BIND_HOST:-0.0.0.0}
 
 cd "$R" || exit 1

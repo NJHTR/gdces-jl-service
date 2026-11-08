@@ -86,17 +86,42 @@ def _cfg_stride(base, key, val, table="[features]"):
     return base.rstrip() + "\n\n%s\n%s = %s\n" % (table, key, val)
 
 
-def ensure_home(user_id):
+def _memory_projects():
+    """允许开引擎记忆的项目白名单；空表示全部关闭。"""
+    raw = os.environ.get("JL_MEMORY_PROJECTS", "").strip()
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+
+def _memory_on(project_id):
+    return (os.environ.get("JL_ENGINE_MEMORY", "0") == "1"
+            and bool(project_id) and project_id in _memory_projects())
+
+
+def ensure_home(user_id, project_id=None):
     """给每个用户准备 EASYCODE_HOME（配置**原子写**，且记忆默认关）。
 
     两道决策约束（写在 BACKLOG 里，代码必须遵守）：
       D-记忆-04  引擎记忆关闭自动注入；MEMORY.md/summary 只作候选与审计
       D-记忆-07  记忆唯一写者 = memory 表；引擎只做抽取器
     所以 memories 特性默认 false；确需打开时显式设 JL_ENGINE_MEMORY=1。
+
+    项目隔离：只有 JL_MEMORY_PROJECTS 白名单里的项目，才使用
+    <homes>/<uid>/projects/<pid> 独立 EASYCODE_HOME（独立 memories/skills/会话）；
+    其他项目继续用用户家目录。个人技能用软链挂进项目家目录，项目记忆不互相串。
     """
+    mem_on = _memory_on(project_id)
     home = os.path.join(HOMES_ROOT, str(user_id))
+    if mem_on:
+        home = os.path.join(HOMES_ROOT, str(user_id), "projects", str(project_id))
+        os.makedirs(home, exist_ok=True)
+        personal_skills = os.path.join(HOMES_ROOT, str(user_id), "skills")
+        link = os.path.join(home, "skills")
+        if os.path.isdir(personal_skills) and not os.path.lexists(link):
+            try:
+                os.symlink(personal_skills, link)
+            except OSError as e:
+                sys.stderr.write("[home] 个人技能软链失败 %s: %r\n" % (link, e))
     cfg = os.path.join(home, "config.toml")
-    mem_on = os.environ.get("JL_ENGINE_MEMORY", "0") == "1"
 
     try:
         os.makedirs(home, exist_ok=True)
@@ -200,7 +225,7 @@ class _Client:
         env["HOME"] = env.get("HOME", "/home/baize")
         env["PATH"] = "/home/baize/bin:/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
         # 每个用户一个家目录：记忆/会话/技能自动隔离
-        env["EASYCODE_HOME"] = ensure_home(self.user_id)
+        env["EASYCODE_HOME"] = ensure_home(self.user_id, self.project_id)
         # 排障用：JL_ENGINE_LOG 可以打开引擎侧模块日志（比如 memories=debug）
         if os.environ.get("JL_ENGINE_LOG"):
             env["RUST_LOG"] = os.environ["JL_ENGINE_LOG"]
