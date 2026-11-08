@@ -1279,7 +1279,12 @@ def handle_doc_validate(body, user=None):
     kind = (body.get("kind") or "").strip()
     if not kind:
         return 400, {"code": 400, "message": "kind 必填"}
+    if load_schema(kind) is None:
+        return 400, {"code": 400, "message": "不支持生成「%s」草稿；可出的文书：%s。巡视记录请走每日巡视记录导出，不要当单份文书生成。"
+                     % (kind, "、".join(list_schemas()))}
     fields = body.get("fields") or {}
+    if not any(str(v or "").strip() for v in fields.values()):
+        return 400, {"code": 400, "message": "这份文书没有任何字段内容；先向用户问清部位/事由，不要生成空文书"}
     check = validate_fields(kind, fields)
     return 200, {"code": 0, "data": dict(check, kind=kind, schemas=list_schemas())}
 
@@ -1294,6 +1299,9 @@ def handle_doc_register(body, user=None):
     kind = (body.get("kind") or "").strip()
     if not pid or not kind:
         return 400, {"code": 400, "message": "projectId 和 kind 必填"}
+    if load_schema(kind) is None:
+        return 400, {"code": 400, "message": "不支持生成「%s」草稿；可出的文书：%s。巡视记录请走每日巡视记录导出。"
+                     % (kind, "、".join(list_schemas()))}
 
     deny = guard_project(pid, user)
     if deny:
@@ -1301,6 +1309,8 @@ def handle_doc_register(body, user=None):
 
     obj = (body.get("obj") or "").strip()
     fields = body.get("fields") or {}
+    if not obj and not any(str(v or "").strip() for v in fields.values()):
+        return 400, {"code": 400, "message": "这份文书没有任何内容；先向用户问清部位/事由，不要登记空文书"}
     bases = body.get("bases") or []
     path = (body.get("path") or "").strip()
     commit = (body.get("commit") or "").strip()
