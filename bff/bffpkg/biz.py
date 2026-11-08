@@ -1488,7 +1488,7 @@ def handle_doc_get(doc_id, user=None):
                       "WHERE REPLACE(code,' ','')=REPLACE(%s,' ','') AND clause=%s",
                       (code.strip(), clause.strip()))
         except Exception as exc:
-            sys.stderr.write("[doc] 补依据失败 %s: %r\n" % (ref, exc))
+            sys.stderr.write("[doc] 补依据失败 %s: %r\n" % (nb.get("ref"), exc))
             continue
         if not rows2:
             continue
@@ -1500,6 +1500,13 @@ def handle_doc_get(doc_id, user=None):
         body = (r2.get("body") or "").strip().replace("\n", " ")
         if body:
             b["quote"] = body[:160]
+
+    # 老前端只看 text，新前端看 quote；两边都给，别让依据点开是空白。
+    for nb, _code, _clause in norm_bases:
+        if not nb.get("text") and nb.get("quote"):
+            nb["text"] = nb["quote"]
+        if not nb.get("quote") and nb.get("text"):
+            nb["quote"] = nb["text"]
 
     bases = [nb for nb, _, _ in norm_bases]
 
