@@ -51,7 +51,7 @@
 ## 当前指针（每轮开发从这里开始）
 
 ```
-next = M1b 双写 + 影子读（jl 已应用 0001；先补 legacy 映射列/回填）
+next = M1b-2 双写 + 影子读（jl 已有 39 candidate；代码未接，feature flag 默认关）
        之后 M1：memory_item / variant / use / review / audit + 状态机
        （P1-1 事件表并入 M1，不单开一轮）
        仍等你：F3 待补清理 / D1b 补照片描述 / D2 真机验收
@@ -584,7 +584,7 @@ F3 数字：按项目实算见「LOOP 已落地」段（test-sandbox 80 待补�
 [ ] M0 设计定稿：按 D-表式-02 / D-记忆-03~11 锁定口径
        （排序三段启用 / 引擎 A / 影子 3 天 / 全降级+20 条 / 单写者 / project 默认）
        + 指标口径（注入精度/应用率/纠正率/重复率/漂移/成本）
-[~] M1 数据模型：memory_item / memory_variant / memory_use / memory_review / memory_audit（0001 已应用到 jl：25 表、memory 39 行不变、备份 db-pre-m1-20261108-0039；下一步 M1b 双写/影子读）
+[~] M1 数据模型：memory_item / memory_variant / memory_use / memory_review / memory_audit（0001 已应用到 jl：25 表、memory 39 行不变、备份 db-pre-m1-20261108-0039；下一步 M1b 双写/影子读）；0002 + 39 candidate 已应用到 jl（2026-11-08 13:34，备份 db-pre-m1b1-20261108-1334，legacy 39 行不变）
       状态机 candidate→active→superseded/archived/expired；新旧并存、可回滚
 [ ] M2 写入闸门：候选制（④：自动→candidate；显式「记住」/手动/确认→active）
       + 来源白名单（只认显式「记住」/编辑 diff/驳回/确认）

@@ -1,0 +1,458 @@
+{
+  "round": 3,
+  "item": "M1b-1-apply",
+  "type": "IMPL",
+  "commit": "c43d5fe",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "9ff26ff"
+    },
+    {
+      "repo": "jl-service",
+      "sha": "c43d5fe"
+    }
+  ],
+  "files": [
+    "db/migrations/0002_memory_v2_legacy_map.sql",
+    "db/migrations/0002_memory_v2_legacy_map.down.sql",
+    "scripts/backfill-memory-v2.py",
+    "scripts/check-m1b-mapping.py",
+    "scripts/migrate.py",
+    "docs/M1B-1.md",
+    "docs/M1-PROD-MIGRATION.md"
+  ],
+  "file_sha256": {
+    "db/migrations/0002_memory_v2_legacy_map.sql": "1e9b9732c0e1afae3190bd675bb8e5e1dbb12b470614c40713045f11a4750cb9",
+    "db/migrations/0002_memory_v2_legacy_map.down.sql": "79ba95152611f5cde7632acc53b210a19553643134471f7b720959d2ad5c5194",
+    "scripts/backfill-memory-v2.py": "40dcb6f5b7650e6068ca571aa46758eba660ef80a12f540b77cb7fb287e161f1",
+    "scripts/check-m1b-mapping.py": "92e429cd0da940053633f22c0c20a36da8d36fda6ad67d8eb70c061f0a77a36a",
+    "scripts/migrate.py": "8aad812536576832cea5f066059b6d36eaa4c0ee4de2c01f608a034aa021d047",
+    "docs/M1B-1.md": "9cc9bd41f95eda446c28bb8657c10b48dc1c446a70cb159ee6f40e069082e056",
+    "docs/M1-PROD-MIGRATION.md": "a24e8558c0c5046210748e9661130dfab2f1623afaa332f829afbe4b153db742",
+    "db/migrations/0001_memory_v2.sql": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+    "db/migrations/0001_memory_v2.down.sql": "ae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527"
+  },
+  "base_commit": "c276381",
+  "diff_hash": "dde5ea64b0cabce7",
+  "diff_hash_algo": "sha256(git diff c276381b70eda0ced3ce12cf6b2c41dec8855ab6..c43d5fefbb930a1951f50fadea88083c20c8867f raw bytes)[:16] (covers 9ff26ff 0002/backfill/checker + c43d5fe allowlist)",
+  "diff_len": 56512,
+  "diff_per_repo": [
+    {
+      "repo": "jl-service",
+      "base": "c276381",
+      "sha": "c43d5fe",
+      "diff_len": 56512,
+      "files_changed": 7
+    }
+  ],
+  "scope_check": {
+    "applied_change_set": "9ff26ff (0002 migration + backfill + mapping checker) then c43d5fe (production allowlist); HEAD at verification time = c43d5fe",
+    "files_changed_c276381_to_c43d5fe": [
+      "db/migrations/0002_memory_v2_legacy_map.down.sql",
+      "db/migrations/0002_memory_v2_legacy_map.sql",
+      "docs/M1-PROD-MIGRATION.md",
+      "docs/M1B-1.md",
+      "scripts/backfill-memory-v2.py",
+      "scripts/check-m1b-mapping.py",
+      "scripts/migrate.py"
+    ],
+    "forbidden_hits": [],
+    "notes": "No bff/BACKLOG/loop/receipts/deploy changes in the applied change set; verifier committed nothing.",
+    "code_edits_by_verifier": false
+  },
+  "environment": {
+    "host": "baize-R640 via ssh rokid-r640",
+    "python": "3.14.4",
+    "db": "127.0.0.1:3309 user=jl",
+    "database": "jl (production, READ-ONLY verification)",
+    "verifier_test_dir": "/tmp/m1b1apply-verify (removed after evidence download)",
+    "server_time_at_run": "2026-11-08 13:36:16 +0800",
+    "self_check": {
+      "checks": 145,
+      "pass": 145,
+      "fail": 0
+    }
+  },
+  "production_apply": {
+    "backup": {
+      "path": "/home/baize/jl-service/backups/db-pre-m1b1-20261108-1334.sql.gz",
+      "sha256": "329f0f87fa8f1c2d0d73e5021d4c980d7f805755a85ecb895be76aa61d968765",
+      "size_bytes": 661884,
+      "gzip_test": "ok",
+      "dump_probe": {
+        "decompressed_bytes": 5033841,
+        "memory_create_statements": 1,
+        "memory_item_create_statements": 1,
+        "legacy_memory_id_occurrences": 0,
+        "0002_version_occurrences": 0,
+        "memory_item_inserts": 0,
+        "memory_inserts": 1,
+        "schema_migrations_0001_occurrences": 1,
+        "schema_migrations_0002_occurrences": 0
+      },
+      "assessment": "valid pre-0002 dump: legacy memory present, v2 tables present but empty, no legacy_memory_id column, no 0002 row"
+    },
+    "schema_migrations_after": [
+      {
+        "version": "0001_memory_v2",
+        "checksum": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+        "applied_at": "2026-11-08 00:40:27"
+      },
+      {
+        "version": "0002_memory_v2_legacy_map",
+        "checksum": "1e9b9732c0e1afae3190bd675bb8e5e1dbb12b470614c40713045f11a4750cb9",
+        "applied_at": "2026-11-08 13:34:58"
+      }
+    ],
+    "backfill": {
+      "evidence": "memory_item.created_at min=max=2026-11-08 13:35:02 (single batch after 0002 at 13:34:58); ids 1..39; 39 rows",
+      "auto_increment_note": "memory_item AUTO_INCREMENT=64 while ids are exactly 1..39 — benign InnoDB auto-increment preallocation for INSERT ... SELECT (no extra rows; COUNT(*)=39 exact)"
+    }
+  },
+  "post_state": {
+    "jl_table_count": 25,
+    "jl_table_list": [
+      "app_user",
+      "audit_log",
+      "auth_token",
+      "citation",
+      "doc",
+      "memory",
+      "memory_audit",
+      "memory_item",
+      "memory_review",
+      "memory_use",
+      "memory_variant",
+      "message",
+      "observation",
+      "photo",
+      "project",
+      "project_member",
+      "review",
+      "review_appeal",
+      "rule_proposal",
+      "schema_migrations",
+      "service_job",
+      "standard",
+      "task",
+      "tenant",
+      "thread_map"
+    ],
+    "expected_table_count_note": "0002 adds no table, so post-apply count is 25 = the same 25 as before 0002 (19 legacy + 5 v2 + schema_migrations). The request's '26 tables' appears to be a miscount; actual verified count is 25 and the list is unchanged from the pre-0002 state (same list as post-0001 verification).",
+    "memory_item": {
+      "rows": 39,
+      "columns": 18,
+      "legacy_memory_id_type": "bigint unsigned / NULL",
+      "unique_index": "uk_legacy_memory (single column legacy_memory_id, non_unique=0, seq=1)",
+      "engine": "InnoDB",
+      "charset": "utf8mb4",
+      "fks": 3,
+      "fk_rules": "all 3 to memory_item(id) ON DELETE CASCADE"
+    },
+    "backfill_rows": {
+      "count": 39,
+      "mapped_legacy_ids": "39/39 distinct",
+      "missing": 0,
+      "orphans": 0,
+      "field_mismatches": 0,
+      "all_kind_rule": true,
+      "all_status_candidate": true,
+      "all_created_by_import": true,
+      "all_confidence_0_500": true,
+      "scope_counts": {
+        "project": 24,
+        "user": 15,
+        "project_user": 0
+      },
+      "expires_at": "all 39 rows within [now+334h, now+337h] (backfill NOW()+14 days); 0 bad/expired",
+      "mapping_fingerprint": "52cf4201c75b47f27930242557b27eb493174fe2f3396821f4d3fa4a9a26ee8b"
+    },
+    "other_v2_tables": {
+      "memory_variant": 0,
+      "memory_use": 0,
+      "memory_review": 0,
+      "memory_audit": 0
+    },
+    "legacy_memory": {
+      "rows": 39,
+      "scope_counts": {
+        "project": 24,
+        "user": 15
+      },
+      "show_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc",
+      "full_12_column_fingerprint": "7b5244d89dc0388ba0b9654970a809addcc17a257513c1af1ed08249b28bc79f",
+      "matches_pre_apply_fingerprint": true,
+      "builder_fingerprint_note": "Lead/builder quoted 1c7016c3… which is the builder's 10-column subset fingerprint; the verifier's independent 12-column full-row fingerprint is 7b5244d8… and is byte-identical to the independent pre-apply measurement taken by the verifier before 0002/backfill (no mutation)."
+    }
+  },
+  "read_only_checks": {
+    "migrate_check": "PROD CHECK (read-only) database=jl; APPLIED 0001 (checksum ok); APPLIED 0002 (checksum ok); MIGRATIONS_OK; exit 0",
+    "mapping_checker": "check-m1b-mapping.py --database jl --allow-production: 18 PASS checks, scope actual=expected project=24/user=15, M1B_MAPPING_OK, exit 0",
+    "structure_checker": "check-memory-v2.py --database jl --allow-production: M1_OK (all structure/enums/indexes/FKs/engines + 0001 checksum checks), exit 0",
+    "idempotent_dry_run": "backfill-memory-v2.py --database jl --allow-production --dry-run: already mapped=39, would insert=0, scope counts project=24/user=15, writes legacy memory: NO; BACKFILL_DRY_RUN_OK (no writes; would insert=0); exit 0 (no --backup needed for dry-run, none used, no execute)"
+  },
+  "no_writes_proof": {
+    "snapshot_1_vs_2": "identical: table list cmp exit 0; 25 tables; memory 39 rows; memory_item 39 rows / 18 cols; schema_migrations exactly 2 rows with same checksums/applied_at; other v2 tables 0 rows; memory_item mapping fingerprint unchanged; legacy memory 12-column fingerprint + SHOW CREATE sha unchanged",
+    "fingerprint_stable": "legacy fp 7b5244d8… and memory create sha 25e3bb99… identical before checkers/dry-run/negatives and after",
+    "server_hand_edits": "find /home/baize/jl-service (excl data/backups/runtime) -newermt '2026-11-08 13:30:00' => empty (no bff/repo/deploy edits)",
+    "executed_against_jl": [
+      "read-only SELECT/SHOW queries",
+      "migrate.py --check (read-only)",
+      "check-m1b-mapping.py (read-only; SET SESSION transaction_read_only=1)",
+      "check-memory-v2.py (read-only)",
+      "backfill-memory-v2.py --dry-run (read-only)",
+      "guard-refusal negative commands (exit 2 before connect/write)"
+    ],
+    "not_executed": [
+      "backfill --execute against jl",
+      "migrate.py apply against jl",
+      "rollback/drop/alter on jl",
+      "deploy / bff / repo edits"
+    ]
+  },
+  "negatives": {
+    "cases_exit_2": [
+      "backfill --database jl (no flags) -> REFUSED production backfill needs --allow-production + env",
+      "backfill --database jl --allow-production --execute (env=1, no --backup) -> REFUSED must provide --backup",
+      "backfill --database jl --allow-production --execute (env=1, nonexistent --backup) -> REFUSED backup file missing",
+      "check-m1b-mapping.py --database jl (no flags) -> REFUSED",
+      "check-m1b-mapping.py --database jl --allow-production (env unset) -> REFUSED needs process env JL_ALLOW_PROD_MIGRATION=1",
+      "migrate.py --database jl (no flags) -> REFUSED"
+    ],
+    "state_unchanged_after_negatives": true
+  },
+  "dod": [
+    {
+      "check": "jl schema post-apply: table count 25 (0002 adds no table), schema_migrations exactly 2 rows (0001 f8751b76.., 0002 1e9b9732..)",
+      "cmd": "information_schema tables + schema_migrations on jl",
+      "expect": "25 tables (same list as pre-0002); 2 migration rows with expected checksums/applied_at",
+      "pass": true
+    },
+    {
+      "check": "memory_item: 18 columns incl legacy_memory_id BIGINT UNSIGNED NULL; single-column UNIQUE; 3 FKs; InnoDB/utf8mb4",
+      "cmd": "information_schema columns/statistics/referential_constraints; SHOW CREATE TABLE memory_item",
+      "expect": "18 cols; uk_legacy_memory/0/1 on legacy_memory_id; 3 FKs CASCADE; InnoDB + utf8mb4; SHOW CREATE lists legacy column+unique key",
+      "pass": true
+    },
+    {
+      "check": "backfill: 39 memory_item rows all candidate/rule/import/0.500; 39 distinct legacy ids; 0 missing/orphan/dup",
+      "cmd": "independent SQL joins/counts on jl",
+      "expect": "39 rows; mapped 39/39; missing 0; orphan 0; field mismatches 0",
+      "pass": true
+    },
+    {
+      "check": "scope mapping project=24 / user=15 / project_user=0 with correct scope_id/project_id",
+      "cmd": "scope group-by + per-row mapping CASE comparison",
+      "expect": "project=24,user=15; project_user rows=0; 0 content mismatches vs legacy mapping rules",
+      "pass": true
+    },
+    {
+      "check": "expires_at = backfill NOW()+14 days; no expired/NULL; created in one batch",
+      "cmd": "TIMESTAMPDIFF window + expiry-bad count + created_at range",
+      "expect": "window 334..337 hours = true; bad=0; created_at all 2026-11-08 13:35:02",
+      "pass": true
+    },
+    {
+      "check": "other v2 tables empty (variant/use/review/audit all 0)",
+      "cmd": "SELECT COUNT(*) on 4 tables",
+      "expect": "variant=0 use=0 review=0 audit=0",
+      "pass": true
+    },
+    {
+      "check": "legacy memory 39 rows unchanged: rows, SHOW CREATE sha 25e3bb99.., full-row fingerprint = pre-apply independent fingerprint",
+      "cmd": "memory-sha.py + 12-column full-row fingerprint helper",
+      "expect": "rows=39; create sha 25e3bb99..; fp 7b5244d8.. equals pre-apply measurement",
+      "pass": true
+    },
+    {
+      "check": "idempotent backfill dry-run on jl says would insert 0 (read-only, no execute)",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 backfill-memory-v2.py --database jl --allow-production --dry-run",
+      "expect": "already mapped=39; would insert=0; BACKFILL_DRY_RUN_OK; exit 0; no writes",
+      "pass": true
+    },
+    {
+      "check": "read-only checkers green on production jl",
+      "cmd": "migrate.py --check ; check-m1b-mapping.py ; check-memory-v2.py (all prod guards)",
+      "expect": "MIGRATIONS_OK; M1B_MAPPING_OK; M1_OK",
+      "pass": true
+    },
+    {
+      "check": "backup valid and is a pre-0002 restore point",
+      "cmd": "stat/sha256/gzip -t + decompressed dump probe",
+      "expect": "661884 B; sha256 329f0f87..; gzip ok; dump: memory present (1 insert), memory_item present but 0 inserts, no legacy_memory_id, no 0002, sm only 0001",
+      "pass": true
+    },
+    {
+      "check": "negatives exit 2; no writes to jl (snapshot 1 == snapshot 2)",
+      "cmd": "6 guard-refusal commands + before/after snapshots + server-hand-edits find",
+      "expect": "all exit 2; identical snapshots; find empty",
+      "pass": true
+    },
+    {
+      "check": "verifier wrote no code/committed nothing; repo untouched",
+      "cmd": "git status; HEAD",
+      "expect": "HEAD c43d5fe; only untracked receipts; no code edits",
+      "pass": true
+    }
+  ],
+  "evidence": [
+    {
+      "check": "jl table list",
+      "cmd": "information_schema tables for jl",
+      "exit": 0,
+      "expect": "25 tables, same list as pre-0002",
+      "pass": true,
+      "out_tail": "25 tables: app_user,audit_log,auth_token,citation,doc,memory,memory_audit,memory_item,memory_review,memory_use,memory_variant,message,observation,photo,project,project_member,review,review_appeal,rule_proposal,schema_migrations,service_job,standard,task,tenant,thread_map"
+    },
+    {
+      "check": "schema_migrations",
+      "cmd": "SELECT version@checksum@applied_at FROM schema_migrations",
+      "exit": 0,
+      "expect": "0001 + 0002 exact",
+      "pass": true,
+      "out_tail": "0001_memory_v2@f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae@2026-11-08 00:40:27\n0002_memory_v2_legacy_map@1e9b9732c0e1afae3190bd675bb8e5e1dbb12b470614c40713045f11a4750cb9@2026-11-08 13:34:58"
+    },
+    {
+      "check": "SHOW CREATE memory_item",
+      "cmd": "SHOW CREATE TABLE memory_item",
+      "exit": 0,
+      "expect": "legacy column + unique key + InnoDB/utf8mb4",
+      "pass": true,
+      "out_tail": "`legacy_memory_id` bigint unsigned DEFAULT NULL COMMENT '来源 legacy memory.id；NULL=非导入行（幂等回填唯一键）', ... UNIQUE KEY `uk_legacy_memory` (`legacy_memory_id`), ... ENGINE=InnoDB AUTO_INCREMENT=64 DEFAULT CHARSET=utf8mb4 ..."
+    },
+    {
+      "check": "memory_item counts",
+      "cmd": "COUNT(*), columns, unique, FKs, ids",
+      "exit": 0,
+      "expect": "39 rows / 18 cols / unique / 3 FKs / ids 1-39",
+      "pass": true,
+      "out_tail": "rows=39; columns=18; uk_legacy_memory (non_unique=0 seq=1); FK count=3 all CASCADE; id range 1-39 (AUTO_INCREMENT=64, benign INSERT..SELECT preallocation)"
+    },
+    {
+      "check": "mapping content",
+      "cmd": "per-row mapping CASE comparison + scope group + distinct ids + missing/orphan",
+      "exit": 0,
+      "expect": "0 mismatches; project=24,user=15; 39/39 mapped; 0 missing/orphan",
+      "pass": true,
+      "out_tail": "field mismatch=0; scope=project=24,user=15; project_user rows=0; mapped=39/39; missing=0; orphan=0"
+    },
+    {
+      "check": "expiry",
+      "cmd": "TIMESTAMPDIFF window + bad count",
+      "exit": 0,
+      "expect": "now+14d window; no bad",
+      "pass": true,
+      "out_tail": "window(334..337h)=1; bad(NULL/expired/out-of-window)=0; created_at min=max=2026-11-08 13:35:02"
+    },
+    {
+      "check": "other v2 tables",
+      "cmd": "COUNT(*) memory_variant/use/review/audit",
+      "exit": 0,
+      "expect": "all 0",
+      "pass": true,
+      "out_tail": "variant=0 use=0 review=0 audit=0"
+    },
+    {
+      "check": "legacy memory unchanged",
+      "cmd": "memory-sha.py + full 12-column fingerprint",
+      "exit": 0,
+      "expect": "39 rows; sha 25e3bb99..; fp 7b5244d8.. = pre-apply",
+      "pass": true,
+      "out_tail": "memory_rows=39; memory_create_sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc; MEMORY_INVARIANT_OK; fp=7b5244d89dc0388ba0b9654970a809addcc17a257513c1af1ed08249b28bc79f (matches 2026-11-08 pre-apply measurement)"
+    },
+    {
+      "check": "mapping fingerprint",
+      "cmd": "independent ordered mapping-row fingerprint",
+      "exit": 0,
+      "expect": "39 rows; matches pre-backfill scratch reference",
+      "pass": true,
+      "out_tail": "mapping_rows=39 mapping_fpsha256=52cf4201c75b47f27930242557b27eb493174fe2f3396821f4d3fa4a9a26ee8b (identical to jl_m2 reference computed during M1b-1 verification)"
+    },
+    {
+      "check": "idempotent dry-run",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 backfill-memory-v2.py --database jl --allow-production --dry-run",
+      "exit": 0,
+      "expect": "would insert 0",
+      "pass": true,
+      "out_tail": "BACKFILL PLAN (dry-run)\n  legacy table        : memory (39 rows, read-only)\n  already mapped      : 39\n  would insert        : 0\n  scope counts (legacy): project=24, user=15\n  writes legacy memory: NO (only SELECT)\nBACKFILL_DRY_RUN_OK (no writes; would insert=0)"
+    },
+    {
+      "check": "migrate --check",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --check",
+      "exit": 0,
+      "expect": "MIGRATIONS_OK",
+      "pass": true,
+      "out_tail": "PROD CHECK (read-only) database=jl\nAPPLIED  0001_memory_v2 (checksum ok)\nAPPLIED  0002_memory_v2_legacy_map (checksum ok)\nMIGRATIONS_OK"
+    },
+    {
+      "check": "mapping checker",
+      "cmd": "check-m1b-mapping.py --database jl --allow-production",
+      "exit": 0,
+      "expect": "M1B_MAPPING_OK",
+      "pass": true,
+      "out_tail": "18 PASS checks (column/unique/0002 checksum/legacy 39/coverage/scope/content/expiry/idempotency); scope counts actual : project=24, user=15; scope counts expected : project=24, user=15; M1B_MAPPING_OK"
+    },
+    {
+      "check": "structure checker",
+      "cmd": "check-memory-v2.py --database jl --allow-production",
+      "exit": 0,
+      "expect": "M1_OK",
+      "pass": true,
+      "out_tail": "all structure/enum/index/FK/engine checks PASS; 3 FKs CASCADE; 0001 checksum ok; M1_OK"
+    },
+    {
+      "check": "backup",
+      "cmd": "stat/sha256/gzip -t/dump probe",
+      "exit": 0,
+      "expect": "661884 B; sha 329f0f87..; pre-0002 dump",
+      "pass": true,
+      "out_tail": "661884 bytes; sha256 329f0f87fa8f1c2d0d73e5021d4c980d7f805755a85ecb895be76aa61d968765; gzip ok; dump_bytes=5033841; memory_create=1; memory_item_create=1; legacy_memory_id=0; m2_version=0; memory_item_inserts=0; memory_inserts=1; sm_0001=1; sm_0002=0"
+    },
+    {
+      "check": "negatives",
+      "cmd": "6 guard-refusal commands",
+      "exit": 2,
+      "expect": "all exit 2, no writes",
+      "pass": true,
+      "out_tail": "backfill jl no flags -> REFUSED 拒绝回填生产库 'jl' | execute no backup -> 生产 execute 必须提供 --backup | execute missing backup -> 文件不存在 | checker jl no flags -> REFUSED 拒绝检查生产库 'jl' | checker no env -> JL_ALLOW_PROD_MIGRATION=1 | migrate jl no flags -> REFUSED 拒绝操作生产库 'jl'; snapshot unchanged"
+    },
+    {
+      "check": "no-writes snapshots",
+      "cmd": "before/after table list cmp + counts + sm rows + memory sha + fp + mapping fp",
+      "exit": 0,
+      "expect": "identical",
+      "pass": true,
+      "out_tail": "table list cmp exit 0; 25 tables; memory 39; memory_item 39; sm 2 rows unchanged; other v2 0; legacy fp 7b5244d8.. and memory sha 25e3bb99.. unchanged; find server-hand-edits empty"
+    },
+    {
+      "check": "post-cleanup snapshot (read-only, 2026-11-08 13:38:47 +0800)",
+      "cmd": "docker exec jl-mysql read-only queries",
+      "exit": 0,
+      "expect": "state persists; verifier dir gone",
+      "pass": true,
+      "out_tail": "jl 25 tables; migrations 0001@f8751b76 + 0002@1e9b9732; memory 39; memory_item 39 (18 cols); legacy col bigint unsigned/YES; uk_legacy_memory/0/1; scope project=24,user=15; other v2 rows 0; id range 39|1-39; verifier_dir GONE"
+    }
+  ],
+  "gates": {
+    "preflight": "not_run",
+    "deploy": "not_applicable",
+    "smoke": "not_applicable",
+    "acceptance": "not_applicable",
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "verified_by": "verifier:independent",
+  "verified_at": "2026-11-08T13:38:47+0800",
+  "notes": [
+    "Independent post-apply verification: every assertion was executed first-hand against the live production jl using read-only SELECT/SHOW and the repo's own read-only checkers (tested blobs verified by sha256). No execute/apply/rollback/DDL/DML was run against jl.",
+    "Expected table count discrepancy flagged: the request said '26 tables (25 + no new table for 0002)'; actual verified count is 25 — exactly the same 25-table list as before 0002 (19 legacy + 5 v2 + schema_migrations). 0002 adds a column/unique key only; no table is added or removed. The actual state is correct.",
+    "Legacy-memory fingerprint cross-check: the builder/Lead figure 1c7016c3… is the builder's 10-column subset fingerprint; the verifier's independent 12-column full-row fingerprint is 7b5244d8… and equals the verifier's own pre-0002/pre-backfill measurement, proving legacy memory was not mutated by the apply/backfill.",
+    "memory_item ids are exactly 1..39 with created_at identical (2026-11-08 13:35:02), i.e. one backfill batch after 0002 was applied at 13:34:58. AUTO_INCREMENT=64 is InnoDB auto-increment preallocation for INSERT ... SELECT, not extra rows (COUNT(*)=39 exact).",
+    "Idempotency confirmed without writing: production backfill dry-run reports already mapped=39 / would insert=0; legacy table is only SELECTed by the dry-run.",
+    "Backup is a valid pre-0002 restore point: 661884 B, sha256 329f0f87…, gzip -t OK, contains legacy memory data, memory_item present but empty, no legacy_memory_id column and no 0002 schema_migrations row.",
+    "No writes proof: table list/counts, schema_migrations rows/checksums/applied_at, memory_item mapping fingerprint, legacy memory fingerprint and SHOW CREATE sha were identical before and after the checkers/dry-run/negative commands; find over the deployment dir (excl data/backups/runtime) since 13:30 shows no bff/repo edits.",
+    "Harness note: the first run had four verifier-assertion calibration failures (backup dump probe read its stdin sequentially in one pipeline, and one SHOW CREATE substring omitted backticks); fixtures were fixed (no product code changed) and the suite re-ran clean: 145 PASS / 0 FAIL.",
+    "Verifier wrote no code and committed nothing; only repo write is this receipt (uncommitted). Builder/Lead evidence dirs in /tmp remain; verifier /tmp/m1b1apply-verify and its tgz were removed after evidence download."
+  ]
+}

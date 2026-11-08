@@ -1,13 +1,16 @@
 {
-  "round": 5,
+  "round": 6,
   "wave": "Wave7 稳定性",
-  "pointer": "M1b 双写 + 影子读（jl 已应用 0001；先补 legacy 映射列/回填）",
+  "pointer": "M1b-2 双写 + 影子读（jl 已有 39 candidate；代码未接）",
   "attempts": {
     "P0-perf": 3,
     "D0": 1,
     "M1-schema": 1,
     "M1-prod": 1,
-    "M1b": 0
+    "M1b-1": 1,
+    "M1b-1b": 1,
+    "M1b-1-apply": 1,
+    "M1b-2": 0
   },
   "budget": {
     "max_attempts_per_item": 2,
@@ -44,6 +47,15 @@
         "no production data backfill without separate approval"
       ],
       "expires": "2026-11-11"
+    },
+    "M1b-1-apply": {
+      "approved_by": "human (来吧)",
+      "scope": [
+        "apply 0002 ALTER on memory_item only",
+        "backfill 39 legacy rows as candidate/rule/import",
+        "legacy memory table read-only"
+      ],
+      "consumed_at": "2026-11-08T13:35:02+08:00"
     }
   },
   "blocked": [
@@ -65,33 +77,34 @@
     {
       "item": "T6.5 测试隔离落点",
       "type": "DECISION",
-      "reason": "A 测试栈 / B 同库测试模式；M1 用 jl_m1 影子库绕开，暂缓"
+      "reason": "A 测试栈 / B 同库测试模式；M1 用 jl_m1/jl_m2 影子库绕开，暂缓"
     }
   ],
-  "last_receipt": "docs/receipts/20261108-0043-M1-prod-apply.json",
+  "last_receipt": "docs/receipts/20261108-1338-M1b-1-apply.json",
   "checkpoint": {
-    "at": "2026-11-08T00:45:00+08:00",
-    "item": "M1-prod-apply",
+    "at": "2026-11-08T13:40:00+08:00",
+    "item": "M1b-1-apply",
     "verdict": "pass",
-    "commit": "f628b7a",
     "receipts": [
-      "docs/receipts/20261108-0038-M1-prod-path.json",
-      "docs/receipts/20261108-0043-M1-prod-apply.json"
+      "docs/receipts/20261108-1324-M1b-1.json",
+      "docs/receipts/20261108-1333-M1b-1b.json",
+      "docs/receipts/20261108-1338-M1b-1-apply.json"
     ],
     "verified_by": "verifier:independent",
     "production_state": {
       "database": "jl",
       "tables": 25,
-      "v2_tables": 5,
-      "schema_migrations": 1,
-      "memory_rows": 39,
-      "v2_rows": 0,
-      "memory_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc"
+      "schema_migrations": 2,
+      "legacy_memory_rows": 39,
+      "memory_item_rows": 39,
+      "memory_item_status": "candidate",
+      "memory_item_scope": "project=24,user=15,project_user=0",
+      "legacy_memory_create_sha256": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc"
     },
     "backup": {
-      "path": "/home/baize/jl-service/backups/db-pre-m1-20261108-0039.sql.gz",
-      "sha256": "48f235e6f2a4e715594572d774fc33d1f016d4d0355e9e806076059da32e7969",
-      "bytes": 660349
+      "path": "/home/baize/jl-service/backups/db-pre-m1b1-20261108-1334.sql.gz",
+      "sha256": "329f0f87fa8f1c2d0d73e5021d4c980d7f805755a85ecb895be76aa61d968765",
+      "bytes": 661884
     },
     "gates": {
       "preflight": "not_run",
@@ -101,5 +114,5 @@
       "negative": "pass"
     }
   },
-  "updated_at": "2026-11-08T00:45:00+08:00"
+  "updated_at": "2026-11-08T13:40:00+08:00"
 }

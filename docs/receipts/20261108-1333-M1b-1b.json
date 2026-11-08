@@ -1,0 +1,427 @@
+{
+  "round": 3,
+  "item": "M1b-1b",
+  "type": "IMPL",
+  "commit": "c43d5fe",
+  "commits": [
+    {
+      "repo": "jl-service",
+      "sha": "c43d5fe"
+    }
+  ],
+  "files": [
+    "scripts/migrate.py",
+    "docs/M1-PROD-MIGRATION.md"
+  ],
+  "file_sha256": {
+    "scripts/migrate.py": "8aad812536576832cea5f066059b6d36eaa4c0ee4de2c01f608a034aa021d047",
+    "docs/M1-PROD-MIGRATION.md": "a24e8558c0c5046210748e9661130dfab2f1623afaa332f829afbe4b153db742"
+  },
+  "unchanged_artifacts": {
+    "db/migrations/0001_memory_v2.sql": "f8751b761cf0a88794264266bbaa8c97b5ae287ae6cf8054f061b83a93823bae",
+    "db/migrations/0001_memory_v2.down.sql": "ae9f4cf599c4b687e81838a5313253173c86d7db2cfa9da0cd61d4011bd67527",
+    "db/migrations/0002_memory_v2_legacy_map.sql": "1e9b9732c0e1afae3190bd675bb8e5e1dbb12b470614c40713045f11a4750cb9",
+    "db/migrations/0002_memory_v2_legacy_map.down.sql": "79ba95152611f5cde7632acc53b210a19553643134471f7b720959d2ad5c5194",
+    "note": "git show --stat c43d5fe changes only scripts/migrate.py + docs/M1-PROD-MIGRATION.md; no 0002 SQL edit, no bff/BACKLOG/loop/receipts/deploy changes."
+  },
+  "base_commit": "9ff26ff",
+  "diff_hash": "e336c47360962612",
+  "diff_hash_algo": "sha256(git diff 9ff26ffe0fe0b1c6d4ee16101a89a0fa5edaeccc..c43d5fefbb930a1951f50fadea88083c20c8867f raw bytes)[:16]",
+  "diff_len": 15724,
+  "diff_per_repo": [
+    {
+      "repo": "jl-service",
+      "base": "9ff26ff",
+      "sha": "c43d5fe",
+      "diff_len": 15724,
+      "files_changed": 2
+    }
+  ],
+  "scope_check": {
+    "git_show_stat_files": [
+      "docs/M1-PROD-MIGRATION.md",
+      "scripts/migrate.py"
+    ],
+    "only_allowed_files": true,
+    "forbidden_hits": [],
+    "notes": "HEAD at verification time = c43d5fe. 0002 SQL untouched (hash still 1e9b9732..). Verifier committed nothing.",
+    "code_edits_by_verifier": false
+  },
+  "environment": {
+    "host": "baize-R640 via ssh rokid-r640",
+    "python": "3.14.4",
+    "gzip": "1.14",
+    "db": "127.0.0.1:3309 user=jl",
+    "scratch_db": "jl_m2 (recreated from a fresh read-only dump of production jl)",
+    "production_db": "jl (read-only + --dry-run only)",
+    "verifier_test_dir": "/tmp/m1b1b-verify (removed after evidence download)",
+    "server_time_at_run": "2026-11-08 13:31:57 +0800",
+    "self_check": {
+      "checks": 223,
+      "pass": 223,
+      "fail": 0
+    }
+  },
+  "production_jl_invariants": {
+    "table_count_before": 25,
+    "table_count_after": 25,
+    "table_list_identical": true,
+    "memory_rows_before": 39,
+    "memory_rows_after": 39,
+    "memory_full_fingerprint_before": "7b5244d89dc0388ba0b9654970a809addcc17a257513c1af1ed08249b28bc79f",
+    "memory_full_fingerprint_after": "7b5244d89dc0388ba0b9654970a809addcc17a257513c1af1ed08249b28bc79f",
+    "memory_create_sha256_unchanged": "25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc",
+    "memory_item_rows": 0,
+    "legacy_memory_id_column_in_jl_memory_item": false,
+    "schema_migrations": "only 0001_memory_v2@f8751b76 (1 row); no 0002 row",
+    "probe_table_m1b1b_probe_new_created": false,
+    "writes_to_jl": "none"
+  },
+  "jl_dry_run": {
+    "command": "env JL_ALLOW_PROD_MIGRATION=1 python3 scripts/migrate.py --env-file <deploy>/.env --database jl --allow-production --backup <dummy gzip> --dry-run",
+    "exit": 0,
+    "plan": {
+      "migrations": "0002_memory_v2_legacy_map",
+      "new_tables": "(none)",
+      "narrow_alter": "memory_item (ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory) [0002_memory_v2_legacy_map]",
+      "safety": "CREATE TABLE IF NOT EXISTS + narrow ALTER on memory_item only; target tables absent; duplicate column/key rejected; legacy memory table untouched",
+      "invariants_pre": "memory present=True rows=39 create_sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc"
+    },
+    "result": "PROD_DRY_RUN_OK (no DDL executed; jl unchanged)",
+    "ddl_executed": false
+  },
+  "jl_check": {
+    "command": "env JL_ALLOW_PROD_MIGRATION=1 python3 scripts/migrate.py --database jl --allow-production --check",
+    "exit": 1,
+    "lines": [
+      "PROD CHECK (read-only) database=jl",
+      "APPLIED  0001_memory_v2 (checksum ok)",
+      "PENDING  0002_memory_v2_legacy_map",
+      "MIGRATIONS_NOT_APPLIED"
+    ]
+  },
+  "analyzer_unit_tests": {
+    "target": "scripts/migrate.py analyze_pending_safety() imported as a module and executed against scratch jl_m2",
+    "positives_jl_m2_pre_0002": [
+      {
+        "case": "real repo migrations dir (0001 applied, 0002 pending)",
+        "result": "ANALYZE_ACCEPT created=0 alters=1",
+        "alter": "ALTER memory_item [ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory] 0002_memory_v2_legacy_map"
+      },
+      {
+        "case": "fake 0002-shape migration (different version)",
+        "result": "ANALYZE_ACCEPT created=0 alters=1"
+      },
+      {
+        "case": "backticked identifiers in the narrow ALTER",
+        "result": "ANALYZE_ACCEPT created=0 alters=1"
+      },
+      {
+        "case": "observation: only ADD COLUMN (no UNIQUE KEY)",
+        "result": "ANALYZE_ACCEPT alters=1 (documented deviation, see code_review observations)"
+      },
+      {
+        "case": "observation: only ADD UNIQUE KEY (no column)",
+        "result": "ANALYZE_ACCEPT alters=1 (would fail at execution; no DDL performed)"
+      },
+      {
+        "case": "observation: two separate allowed ALTER statements (column; then key)",
+        "result": "ANALYZE_ACCEPT alters=2"
+      },
+      {
+        "case": "positive control: CREATE TABLE IF NOT EXISTS absent table",
+        "result": "ANALYZE_ACCEPT created=1 (m1b1b_probe_new)"
+      }
+    ],
+    "negatives_jl_m2_pre_0002_exit_2": [
+      "ALTER memory (legacy)",
+      "ALTER other table (project)",
+      "memory_item DROP COLUMN",
+      "memory_item MODIFY COLUMN",
+      "memory_item ADD other column",
+      "duplicate ADD COLUMN in one plan",
+      "duplicate ADD UNIQUE KEY in one plan",
+      "multi-statement: allowed ALTER + DROP TABLE memory",
+      "MySQL executable comment /*!80000 ... */",
+      "allowed statement + executable comment payload",
+      "CREATE TABLE IF NOT EXISTS memory (existing)",
+      "CREATE TABLE IF NOT EXISTS memory_item (existing)",
+      "wrong column type (INT)",
+      "NOT NULL instead of NULL",
+      "unexpected DEFAULT 0",
+      "comma inside COMMENT followed by evil ADD COLUMN",
+      "uppercase table name MEMORY_ITEM (case-sensitive table)",
+      "schema-qualified `jl`.`memory_item`",
+      "ASCII ';' inside COMMENT (conservative over-reject)"
+    ],
+    "duplicate_0002_when_already_applied": [
+      "fake 0002-shape ALTER after 0002 applied -> exit 2: memory_item.legacy_memory_id 列已存在/重复",
+      "fake only ADD UNIQUE KEY after 0002 applied -> exit 2: memory_item 唯一键 uk_legacy_memory 已存在/重复"
+    ]
+  },
+  "cli_negatives_on_jl_dry_run": {
+    "note": "each run uses env JL_ALLOW_PROD_MIGRATION=1 + --allow-production + valid dummy gzip backup + --dry-run + fake --migrations-dir; exit before any DDL",
+    "cases_exit_2": [
+      "alter_memory (ALTER TABLE memory ...)",
+      "other_table (ALTER TABLE project ...)",
+      "drop_column (memory_item DROP COLUMN)",
+      "add_other_column (memory_item ADD evil)",
+      "modify_column (memory_item MODIFY canonical_text)",
+      "multi_statement (allowed ALTER; DROP TABLE memory)",
+      "duplicate_add (two ADD COLUMN legacy_memory_id)",
+      "exec_comment (/*!80000 ALTER TABLE memory DROP COLUMN text */)",
+      "create_existing (CREATE TABLE IF NOT EXISTS memory)"
+    ],
+    "positive_control": "fake CREATE TABLE IF NOT EXISTS m1b1b_probe_new -> dry-run exit 0, plan new tables = m1b1b_probe_new, PROD_DRY_RUN_OK; probe table not created in jl (count 0)"
+  },
+  "jl_m2_migration_tests": {
+    "clone": "fresh mysqldump of jl -> recreated jl_m2: 25 tables, memory 39 rows, memory_item 0, schema_migrations only 0001; legacy full fingerprint identical to jl (7b5244d8..)",
+    "apply_0002": "SKIP 0001 (checksum ok); APPLY 0002_memory_v2_legacy_map; OK 1 statement; MIGRATE_OK (1 migration(s) applied)",
+    "idempotent_apply_again": "SKIP 0001 + SKIP 0002; MIGRATE_OK (no-op: all migrations already applied)",
+    "check": "APPLIED 0001 (checksum ok); APPLIED 0002 (checksum ok); MIGRATIONS_OK",
+    "schema": "legacy_memory_id bigint unsigned/YES; uk_legacy_memory non_unique=0 seq=1 on legacy_memory_id; memory_item 18 columns",
+    "down_0002": "executed committed 0002 down SQL on jl_m2: APPLY_SQL_OK statements=1; column removed (0), unique key removed (0), memory_item survives (1 table, 17 columns); schema_migrations 0002 row removed; migrate re-applied 0002 -> MIGRATE_OK (1 applied); --check MIGRATIONS_OK",
+    "final_state": "jl_m2 has 0001+0002, legacy_memory_id bigint unsigned/YES, uk_legacy_memory/0/1, memory_item 0 rows (no backfill in this item)"
+  },
+  "code_review": {
+    "implementation": "analyze_pending_safety now returns (created, alters); plan prints a dedicated 'narrow ALTER' line; only CREATE TABLE IF NOT EXISTS (target absent), SET NAMES and a narrow ALTER on memory_item are admitted. ALTER body is split on top-level commas respecting quotes/backticks/parens; only 'ADD COLUMN legacy_memory_id BIGINT UNSIGNED NULL [COMMENT ...]' and 'ADD UNIQUE KEY uk_legacy_memory (legacy_memory_id)' clauses are admitted; column/key existence and duplicate planning are checked via information_schema; raw '/*!' anywhere in a pending migration is refused.",
+    "bypass_attempts_tested": [
+      "quote/paren-comma splitting: comma hidden inside COMMENT does not split, evil second clause is rejected",
+      "multi-statement: split_sql splits on top-level ';' and every statement is checked; DROP/other statement rejected",
+      "semicolon inside ALTER body: explicitly rejected (conservative)",
+      "MySQL executable comments /*!...*/: rejected by raw-text scan (also when mixed with an allowed statement)",
+      "case variants (MEMORY_ITEM): rejected by exact table comparison (safe on Linux lower_case_table_names=0)",
+      "schema-qualified names: rejected (conservative)",
+      "duplicate column/key in one plan and across pending migrations: rejected",
+      "duplicate 0002 when column/key already exist: rejected",
+      "CREATE TABLE IF NOT EXISTS targeting existing memory/memory_item: rejected"
+    ],
+    "observations_non_blocking": [
+      "Allowlist accepts a narrow ALTER containing only ADD COLUMN or only ADD UNIQUE KEY (not strictly both clauses). Only the expected objects on memory_item can be touched; key-only would fail at execution (unknown column), column-only would make the real 0002 later fail on duplicate column. No data-destructive path found; docs describe the intended pair.",
+      "Two separate allowed ALTER statements in one migration (column; then key) are accepted and counted as two alters; same expected effect only.",
+      "Body ';' rejection is conservative over-reject: a legitimate COMMENT containing an ASCII ';' is refused (real 0002 uses the full-width '；', so unaffected).",
+      "CREATE TABLE IF NOT EXISTS is validated for target absence only, not the rest of the statement (e.g. ... SELECT ...); it still only creates a new table and cannot modify existing/legacy tables. Pre-existing behavior from f628b7a, unchanged by this commit.",
+      "Production rollback allowlist (analyze_down_safety) remains DROP TABLE IF EXISTS <v2 tables> only; 0002's down ALTER is not admitted there, so a future controlled production rollback after applying 0002 would be refused with exit 2 unless extended. Not in scope here (no production apply/rollback executed)."
+    ],
+    "blocking_issues": []
+  },
+  "production_apply_command": {
+    "status": "NOT EXECUTED by verifier; Lead runs only after this PASS (this commit enables the 0002 narrow ALTER in the production path)",
+    "steps": [
+      "1) generate a fresh pre-0002 backup, e.g. cd /home/baize/jl-service && STAMP=$(date +%Y%m%d-%H%M) && docker exec jl-mysql mysqldump -uroot -p\"$(grep '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)\" --default-character-set=utf8mb4 --single-transaction --routines jl | gzip > backups/db-pre-m1b1-$STAMP.sql.gz",
+      "2) copy scripts/migrate.py (c43d5fe) + db/migrations/0001_* + 0002_* to /tmp/m1-prod (recopy migrate.py; verify sha256 db/migrations/0002_memory_v2_legacy_map.sql = 1e9b9732c0e1afae3190bd675bb8e5e1dbb12b470614c40713045f11a4750cb9)",
+      "3) dry-run: ssh rokid-r640 \"JL_ALLOW_PROD_MIGRATION=1 python3 /tmp/m1-prod/scripts/migrate.py --env-file /home/baize/jl-service/.env --database jl --allow-production --backup /home/baize/jl-service/backups/db-pre-m1b1-$STAMP.sql.gz --dry-run\"",
+      "4) apply once: same command without --dry-run",
+      "5) post: migrate.py --database jl --allow-production --check (expect APPLIED 0001 + APPLIED 0002, MIGRATIONS_OK); check-prod-migration.py --phase post --baseline /tmp/m1-prod-baseline.json (expect PROD_CHECK_OK)"
+    ],
+    "expected_dry_run_plan_line": "narrow ALTER    : memory_item (ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory) [0002_memory_v2_legacy_map]"
+  },
+  "dod": [
+    {
+      "check": "commit c43d5fe contains only allowed files (scripts/migrate.py + docs/M1-PROD-MIGRATION.md); no 0002 SQL edit, no bff/BACKLOG/loop/receipts/deploy",
+      "cmd": "git show --stat --name-status c43d5fe; git diff --stat 9ff26ff c43d5fe",
+      "expect": "2 files changed (232+/24-); 0002 hashes unchanged",
+      "pass": true
+    },
+    {
+      "check": "server copy compiles; tested bytes equal committed blobs",
+      "cmd": "python3 -m py_compile scripts/migrate.py; sha256sum scripts/migrate.py db/migrations/*.sql docs/M1-PROD-MIGRATION.md",
+      "expect": "py_compile exit 0; migrate 8aad8125.., doc a24e8558.., 0001 f8751b76../ae9f4cf5.., 0002 1e9b9732../79ba9515..",
+      "pass": true
+    },
+    {
+      "check": "analyzer accepts real 0002 narrow ALTER on memory_item only (column/key absent)",
+      "cmd": "analyzer-unit.py against jl_m2 pre-0002 with repo migrations dir",
+      "expect": "ANALYZE_ACCEPT created=0 alters=1; ALTER memory_item [ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory] 0002_memory_v2_legacy_map",
+      "pass": true
+    },
+    {
+      "check": "analyzer rejects ALTER memory / other tables / DROP / MODIFY / other columns / duplicate adds / multi-statement / executable comments / CREATE existing",
+      "cmd": "19 analyzer fixture dirs against jl_m2",
+      "expect": "all exit 2, no ANALYZE_ACCEPT; specific messages verified",
+      "pass": true
+    },
+    {
+      "check": "jl_m2: apply 0002 normally, --check green, duplicate 0002 rejected when applied, 0002 down works + re-apply",
+      "cmd": "migrate.py --database jl_m2; --check; analyzer duplicate fixtures; execute committed 0002 down; migrate re-apply",
+      "expect": "APPLY 0002 / MIGRATIONS_OK; duplicate -> exit 2; down removes column+key (17 cols remaining) then re-apply restores",
+      "pass": true
+    },
+    {
+      "check": "jl dry-run prints narrow ALTER plan, exits 0 PROD_DRY_RUN_OK, executes no DDL",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --backup <gzip> --dry-run",
+      "expect": "plan line narrow ALTER memory_item (...); migrations 0002; new tables (none); invariants pre rows=39; PROD_DRY_RUN_OK",
+      "pass": true
+    },
+    {
+      "check": "jl --check reports APPLIED 0001 + PENDING 0002 (read-only)",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --check",
+      "expect": "APPLIED 0001 (checksum ok); PENDING 0002; MIGRATIONS_NOT_APPLIED; exit 1",
+      "pass": true
+    },
+    {
+      "check": "negative CLI on jl dry-run: 9 unsafe fake migration dirs exit 2; positive CREATE absent exit 0; no writes",
+      "cmd": "9 cli_neg + 1 positive with fake --migrations-dir",
+      "expect": "all unsafe exit 2 with messages, no plan; positive plan new tables + PROD_DRY_RUN_OK; probe table absent in jl",
+      "pass": true
+    },
+    {
+      "check": "production jl unchanged before/after all tests (no DDL/DML)",
+      "cmd": "read-only table list/count, memory rows + full 12-col fingerprint + SHOW CREATE sha, memory_item rows/columns, schema_migrations",
+      "expect": "25 tables identical; memory 39 rows, fingerprint 7b5244d8.. and create sha 25e3bb99.. unchanged; memory_item 0 rows; no legacy column; schema_migrations only 0001",
+      "pass": true
+    },
+    {
+      "check": "code review of bypasses (quote/paren splitting, comments, case, multi statements) and report any issue",
+      "cmd": "manual review of diff + adversarial fixtures",
+      "expect": "no blocking bypass found; non-blocking observations documented",
+      "pass": true
+    },
+    {
+      "check": "no code edits/commits by verifier; no server hand edits; verifier tmp cleaned",
+      "cmd": "git status; find /home/baize/jl-service ... -newermt '2026-11-08 13:20:00'; rm -rf /tmp/m1b1b-verify",
+      "expect": "HEAD unchanged; only receipt untracked; deployment find empty; verifier dir gone",
+      "pass": true
+    }
+  ],
+  "evidence": [
+    {
+      "check": "commit scope",
+      "cmd": "git show --stat c43d5fe",
+      "exit": 0,
+      "expect": "2 allowed files",
+      "pass": true,
+      "out_tail": "docs/M1-PROD-MIGRATION.md | 19 +++-\nscripts/migrate.py | 237 +++++++++++++++++++++++++++++++++++++++++-----\n2 files changed, 232 insertions(+), 24 deletions(-)"
+    },
+    {
+      "check": "tested artifacts == committed blobs",
+      "cmd": "sha256sum on server /tmp/m1b1b-verify",
+      "exit": 0,
+      "expect": "migrate 8aad8125.., doc a24e8558.., migrations unchanged",
+      "pass": true,
+      "out_tail": "8aad812536576832cea5f066059b6d36eaa4c0ee4de2c01f608a034aa021d047  scripts/migrate.py\na24e8558c0c5046210748e9661130dfab2f1623afaa332f829afbe4b153db742  docs/M1-PROD-MIGRATION.md\n1e9b9732c0e1afae3190bd675bb8e5e1dbb12b470614c40713045f11a4750cb9  0002_memory_v2_legacy_map.sql"
+    },
+    {
+      "check": "jl dry-run plan",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --backup <dummy gzip> --dry-run",
+      "exit": 0,
+      "expect": "narrow ALTER plan + PROD_DRY_RUN_OK",
+      "pass": true,
+      "out_tail": "PROD PLAN (dry-run apply)\n  database        : jl (production)\n  migrations      : 0002_memory_v2_legacy_map\n  new tables      : (none)\n  narrow ALTER    : memory_item (ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory) [0002_memory_v2_legacy_map]\n  backup sha256   : 313b44177059517cf9fa54dd022addf3234760fcda73606c6f3fb4d7801f3c9a\n  backup size     : 25 bytes (gzip -t ok)\n  invariants pre  : memory present=True rows=39 create_sha256=25e3bb995994f7fc7f3c017ee8d52dd890ea71a877d8559cde16337f162247fc\n  safety          : CREATE TABLE IF NOT EXISTS + narrow ALTER on memory_item only; ...\nPROD_DRY_RUN_OK (no DDL executed; jl unchanged)"
+    },
+    {
+      "check": "jl --check",
+      "cmd": "env JL_ALLOW_PROD_MIGRATION=1 migrate.py --database jl --allow-production --check",
+      "exit": 1,
+      "expect": "APPLIED 0001 / PENDING 0002",
+      "pass": true,
+      "out_tail": "PROD CHECK (read-only) database=jl\nAPPLIED  0001_memory_v2 (checksum ok)\nPENDING  0002_memory_v2_legacy_map\nMIGRATIONS_NOT_APPLIED"
+    },
+    {
+      "check": "analyzer positive real 0002",
+      "cmd": "analyzer-unit.py --database jl_m2 --migrations-dir db/migrations",
+      "exit": 0,
+      "expect": "ANALYZE_ACCEPT alters=1",
+      "pass": true,
+      "out_tail": "ANALYZE_ACCEPT created=0 alters=1 pending=1\nALTER memory_item [ADD COLUMN legacy_memory_id, ADD UNIQUE KEY uk_legacy_memory] 0002_memory_v2_legacy_map"
+    },
+    {
+      "check": "analyzer negatives (sample messages)",
+      "cmd": "analyzer-unit.py with 19 unsafe fixture dirs",
+      "exit": 2,
+      "expect": "exit 2 each",
+      "pass": true,
+      "out_tail": "ALTER memory -> 试图 ALTER 表 memory | other table -> 试图 ALTER 表 project | duplicate add -> 重复 ADD COLUMN | duplicate key -> 重复 ADD UNIQUE KEY | exec comment -> 可执行注释 | multi-statement -> 含不安全语句 | create existing -> 要创建的表已存在 | comment-comma -> 含不允许的 ALTER 子句 | mixed case / schema-qualified / wrong type / NOT NULL / DEFAULT 0 / ASCII-';'-in-COMMENT -> exit 2"
+    },
+    {
+      "check": "duplicate 0002 when already applied",
+      "cmd": "analyzer-unit.py fake real-0002-shape after jl_m2 0002 applied",
+      "exit": 2,
+      "expect": "column duplicate rejected",
+      "pass": true,
+      "out_tail": "FATAL: REFUSED: memory_item.legacy_memory_id 列已存在/重复（拒绝重复 ADD COLUMN），迁移 9001_dup_real，exit 2"
+    },
+    {
+      "check": "jl_m2 apply 0002",
+      "cmd": "migrate.py --database jl_m2",
+      "exit": 0,
+      "expect": "APPLY 0002",
+      "pass": true,
+      "out_tail": "SKIP  0001_memory_v2 (already applied, checksum ok)\nAPPLY 0002_memory_v2_legacy_map  <- 0002_memory_v2_legacy_map.sql\n  OK  1 statement(s)\nMIGRATE_OK (1 migration(s) applied)"
+    },
+    {
+      "check": "jl_m2 --check / idempotent apply",
+      "cmd": "migrate.py --database jl_m2 --check ; migrate.py (again)",
+      "exit": 0,
+      "expect": "MIGRATIONS_OK / no-op",
+      "pass": true,
+      "out_tail": "APPLIED 0001 (checksum ok) + APPLIED 0002 (checksum ok) -> MIGRATIONS_OK\nsecond apply: SKIP 0001 + SKIP 0002 -> MIGRATE_OK (no-op: all migrations already applied)"
+    },
+    {
+      "check": "jl_m2 0002 schema",
+      "cmd": "information_schema",
+      "exit": 0,
+      "expect": "bigint unsigned NULL + single-column unique",
+      "pass": true,
+      "out_tail": "legacy_memory_id -> bigint unsigned/YES; uk_legacy_memory/0/1/legacy_memory_id; memory_item columns=18"
+    },
+    {
+      "check": "0002 down + re-apply on jl_m2",
+      "cmd": "execute committed down SQL; DELETE schema_migrations row; migrate re-apply",
+      "exit": 0,
+      "expect": "column+key gone (17 cols), then re-applied",
+      "pass": true,
+      "out_tail": "APPLY_SQL_OK statements=1; column count after down=0; index count=0; memory_item still exists (1, 17 columns); DELETE row; APPLY 0002 -> MIGRATE_OK (1 applied); --check MIGRATIONS_OK"
+    },
+    {
+      "check": "negative CLI on jl dry-run",
+      "cmd": "9 unsafe fake --migrations-dir cases",
+      "exit": 2,
+      "expect": "exit 2, no plan",
+      "pass": true,
+      "out_tail": "alter_memory -> 试图 ALTER 表 memory | exec_comment -> 可执行注释 | create_existing -> 要创建的表已存在：memory | others -> 含不允许的 ALTER 子句 / 含不安全语句 / 重复 ADD COLUMN; no PROD_DRY_RUN_OK in any"
+    },
+    {
+      "check": "positive CLI on jl dry-run",
+      "cmd": "--migrations-dir fake-create-absent --dry-run",
+      "exit": 0,
+      "expect": "new tables m1b1b_probe_new, PROD_DRY_RUN_OK, table not created",
+      "pass": true,
+      "out_tail": "new tables      : m1b1b_probe_new\nnarrow ALTER    : (none)\nPROD_DRY_RUN_OK (no DDL executed; jl unchanged); jl probe table count=0"
+    },
+    {
+      "check": "production jl invariants",
+      "cmd": "read-only table/memory/memory_item/schema_migrations + memory-sha + full fingerprint",
+      "exit": 0,
+      "expect": "identical before/after",
+      "pass": true,
+      "out_tail": "table list cmp identical; 25 tables; memory 39 rows; memory_item 0 rows; legacy col 0; sm 1 row 0001@f8751b76 (no 0002); memory sha 25e3bb99..; fp 7b5244d8.. unchanged"
+    },
+    {
+      "check": "hygiene",
+      "cmd": "find /home/baize/jl-service ... -newermt '2026-11-08 13:20:00'; post-cleanup snapshot",
+      "exit": 0,
+      "expect": "no server edits; verifier tmp gone",
+      "pass": true,
+      "out_tail": "find stdout empty; /tmp/m1b1b-verify + tgz removed; post-cleanup 13:33:16: jl unchanged (25/39/0/no col/0001 only/probe 0); jl_m2 0001+0002, legacy col bigint unsigned/YES, uk_legacy_memory/0/1"
+    }
+  ],
+  "gates": {
+    "preflight": "not_run",
+    "deploy": "not_applicable",
+    "smoke": "not_applicable",
+    "acceptance": "not_applicable",
+    "negative": "pass"
+  },
+  "verdict": "pass",
+  "verified_by": "verifier:independent",
+  "verified_at": "2026-11-08T13:33:16+0800",
+  "notes": [
+    "Independent verification: jl_m2 was recreated from a fresh read-only dump of production jl; analyzer unit tests imported scripts/migrate.py from the committed blob (sha256 8aad8125..) and executed analyze_pending_safety directly against jl_m2.",
+    "Production jl was never written: only read-only SELECT/SHOW + --dry-run + --check were run against it. After all tests the 25-table list, memory rows/full 12-column fingerprint/SHOW CREATE sha, memory_item 0 rows/17 columns, absence of legacy_memory_id, and schema_migrations=only 0001 were identical to the pre-run snapshot; the positive-control probe table was not created.",
+    "No blocking bypass found. The allowlist admits only the documented narrow ALTER on memory_item (column/key absent), CREATE TABLE IF NOT EXISTS absent targets, and SET NAMES; adversarial fixtures for DROP/MODIFY/other tables/other columns/duplicate adds/multi-statement/executable comments/case/schema-qualified/quote-comma tricks all exit 2 before any plan or DDL.",
+    "Non-blocking observations: (a) an ALTER with only ADD COLUMN or only the UNIQUE KEY is accepted (still limited to the expected memory_item objects; key-only fails at execution and column-only would block the real 0002 later); (b) two separate allowed ALTER statements are accepted as two alters; (c) a legitimate COMMENT containing an ASCII ';' is conservatively refused (real 0002 uses full-width '；'); (d) CREATE TABLE IF NOT EXISTS rest-of-statement is not semantically validated (pre-existing, only creates a new table); (e) production rollback allowlist still does not admit 0002's down ALTER, so a future controlled prod rollback after applying 0002 would need an allowlist extension (out of scope here).",
+    "One verifier fixture initially contained an ASCII ';' inside its COMMENT and legitimately tripped the conservative ';' rejection; fixture corrected (no analyzer change) and the suite was re-run from a rebuilt fresh clone: final clean run 223 PASS / 0 FAIL.",
+    "Verifier wrote no code and committed nothing; only repo write is this receipt (uncommitted). Builder/Lead evidence dirs in /tmp remain; verifier /tmp/m1b1b-verify and tgz were removed after evidence download. jl_m2 is left at 0001+0002 applied with the legacy_memory_id column/unique key present."
+  ]
+}
