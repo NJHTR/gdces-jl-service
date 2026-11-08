@@ -89,13 +89,48 @@ def engine():
 
 
 # ---------------------------------------------------------------- handle_messages
+def _photos_from_parts(parts):
+    """从消息 parts 里还原图片 URL。聊天历史只存 blob sha，不还原就永远显示 [图片]。"""
+    if isinstance(parts, str):
+        try:
+            parts = json.loads(parts)
+        except Exception:
+            parts = []
+    out = []
+    for p in (parts or []):
+        if not isinstance(p, dict):
+            continue
+        if (p.get("type") or "").lower() != "image":
+            continue
+        blob = (p.get("blob") or p.get("sha") or "").strip()
+        if blob:
+            out.append("/api/v1/blobs/" + blob)
+    return out
+
+
+def _normalize_message_photos(m):
+    photos = m.get("photos")
+    if isinstance(photos, str):
+        try:
+            photos = json.loads(photos)
+        except Exception:
+            photos = []
+    photos = photos or []
+    if not photos:
+        photos = _photos_from_parts(m.pop("parts", None))
+    else:
+        m.pop("parts", None)
+    m["photos"] = photos
+    return m
+
+
 def handle_messages(params):
     project_id = q1(params, "projectId")
     if not project_id:
         return 400, {"code": 400, "message": "projectId 必填"}
     after = int(q1(params, "after", 0))
     user_id = q1(params, "userId")
-    sql = ("SELECT id, user_id, role, text, photos, trace, trace_sum, ms, task_id, created_at "
+    sql = ("SELECT id, user_id, role, text, photos, parts, trace, trace_sum, ms, task_id, created_at "
            "FROM message WHERE project_id=%s AND id > %s")
     args = [project_id, after]
     if user_id:
@@ -106,6 +141,7 @@ def handle_messages(params):
     for m in rows:
         if m.get("trace") and isinstance(m["trace"], str):
             m["trace"] = json.loads(m["trace"])
+        _normalize_message_photos(m)
         m["createdAt"] = str(m.pop("created_at", ""))
     return 200, {"code": 0, "data": {"list": rows, "lastId": rows[-1]["id"] if rows else after}}
 
@@ -512,7 +548,7 @@ def handle_bootstrap(params, user):
     # ---- 消息（含按天分组的时间戳）----
     msgs = []
     last_day = None
-    rows = q("SELECT id, role, text, photos, trace, trace_sum, ms, sync, created_at, cites, answer "
+    rows = q("SELECT id, role, text, photos, parts, trace, trace_sum, ms, sync, created_at, cites, answer "
              "FROM message WHERE project_id=%s ORDER BY id", (project_id,))
     for m in rows:
         day = m["created_at"].strftime("%Y-%m-%d")
@@ -521,10 +557,17 @@ def handle_bootstrap(params, user):
             md, week = _day_label(m["created_at"])
             msgs.append({"id": f"s-{day}", "type": "stamp", "text": f"{'今天' if week.startswith('今天') else md} {m['created_at'].strftime('%H:%M')}"})
         if m["role"] == "user":
+            photos = m["photos"]
+            if isinstance(photos, str):
+                try:
+                    photos = json.loads(photos)
+                except Exception:
+                    photos = []
+            photos = photos or _photos_from_parts(m.get("parts"))
             msgs.append({
                 "id": f"m{m['id']}", "type": "me", "text": m["text"] or "",
                 "time": m["created_at"].strftime("%H:%M"), "sync": bool(m["sync"]),
-                "photos": json.loads(m["photos"]) if m["photos"] and isinstance(m["photos"], str) else (m["photos"] or []),
+                "photos": photos,
                 "voice": False,
             })
         elif m["role"] == "assistant":
