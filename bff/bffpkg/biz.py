@@ -1568,7 +1568,7 @@ def handle_doc_get(doc_id, user=None):
     file_history = []
     try:
         from .report import form_file_history
-        file_history = form_file_history(d["project_id"], d["id"], d.get("updated_at"))
+        file_history = form_file_history(d["project_id"], d["id"])
         if file_history:
             file_info = file_history[0]
     except Exception as e:

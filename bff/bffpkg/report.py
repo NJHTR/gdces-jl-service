@@ -560,7 +560,7 @@ def build_form_docx(project_id, doc_id):
             "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path)))}
 
 
-def form_file_history(project_id, doc_id, doc_updated_at=None):
+def form_file_history(project_id, doc_id):
     """列出这份文书的全部历史 Word（旧版 form-doc<id>.docx 也算一条）。"""
     sub = _safe_name(project_id)
     out = []
@@ -579,12 +579,6 @@ def form_file_history(project_id, doc_id, doc_updated_at=None):
                 version = int(meta.get("version") or version)
         except Exception:
             pass
-        stale = False
-        if doc_updated_at is not None:
-            try:
-                stale = os.path.getmtime(path) < doc_updated_at.timestamp()
-            except Exception:
-                stale = False
         out.append({
             "exists": True,
             "url": "/api/v1/exports/%s/%s" % (sub, url_name),
@@ -592,15 +586,14 @@ def form_file_history(project_id, doc_id, doc_updated_at=None):
             "bytes": os.path.getsize(path),
             "version": version,
             "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
-            "stale": bool(stale),
         })
     out.sort(key=lambda x: (x.get("generatedAt") or "", x.get("version") or 0), reverse=True)
     return out
 
 
-def existing_form_file(project_id, doc_id, doc_updated_at=None):
+def existing_form_file(project_id, doc_id):
     """兼容旧调用：有历史文件就返回最新一份。"""
-    hist = form_file_history(project_id, doc_id, doc_updated_at)
+    hist = form_file_history(project_id, doc_id)
     if hist:
         return hist[0]
     return {"exists": False}
