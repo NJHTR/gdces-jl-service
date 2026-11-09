@@ -2,6 +2,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -1902,7 +1903,7 @@ def handle_photo_search(params, user=None):
     date_to = (q1(params, "dateTo") or "").strip()
     limit = min(int(q1(params, "limit") or 20), 100)
 
-    sql = ("SELECT id, sha256, place, weather, shot_at, src, caption, created_at "
+    sql = ("SELECT id, sha256, blob_path, place, weather, shot_at, src, caption, created_at "
            "FROM photo WHERE project_id=%s")
     argv = [pid]
     if kw:
@@ -1926,6 +1927,20 @@ def handle_photo_search(params, user=None):
         r["url"] = "/api/v1/blobs/" + r["sha256"]
         r["shot_at"] = str(r["shot_at"]) if r.get("shot_at") else None
         r["created_at"] = str(r["created_at"]) if r.get("created_at") else None
+        # easyCode 的 view_image 只认本地路径，不认 sha/url。
+        # 把候选图复制到项目工作区里的缓存目录，模型才能真的“看图”而不是只看 caption。
+        try:
+            src = r.get("blob_path") or os.path.join(BLOB_ROOT, r["sha256"][:2], r["sha256"])
+            if src and os.path.isfile(src):
+                cache = os.path.join(WS_ROOT, pid, ".cache", "photos")
+                os.makedirs(cache, exist_ok=True)
+                ext = os.path.splitext(src)[1] or ".jpg"
+                dst = os.path.join(cache, r["sha256"] + ext)
+                if not os.path.exists(dst):
+                    shutil.copyfile(src, dst)
+                r["path"] = dst
+        except Exception as e:
+            sys.stderr.write("[photo] 准备 view_image 路径失败 %s: %r\n" % (r.get("sha256"), e))
     return 200, {"code": 0, "data": rows, "total": len(rows)}
 
 

@@ -62,13 +62,14 @@ const TOOLS = [
         fields: { type: "object", description: "字段键值，如 {受检单位, 部位, 事由}" },
         bases: {
           type: "array",
-          description: "依据列表",
+          description:
+            "依据列表。照片依据放这里，不要放 fields：kind=photo, ref=照片 sha256, text=部位/时间/画面内容/为什么属于本记录。",
           items: {
             type: "object",
             properties: {
               kind: { type: "string", description: "rec / photo / rule / memo" },
-              ref: { type: "string", description: "msg_123 / photo_9 / JGJ130-2011#6.4.3" },
-              text: { type: "string" },
+              ref: { type: "string", description: "msg_123 / photo sha256 / JGJ130-2011#6.4.3" },
+              text: { type: "string", description: "人话依据；照片要写画面和关联理由" },
             },
           },
         },
@@ -94,7 +95,8 @@ const TOOLS = [
     name: "search_photos",
     description:
       "按描述/部位/日期查现场影像。描述是看过图后写的一句话，" +
-      "用来回答「这个部位以前查过什么」。返回 id、时间、部位、描述和原图地址。",
+      "用来回答「这个部位以前查过什么」。返回 id、时间、部位、描述、原图地址，" +
+      "以及可直接传给 view_image 的本地 path——先看图再判断，别只看描述选图。",
     inputSchema: {
       type: "object",
       properties: {
