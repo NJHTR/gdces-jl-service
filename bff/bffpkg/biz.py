@@ -1541,27 +1541,8 @@ def handle_doc_get(doc_id, user=None):
 
     bases = [nb for nb, _, _ in norm_bases]
 
-    # 记录类文书自动带出当天现场影像：省统表正文没有附件栏，但记录详情
-    # 必须能看到“今天拍了哪些图”，否则用户会觉得图片没有收进来。
-    if d["kind"] in ("监理日志", "旁站记录", "平行检查记录", "监理检查记录"):
-        try:
-            have = {str(x.get("ref") or "") for x in bases if isinstance(x, dict)}
-            rows_p = q("SELECT sha256, place, caption, note, work, created_at FROM photo "
-                       "WHERE project_id=%s AND DATE(created_at)=DATE(%s) "
-                       "ORDER BY created_at", (d["project_id"], d.get("created_at")))
-            for p in rows_p:
-                sha = p.get("sha256") or ""
-                if not sha or sha in have:
-                    continue
-                at = str(p.get("created_at") or "")[:16].replace("T", " ")
-                desc = (p.get("caption") or p.get("note") or p.get("work") or "").strip()
-                place = (p.get("place") or "").strip()
-                bases.append({
-                    "kind": "photo", "ref": sha,
-                    "text": " · ".join(x for x in (at, place, desc) if x) or ("现场影像 " + sha[:12]),
-                })
-        except Exception as e:
-            sys.stderr.write("[doc] 取当天影像失败 %s: %r\n" % (doc_id, e))
+    # 不再自动把“当天所有影像”塞进文书依据。
+    # 照片是证据，必须来自本轮明确上传/用户勾选；否则 A 的图会被带进 B 的记录。
 
     # 之前导出的 Word 是否还在：详情页要有“再次打开/历史版本”的入口
     file_info = {"exists": False}
@@ -1622,6 +1603,13 @@ def handle_doc_patch(doc_id, body, user=None):
             bases.append(b)
             have.add(ref)
 
+    remove_bases = body.get("removeBases") or []
+    if remove_bases and not isinstance(remove_bases, list):
+        return 400, {"code": 400, "message": "removeBases 必须是数组"}
+    if remove_bases:
+        drop = {str(x) for x in remove_bases}
+        bases = [b for b in bases if str((b or {}).get("ref") or "") not in drop]
+
     patch = body.get("fields") or {}
     if not isinstance(patch, dict):
         return 400, {"code": 400, "message": "fields 必须是对象"}
@@ -1635,8 +1623,8 @@ def handle_doc_patch(doc_id, body, user=None):
                 patch[_nk] = patch[_k]
             del patch[_k]
     # 允许只改状态（签发）、只补附件（bases）；不传 fields 也合法。
-    if not patch and not (body.get("state") or "").strip() and not add_bases:
-        return 400, {"code": 400, "message": "fields、state 或 bases 至少给一个"}
+    if not patch and not (body.get("state") or "").strip() and not add_bases and not remove_bases:
+        return 400, {"code": 400, "message": "fields、state、bases 或 removeBases 至少给一个"}
 
     # 允许补 schema 里的字段（不只是已有字段）。
     #

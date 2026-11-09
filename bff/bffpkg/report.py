@@ -511,10 +511,22 @@ def build_form_docx(project_id, doc_id):
 
     # 监理日志/记录类：省统表正文没有附件栏，但现场影像必须能跟着文件走。
     # 在正文后追加一页「附件清单」，不篡改省统表表格本身。
+    # 附件页只放这份文书明确关联的照片，不再按“当天所有图”自动带。
+    # 证据必须来自用户上传/勾选，否则 A 的图会被贴进 B 的记录。
     try:
-        photos = q("SELECT sha256, blob_path, place, caption, note, work, created_at FROM photo "
-                   "WHERE project_id=%s AND DATE(created_at)=DATE(%s) "
-                   "ORDER BY created_at", (project_id, d.get("created_at")))
+        bases = _loads(d.get("bases"))
+        refs = []
+        for b in (bases or []):
+            if isinstance(b, dict) and b.get("kind") == "photo" and b.get("ref"):
+                refs.append(str(b["ref"]))
+        photos = []
+        if refs:
+            ph = ",".join(["%s"] * len(refs))
+            rows_p = q("SELECT sha256, blob_path, place, caption, note, work, created_at FROM photo "
+                       "WHERE project_id=%s AND sha256 IN (" + ph + ")",
+                       tuple([project_id] + refs))
+            by_sha = {r["sha256"]: r for r in rows_p}
+            photos = [by_sha[x] for x in refs if x in by_sha]
     except Exception:
         photos = []
     if photos:
