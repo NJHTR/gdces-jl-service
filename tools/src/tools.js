@@ -170,15 +170,22 @@ function renderDoc({ kind, obj, fields, bases, missingKeys = [] }) {
 export async function createDocDraft({ projectId, kind, obj, fields, bases = [], body }) {
   if (!kind) throw new Error("缺 kind");
 
-  // 先问服务端缺什么（schema 是唯一出处），再排版 —— 工具不自己判
-  let missingKeys = [];
+  // schema 是唯一出处：先拿正式字段校验，字段名不在表里就拒绝写文件。
+  let chk;
   try {
-    const chk = await validateDoc({ kind, fields: fields || {} });
-    missingKeys = (chk.missing || []).concat(chk.placeholder || []);
+    chk = await validateDoc({ kind, fields: fields || {} });
   } catch (err) {
-    // 问不到就按「不知道」处理，绝不自己编缺项
-    console.error("[create_doc_draft] validate 失败，按无缺项排版:", err && err.message);
+    throw new Error("无法校验字段（" + ((err && err.message) || "网络异常") + "），先不写文书；请重试 validate_doc");
   }
+  if ((chk.unknown || []).length) {
+    const allowed = (chk.required || []).concat(chk.optional || []);
+    throw new Error(
+      "字段名不在 schema，已拒绝写入：" + chk.unknown.join("、") +
+      "；正式字段是：" + allowed.join("、") +
+      "；请用 get_schema 重新对照，把事实填到正式 key 后再提交"
+    );
+  }
+  const missingKeys = (chk.missing || []).concat(chk.placeholder || []);
   const { md } = renderDoc({ kind, obj, fields, bases, missingKeys });
   const missing = missingKeys;
 
@@ -251,6 +258,26 @@ export async function validateDoc({ kind, fields }) {
   const payload = await resp.json().catch(() => ({}));
   if (!resp.ok || payload.code !== 0) {
     throw new Error(`校验失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
+  }
+  return payload.data;
+}
+
+/* ---------------- get_schema ---------------- */
+/**
+ * 拿某类文书的正式字段表（required/optional/placeholders）。
+ * 模型必须按这张表去理解现场、找证据、逐项填；不要猜字段名。
+ */
+export async function getSchema({ kind }) {
+  if (!kind) throw new Error("缺 kind");
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}/api/v1/docs/schema`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind }),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    throw new Error(`取 schema 失败: ${resp.status} ${JSON.stringify(payload).slice(0, 200)}`);
   }
   return payload.data;
 }

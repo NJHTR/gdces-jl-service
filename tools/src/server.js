@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getSchema, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -52,14 +52,14 @@ const TOOLS = [
   {
     name: "create_doc_draft",
     description:
-      "在工作区生成一份文书草稿并 git 提交。提交信息必须先写依据，没有依据会被钩子拒绝。缺的字段会标「待补」，不影响生成。",
+      "在工作区生成一份文书草稿并 git 提交。先用 get_schema 拿正式字段名，再用 validate_doc 自查；字段名不在 schema 会被拒绝，不再猜别名。",
     inputSchema: {
       type: "object",
       properties: {
         projectId: { type: "string" },
-        kind: { type: "string", description: "旁站记录 / 监理通知单 / 监理日志" },
+        kind: { type: "string", description: "文书类型；先调用 get_schema(kind)" },
         obj: { type: "string", description: "对象，如 4#楼东侧外架" },
-        fields: { type: "object", description: "字段键值，如 {受检单位, 部位, 事由}" },
+        fields: { type: "object", description: "字段键值；key 必须来自 get_schema 的 required/optional，不能自造别名" },
         bases: {
           type: "array",
           description:
@@ -79,9 +79,21 @@ const TOOLS = [
     },
   },
   {
+    name: "get_schema",
+    description:
+      "拿某类文书的正式字段表：required / optional / placeholders / 来源说明。出稿第一步先调它，再按表去现场记录、照片、知识、记忆里逐项找证据；不要猜字段名。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", description: "文书类型，如 旁站记录 / 监理通知单 / 监理检查记录" },
+      },
+      required: ["kind"],
+    },
+  },
+  {
     name: "validate_doc",
     description:
-      "出稿前自查：按文书类型的 schema 检查字段齐不齐。占位词（待补/待定/未知…）会被当成缺。返回 {ok, missing, placeholder, unknown}。缺就继续打听/补齐，别硬写。",
+      "出稿前自查：按文书类型的 schema 检查字段齐不齐。返回 {ok, missing, placeholder, unknown, required, optional}。unknown 表示 key 写错，必须改成 required/optional 里的正式名；占位词也算缺。",
     inputSchema: {
       type: "object",
       properties: {
@@ -212,6 +224,7 @@ const HANDLERS = {
   search_standards: searchStandards,
   create_doc_draft: createDocDraft,
   validate_doc: validateDoc,
+  get_schema: getSchema,
   get_context: getContext,
   caption_photo: captionPhoto,
   search_photos: searchPhotos,

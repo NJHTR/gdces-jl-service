@@ -1371,7 +1371,26 @@ def handle_review_record(body, user=None):
                                      "verifiedBumped": bumped}}
 
 
-# ---------------------------------------------------------------- handle_doc_register
+# ---------------------------------------------------------------- handle_doc_schema
+def handle_doc_schema(body, user=None):
+    """把某类文书的正式字段表交给 agent：模型按表去找证据、逐项填，而不是猜字段名。"""
+    kind = (body.get("kind") or "").strip()
+    if not kind:
+        return 400, {"code": 400, "message": "kind 必填"}
+    schema = load_schema(kind)
+    if schema is None:
+        return 404, {"code": 404, "message": "没有这种文书的 schema：%s" % kind}
+    return 200, {"code": 0, "data": {
+        "kind": kind,
+        "required": list(schema.get("fields") or []),
+        "optional": list(schema.get("optional") or []),
+        "placeholders": list(schema.get("placeholders") or []),
+        "desc": schema.get("desc") or "",
+        "source": schema.get("source") or "",
+    }}
+
+
+# ---------------------------------------------------------------- handle_doc_validate
 def handle_doc_validate(body, user=None):
     """只校验，不落库。agent 出稿前自己先查一遍，别等 register 被打回。"""
     kind = (body.get("kind") or "").strip()
@@ -1384,7 +1403,12 @@ def handle_doc_validate(body, user=None):
     if not any(str(v or "").strip() for v in fields.values()):
         return 400, {"code": 400, "message": "这份文书没有任何字段内容；先向用户问清部位/事由，不要生成空文书"}
     check = validate_fields(kind, fields)
-    return 200, {"code": 0, "data": dict(check, kind=kind, schemas=list_schemas())}
+    schema = load_schema(kind) or {}
+    return 200, {"code": 0, "data": dict(
+        check, kind=kind, schemas=list_schemas(),
+        required=list(schema.get("fields") or []),
+        optional=list(schema.get("optional") or []),
+    )}
 
 
 def handle_doc_register(body, user=None):
@@ -1416,9 +1440,8 @@ def handle_doc_register(body, user=None):
     task_id = body.get("taskId") or None
 
     fields, bases = prepare_bases(fields, bases)
-    # 旧模板/模型常写「旁站部位 / 旁站开始时间」，先归一成 schema 的正式键，
-    # 否则明明填了，详情页仍按 required 显示一堆待补。
-    fields = normalize_fields(kind, fields)
+    # 不再在登记时猜旧字段名：模型必须先 get_schema 拿正式 key，再过 validate_doc。
+    # _FIELD_ALIASES 只保留给旧文书的读取兼容，不参与新文书生成。
 
     # 齐不齐由 schema 说了算（依据也算必填；占位词「待补」也算缺）
     check = validate_fields(kind, fields)
