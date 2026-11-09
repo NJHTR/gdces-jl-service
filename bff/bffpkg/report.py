@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import sys
 import time
 
 from .core import ROOT, q, validate_fields
@@ -501,22 +502,43 @@ def build_form_docx(project_id, doc_id):
     # 监理日志/记录类：省统表正文没有附件栏，但现场影像必须能跟着文件走。
     # 在正文后追加一页「附件清单」，不篡改省统表表格本身。
     try:
-        photos = q("SELECT sha256, place, caption, note, work, created_at FROM photo "
+        photos = q("SELECT sha256, blob_path, place, caption, note, work, created_at FROM photo "
                    "WHERE project_id=%s AND DATE(created_at)=DATE(%s) "
                    "ORDER BY created_at", (project_id, d.get("created_at")))
     except Exception:
         photos = []
     if photos:
         from docx import Document
+        from docx.shared import Cm
+        from PIL import Image
         doc = Document(path)
         doc.add_page_break()
         doc.add_paragraph("附件：现场影像（%d 张，非省统表正文）" % len(photos))
+        placed = 0
         for i, p in enumerate(photos, 1):
             at = str(p.get("created_at") or "")[:19].replace("T", " ")
             desc = (p.get("caption") or p.get("note") or p.get("work") or "").strip()
             place = (p.get("place") or "").strip()
             bits = [x for x in (at, place, desc) if x]
-            doc.add_paragraph("%d. %s  sha %s" % (i, " · ".join(bits), (p.get("sha256") or "")[:12]))
+            caption = "%d. %s  sha %s" % (i, " · ".join(bits), (p.get("sha256") or "")[:12])
+            if placed:
+                doc.add_page_break()
+            doc.add_paragraph(caption)
+            blob = (p.get("blob_path") or "").strip()
+            if blob and os.path.isfile(blob):
+                try:
+                    im = Image.open(blob)
+                    im = im.convert("RGB")
+                    im.thumbnail((1600, 1600))
+                    buf = io.BytesIO()
+                    im.save(buf, format="JPEG", quality=82, optimize=True)
+                    buf.seek(0)
+                    doc.add_picture(buf, width=Cm(15))
+                    placed += 1
+                except Exception as e:
+                    sys.stderr.write("[form] 贴图失败 %s: %r\n" % (blob, e))
+            if not placed:
+                doc.add_paragraph("（图片文件读取失败，仅保留影像记录）")
         doc.save(path)
     with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
         json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
