@@ -1416,6 +1416,9 @@ def handle_doc_register(body, user=None):
     task_id = body.get("taskId") or None
 
     fields, bases = prepare_bases(fields, bases)
+    # 旧模板/模型常写「旁站部位 / 旁站开始时间」，先归一成 schema 的正式键，
+    # 否则明明填了，详情页仍按 required 显示一堆待补。
+    fields = normalize_fields(kind, fields)
 
     # 齐不齐由 schema 说了算（依据也算必填；占位词「待补」也算缺）
     check = validate_fields(kind, fields)
@@ -1452,6 +1455,11 @@ _FIELD_ALIASES = {
         "实测值(mm)": "实测值",
         "检查事项": "检查内容",
         "检查情况": "检查内容",
+    },
+    "旁站记录": {
+        "旁站部位": "关键部位工序",
+        "旁站开始时间": "开始时间",
+        "旁站结束时间": "结束时间",
     },
 }
 
