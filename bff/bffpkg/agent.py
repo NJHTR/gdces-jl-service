@@ -617,7 +617,7 @@ def handle_bootstrap(params, user):
     # ---- 资料 ----
     docs = []
     for d in q("SELECT id, kind, obj, state, created_at FROM doc WHERE project_id=%s "
-               "ORDER BY created_at DESC LIMIT 30", (project_id,)):
+               "ORDER BY created_at DESC LIMIT 200", (project_id,)):
         tone = {"待补": "wait", "待签": "wait", "已签": "ok"}.get(d["state"], "wait")
         docs.append({
             "id": f"f{d['id']}", "kind": d["kind"][:3] if d["kind"] else "文书",
@@ -626,7 +626,7 @@ def handle_bootstrap(params, user):
             "icon": KIND_TO_ICON.get(d["kind"], "doc"), "visual": False,
         })
     for ph in q("SELECT id, sha256, place, shot_at FROM photo WHERE project_id=%s "
-                "ORDER BY id DESC LIMIT 10", (project_id,)):
+                "ORDER BY id DESC LIMIT 100", (project_id,)):
         docs.append({
             "id": f"p{ph['id']}", "kind": "影像",
             "name": f"{ph['place'] or '现场'} · 现场影像",
