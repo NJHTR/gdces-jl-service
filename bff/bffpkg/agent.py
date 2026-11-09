@@ -632,6 +632,8 @@ def handle_bootstrap(params, user):
             "name": f"{ph['place'] or '现场'} · 现场影像",
             "meta": ph["shot_at"].strftime("%m-%d %H:%M") if ph["shot_at"] else "",
             "state": "已上传", "tone": "sign", "icon": "cam", "visual": True,
+            "sha256": ph.get("sha256") or "",
+            "url": "/api/v1/blobs/" + (ph.get("sha256") or ""),
         })
 
     # ---- 记忆 ----
