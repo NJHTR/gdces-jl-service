@@ -6,6 +6,7 @@
 - 表式由省统表原件模板（GD-B-214）保证；这里只整理数据，不排版
 - 生成物落在 data/exports/<project>/，用 GET /api/v1/exports/<名称> 取
 """
+import glob
 import io
 import json
 import os
@@ -486,10 +487,19 @@ def build_form_docx(project_id, doc_id):
                     data[name] = ""
 
     display = "%s-%s-%s.docx" % (proj_name, kind, d.get("obj") or doc_id)
-    # URL 必须纯 ASCII：带中文时 urllib / wx.downloadFile 都会在请求行编码失败（踩过两次）
-    url_name = "form-doc%s.docx" % doc_id
+    # 每次生成保留一个历史版本，不再覆盖上一份。
     dest = os.path.join(EXPORT_ROOT, _safe_name(project_id))
     os.makedirs(dest, exist_ok=True)
+    version = 1
+    for old in glob.glob(os.path.join(dest, "form-doc%s*.docx" % doc_id)):
+        if old.endswith(".meta.json"):
+            continue
+        m = re.search(r"-v(\d+)\.docx$", old)
+        if m:
+            version = max(version, int(m.group(1)) + 1)
+        else:
+            version = max(version, 2)          # 旧的 form-doc<id>.docx 算 v1
+    url_name = "form-doc%s-v%d.docx" % (doc_id, version)
     path = os.path.join(dest, url_name)
 
     got = fill_forms(form_kind, [data], path)
@@ -541,39 +551,59 @@ def build_form_docx(project_id, doc_id):
                 doc.add_paragraph("（图片文件读取失败，仅保留影像记录）")
         doc.save(path)
     with io.open(path + ".meta.json", "w", encoding="utf-8") as f:
-        json.dump({"name": display, "docId": doc_id, "kind": kind}, f, ensure_ascii=False)
+        json.dump({"name": display, "docId": doc_id, "kind": kind,
+                   "version": version, "createdAt": time.strftime("%Y-%m-%d %H:%M")},
+                  f, ensure_ascii=False)
     return {"path": path, "name": display, "url_name": url_name,
-            "bytes": os.path.getsize(path), "docId": doc_id, "kind": kind}
+            "bytes": os.path.getsize(path), "docId": doc_id, "kind": kind,
+            "version": version,
+            "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path)))}
+
+
+def form_file_history(project_id, doc_id, doc_updated_at=None):
+    """列出这份文书的全部历史 Word（旧版 form-doc<id>.docx 也算一条）。"""
+    sub = _safe_name(project_id)
+    out = []
+    pattern = os.path.join(EXPORT_ROOT, sub, "form-doc%s*.docx" % doc_id)
+    for path in glob.glob(pattern):
+        if path.endswith(".meta.json") or not os.path.isfile(path):
+            continue
+        url_name = os.path.basename(path)
+        m = re.search(r"-v(\d+)\.docx$", url_name)
+        version = int(m.group(1)) if m else 1
+        name = "%s.docx" % doc_id
+        try:
+            with io.open(path + ".meta.json", encoding="utf-8") as f:
+                meta = json.load(f) or {}
+                name = meta.get("name") or name
+                version = int(meta.get("version") or version)
+        except Exception:
+            pass
+        stale = False
+        if doc_updated_at is not None:
+            try:
+                stale = os.path.getmtime(path) < doc_updated_at.timestamp()
+            except Exception:
+                stale = False
+        out.append({
+            "exists": True,
+            "url": "/api/v1/exports/%s/%s" % (sub, url_name),
+            "name": name,
+            "bytes": os.path.getsize(path),
+            "version": version,
+            "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
+            "stale": bool(stale),
+        })
+    out.sort(key=lambda x: (x.get("generatedAt") or "", x.get("version") or 0), reverse=True)
+    return out
 
 
 def existing_form_file(project_id, doc_id, doc_updated_at=None):
-    """查这份文书之前导出的 Word 是否还在；在就返回可再次打开的入口。
-
-    只做 stat，不重新生成。文件比文书旧则标记 stale，前端提示“重新生成”。
-    """
-    url_name = "form-doc%s.docx" % doc_id
-    sub = _safe_name(project_id)
-    path = os.path.join(EXPORT_ROOT, sub, url_name)
-    if not os.path.isfile(path):
-        return {"exists": False}
-    name = "%s.docx" % doc_id
-    try:
-        with io.open(path + ".meta.json", encoding="utf-8") as f:
-            name = (json.load(f) or {}).get("name") or name
-    except Exception:
-        pass
-    stale = False
-    if doc_updated_at is not None:
-        try:
-            stale = os.path.getmtime(path) < doc_updated_at.timestamp()
-        except Exception:
-            stale = False
-    return {
-        "exists": True, "url": "/api/v1/exports/%s/%s" % (sub, url_name),
-        "name": name, "bytes": os.path.getsize(path),
-        "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
-        "stale": bool(stale),
-    }
+    """兼容旧调用：有历史文件就返回最新一份。"""
+    hist = form_file_history(project_id, doc_id, doc_updated_at)
+    if hist:
+        return hist[0]
+    return {"exists": False}
 
 
 # ---------------------------------------------------------------- 按天出表（监理日志等）
