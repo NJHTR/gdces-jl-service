@@ -858,6 +858,16 @@ def build_answer(doc, cites, text):
         "rich": rich_reply(text, missing if missing else None),
         "gaps": missing,
         "text": text,
+        # 卡片必须跟着消息一起落库：否则刷新/重进页面，聊天里只剩文字，
+        # 文书卡片消失（前端只从 task 的即时返回里拿 artifact）。
+        "artifact": ({
+            "id": doc.get("id"), "kind": doc.get("kind") or "文书",
+            "obj": doc.get("obj") or "", "state": doc.get("state") or "",
+            "path": doc.get("path") or "",
+            "commit": (doc.get("git_commit") or "")[:10],
+            "name": (doc.get("kind") or "文书") +
+                    (" · " + doc["obj"] if doc.get("obj") else ""),
+        } if doc else None),
     }
 
 

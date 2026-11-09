@@ -548,8 +548,26 @@ def handle_bootstrap(params, user):
     # ---- 消息（含按天分组的时间戳）----
     msgs = []
     last_day = None
-    rows = q("SELECT id, role, text, photos, parts, trace, trace_sum, ms, sync, created_at, cites, answer "
+    rows = q("SELECT id, role, text, photos, parts, trace, trace_sum, ms, sync, created_at, cites, answer, task_id "
              "FROM message WHERE project_id=%s ORDER BY id", (project_id,))
+    # 旧消息的 answer 里没有 artifact，但 task.doc_id 还在；批量补出来，
+    # 否则重新进页面后聊天里的文书卡片会消失。
+    artifact_by_task = {}
+    task_ids = sorted({m["task_id"] for m in rows if m.get("task_id") and m.get("role") == "assistant"})
+    if task_ids:
+        try:
+            ph = ",".join(["%s"] * len(task_ids))
+            for r in q("SELECT t.id AS task_id, d.id, d.kind, d.obj, d.state, d.path, d.git_commit "
+                       "FROM task t JOIN doc d ON d.id=t.doc_id WHERE t.id IN (" + ph + ")",
+                       tuple(task_ids)):
+                artifact_by_task[r["task_id"]] = {
+                    "id": r["id"], "kind": r["kind"] or "文书", "obj": r["obj"] or "",
+                    "state": r["state"] or "", "path": r["path"] or "",
+                    "commit": (r["git_commit"] or "")[:10],
+                    "name": (r["kind"] or "文书") + (" · " + r["obj"] if r["obj"] else ""),
+                }
+        except Exception as e:
+            sys.stderr.write("[bootstrap] 补历史文书卡失败: %r\n" % (e,))
     for m in rows:
         day = m["created_at"].strftime("%Y-%m-%d")
         if day != last_day:
@@ -574,13 +592,23 @@ def handle_bootstrap(params, user):
             trace = m["trace"]
             if isinstance(trace, str):
                 trace = json.loads(trace)
+            answer = m["answer"]
+            if isinstance(answer, str):
+                try:
+                    answer = json.loads(answer) if answer else None
+                except Exception:
+                    answer = None
+            artifact = (answer or {}).get("artifact") if isinstance(answer, dict) else None
+            if not artifact:
+                artifact = artifact_by_task.get(m.get("task_id"))
             msgs.append({
                 "id": f"a{m['id']}", "type": "agent", "text": m["text"] or "",
                 "time": m["created_at"].strftime("%H:%M"),
                 "trace": trace or [], "traceSum": m["trace_sum"], "ms": m["ms"],
                 "msLabel": ms_label(m["ms"]),
                 "cites": json.loads(m["cites"]) if isinstance(m["cites"], str) else (m["cites"] or []),
-                "answer": json.loads(m["answer"]) if isinstance(m["answer"], str) else (m["answer"] or None),
+                "answer": answer,
+                "artifact": artifact,
             })
 
     # ---- 记录（按天分组）----
