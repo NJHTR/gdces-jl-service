@@ -1563,10 +1563,19 @@ def handle_doc_get(doc_id, user=None):
         except Exception as e:
             sys.stderr.write("[doc] 取当天影像失败 %s: %r\n" % (doc_id, e))
 
+    # 之前导出的 Word 是否还在：详情页要有“再次打开”的入口
+    file_info = {"exists": False}
+    try:
+        from .report import existing_form_file
+        file_info = existing_form_file(d["project_id"], d["id"], d.get("updated_at"))
+    except Exception as e:
+        sys.stderr.write("[doc] 查导出文件失败 %s: %r\n" % (doc_id, e))
+
     return 200, {"code": 0, "data": {
         "id": d["id"], "projectId": d["project_id"], "kind": d["kind"], "obj": d["obj"],
         "state": d["state"], "fields": fields or {}, "missing": missing,
         "bases": bases or [], "path": d["path"], "commit": (d["git_commit"] or "")[:10],
+        "file": file_info,
         "createdAt": str(d["created_at"] or ""), "updatedAt": str(d["updated_at"] or ""),
     }}
 

@@ -546,6 +546,36 @@ def build_form_docx(project_id, doc_id):
             "bytes": os.path.getsize(path), "docId": doc_id, "kind": kind}
 
 
+def existing_form_file(project_id, doc_id, doc_updated_at=None):
+    """查这份文书之前导出的 Word 是否还在；在就返回可再次打开的入口。
+
+    只做 stat，不重新生成。文件比文书旧则标记 stale，前端提示“重新生成”。
+    """
+    url_name = "form-doc%s.docx" % doc_id
+    sub = _safe_name(project_id)
+    path = os.path.join(EXPORT_ROOT, sub, url_name)
+    if not os.path.isfile(path):
+        return {"exists": False}
+    name = "%s.docx" % doc_id
+    try:
+        with io.open(path + ".meta.json", encoding="utf-8") as f:
+            name = (json.load(f) or {}).get("name") or name
+    except Exception:
+        pass
+    stale = False
+    if doc_updated_at is not None:
+        try:
+            stale = os.path.getmtime(path) < doc_updated_at.timestamp()
+        except Exception:
+            stale = False
+    return {
+        "exists": True, "url": "/api/v1/exports/%s/%s" % (sub, url_name),
+        "name": name, "bytes": os.path.getsize(path),
+        "generatedAt": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(path))),
+        "stale": bool(stale),
+    }
+
+
 # ---------------------------------------------------------------- 按天出表（监理日志等）
 def _supervision_lines(b, limit=8):
     """当日监理工作：按文书类型汇总 + 影像张数（只陈述做了什么，不评价）。"""
