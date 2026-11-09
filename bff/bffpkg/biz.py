@@ -1582,13 +1582,33 @@ def handle_doc_patch(doc_id, body, user=None):
             fields = {}
     fields = dict(fields or {})
 
+    bases = d["bases"]
+    if isinstance(bases, str):
+        try:
+            bases = json.loads(bases)
+        except Exception:
+            bases = []
+    bases = list(bases or [])
+    add_bases = body.get("bases") or []
+    if add_bases and not isinstance(add_bases, list):
+        return 400, {"code": 400, "message": "bases 必须是数组"}
+    if add_bases:
+        have = {str(x.get("ref") or "") for x in bases if isinstance(x, dict)}
+        for b in add_bases:
+            if not isinstance(b, dict):
+                continue
+            ref = str(b.get("ref") or "").strip()
+            if not ref or ref in have:
+                continue
+            bases.append(b)
+            have.add(ref)
+
     patch = body.get("fields") or {}
     if not isinstance(patch, dict):
         return 400, {"code": 400, "message": "fields 必须是对象"}
-    # 允许「只改状态」（比如签发）：不传 fields 就只动 state。
-    # 原来强制 fields 必填，导致签发时还得把全部字段重发一遍。
-    if not patch and not (body.get("state") or "").strip():
-        return 400, {"code": 400, "message": "fields 或 state 至少给一个"}
+    # 允许只改状态（签发）、只补附件（bases）；不传 fields 也合法。
+    if not patch and not (body.get("state") or "").strip() and not add_bases:
+        return 400, {"code": 400, "message": "fields、state 或 bases 至少给一个"}
 
     # 允许补 schema 里的字段（不只是已有字段）。
     #
@@ -1626,8 +1646,9 @@ def handle_doc_patch(doc_id, body, user=None):
     state = wanted or ("待补" if missing else "待签")
 
     prev_state = d.get("state")
-    exec_sql("UPDATE doc SET fields=%s, state=%s, updated_at=NOW(3) WHERE id=%s",
-             (json.dumps(fields, ensure_ascii=False), state, doc_id))
+    exec_sql("UPDATE doc SET fields=%s, bases=%s, state=%s, updated_at=NOW(3) WHERE id=%s",
+             (json.dumps(fields, ensure_ascii=False), json.dumps(bases, ensure_ascii=False),
+              state, doc_id))
     # 人签发 = 依据被确认：引用账本 verified +1。
     # 只在「从未签 → 已签」这一次生效，否则重复 PUT 会把权威度刷上去。
     if state == "已签" and prev_state != "已签":
@@ -1635,15 +1656,16 @@ def handle_doc_patch(doc_id, body, user=None):
 
     # 写回工作区并提交，保证"文档=仓库里的文件"
     try:
-        update_doc_file(d["project_id"], doc_id, d["kind"], d["obj"], fields, d.get("bases"))
+        update_doc_file(d["project_id"], doc_id, d["kind"], d["obj"], fields, bases)
     except Exception as e:
         sys.stderr.write(f"[doc] 回写失败 {doc_id}: {e}\n")
 
     audit(d["project_id"], user["id"] if user else 1, "doc.update", f"doc:{doc_id}",
-          json.dumps({"fields": list(patch.keys()), "state": state}, ensure_ascii=False))
+          json.dumps({"fields": list(patch.keys()), "bases": len(bases), "state": state},
+                     ensure_ascii=False))
     return 200, {"code": 0, "data": {"id": doc_id, "state": state, "missing": missing,
                                        "dropped": dropped,
-                                     "fields": fields}}
+                                     "fields": fields, "bases": bases}}
 
 
 # ---------------------------------------------------------------- 文书渲染（唯一实现）
