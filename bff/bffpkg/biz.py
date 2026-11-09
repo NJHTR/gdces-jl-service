@@ -1445,6 +1445,13 @@ _FIELD_ALIASES = {
         "当日存在问题及处理情况": "当日存在问题及处理",
         "其他有关事项": "其他事项",
     },
+    "监理检查记录": {
+        "钢筋保护层厚度实测值": "实测值",
+        "保护层厚度实测值": "实测值",
+        "实测值(mm)": "实测值",
+        "检查事项": "检查内容",
+        "检查情况": "检查内容",
+    },
 }
 
 
@@ -1606,6 +1613,15 @@ def handle_doc_patch(doc_id, body, user=None):
     patch = body.get("fields") or {}
     if not isinstance(patch, dict):
         return 400, {"code": 400, "message": "fields 必须是对象"}
+    # 模型/历史字段有时用旧名；补字段时先归一到 schema 的键，否则用户填了
+    # “钢筋保护层厚度实测值”，必填的「实测值」还是待补。
+    _alias = _FIELD_ALIASES.get(d["kind"]) or {}
+    for _k in list(patch.keys()):
+        _nk = _alias.get(_k)
+        if _nk and _nk != _k:
+            if not patch.get(_nk):
+                patch[_nk] = patch[_k]
+            del patch[_k]
     # 允许只改状态（签发）、只补附件（bases）；不传 fields 也合法。
     if not patch and not (body.get("state") or "").strip() and not add_bases:
         return 400, {"code": 400, "message": "fields、state 或 bases 至少给一个"}
