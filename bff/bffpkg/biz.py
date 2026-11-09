@@ -1975,6 +1975,52 @@ def handle_photo_search(params, user=None):
     return 200, {"code": 0, "data": rows, "total": len(rows)}
 
 
+# ---------------------------------------------------------------- handle_project_files
+def handle_project_files(params, user=None):
+    """项目资料页：文书 / 现场影像 / 已导出文件 / 项目概况。
+
+    只返回展示需要的字段，不暴露工作区路径、git、.agent。
+    """
+    pid = q1(params, "projectId")
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    deny = guard_project(pid, user)
+    if deny:
+        return deny
+
+    docs = q("SELECT id, kind, obj, state, path, created_at FROM doc "
+             "WHERE project_id=%s ORDER BY created_at DESC, id DESC", (pid,))
+    for d in docs:
+        d["created_at"] = str(d.get("created_at") or "")
+
+    photos = q("SELECT id, sha256, place, weather, shot_at, src, caption, created_at "
+               "FROM photo WHERE project_id=%s ORDER BY created_at DESC, id DESC", (pid,))
+    for p in photos:
+        p["url"] = "/api/v1/blobs/" + p["sha256"]
+        p["shot_at"] = str(p["shot_at"] or p["created_at"] or "")
+        p["created_at"] = str(p.get("created_at") or "")
+
+    exports = []
+    try:
+        from .report import form_file_history
+        for d in docs:
+            for f in form_file_history(pid, d["id"]):
+                f["docId"] = d["id"]
+                f["docKind"] = d.get("kind") or ""
+                f["docObj"] = d.get("obj") or ""
+                exports.append(f)
+        exports.sort(key=lambda x: (x.get("generatedAt") or "", x.get("version") or 0), reverse=True)
+    except Exception as e:
+        sys.stderr.write("[project-files] 导出文件列表失败 %s: %r\n" % (pid, e))
+
+    return 200, {"code": 0, "data": {
+        "project": get_project(pid),
+        "docs": docs,
+        "photos": photos,
+        "exports": exports,
+    }}
+
+
 # ---------------------------------------------------------------- handle_stats
 def handle_stats(params, user=None):
     pid = q1(params, "projectId")
