@@ -580,42 +580,75 @@ paths:
         '200': { description: 成功 }
 
   # ---------------------------------------------------------------- 记忆
+  # 记忆分两个域（详见 docs/MEMORY-ACCEPTANCE.md）：
+  #   memory 表 = 唯一账本；memory_candidate = 待确认候选；文件（MEMORY.md / projects/... / memory_summary.md / rules.md）= 渲染视图。
+  # 写入审批：项目级规矩必须走 rule_proposal 或 memory_candidate(scope=project) 的提案，由总监/owner/admin 确认；
+  #          个人记忆（scope=user）只能本人读写。
   /api/v1/memories:
     get:
       tags: [记忆]
       x-owner: agent
-      summary: 记忆列表
+      summary: 记忆列表（memory 表；文件视图另见 memory_summary/MEMORY.md/rules.md）
+      description: |
+        scope=user 时只能查本人（ownerId 必须是当前 token 用户，否则 403；演示模式匿名放行）。
+        scope=project 时需要项目成员。
       parameters:
         - name: scope
           in: query
+          required: true
           schema: { type: string, enum: [user, project] }
         - name: ownerId
           in: query
+          required: true
+          description: scope=user 时是 user_id；scope=project 时是 project_id
+          schema: { type: string }
+        - name: projectId
+          in: query
+          description: scope=user 时用于筛「本项目」的个人记忆
           schema: { type: string }
       responses:
         '200': { description: 成功 }
+        '403': { description: 查看他人个人记忆 / 非项目成员 }
     post:
       tags: [记忆]
       x-owner: agent
-      summary: 新增记忆
+      summary: 新增记忆（scope=project 时只创建待确认提案，不直接生效）
+      description: |
+        scope=user：登录用户只能写自己（ownerId 必须等于 token 用户）。
+        scope=project：不写 memory，只插入 rule_proposal(pending)；总监/owner 确认后才写 memory + 重渲染 rules.md。
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                scope: { type: string, enum: [user, project] }
-                ownerId: { type: string }
-                text: { type: string }
+            schema: { $ref: '#/components/schemas/MemoryCreate' }
+      responses:
+        '200': { description: '成功；scope=project 时返回 {id,status:"pending",proposal:true}' }
+        '403': { description: 替他人写个人记忆 / 非项目成员 }
+
+  /api/v1/memories/recall:
+    get:
+      tags: [记忆]
+      x-owner: agent
+      summary: 按关键词找记忆（项目规矩 + 我的记忆 + 我在这个项目的习惯），命中 hits+1
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, example: 整改回复 }
+        - name: userId
+          in: query
+          description: 只允许本人（传他人 userId → 403；匿名演示放行）
+          schema: { type: string }
       responses:
         '200': { description: 成功 }
+        '403': { description: 查询他人记忆 }
 
   /api/v1/memories/{memoryId}:
     patch:
       tags: [记忆]
       x-owner: agent
-      summary: 改记忆
+      summary: 改记忆（个人记忆仅本人；项目记忆仅总监/owner/admin）
       parameters:
         - name: memoryId
           in: path
@@ -628,14 +661,18 @@ paths:
             schema:
               type: object
               properties:
-                text: { type: string }
-                status: { type: string, enum: [active, disabled] }
+                text: { type: string, maxLength: 512 }
+                status:
+                  type: integer
+                  description: 1=生效 0=停用（历史文档曾写 active/disabled，真实实现按真值转 1/0）
+                  example: 1
       responses:
         '200': { description: 成功 }
+        '403': { description: 非本人 / 非总监 }
     delete:
       tags: [记忆]
       x-owner: agent
-      summary: 删记忆
+      summary: 删记忆（个人记忆仅本人；项目记忆仅总监/owner/admin）
       parameters:
         - name: memoryId
           in: path
@@ -643,6 +680,152 @@ paths:
           schema: { type: integer }
       responses:
         '200': { description: 成功 }
+        '403': { description: 非本人 / 非总监 }
+
+  /api/v1/metrics/memory:
+    get:
+      tags: [记忆]
+      x-owner: biz
+      summary: 记忆指标（主动写/复用/撤销率/提案确认率）
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200': { description: 成功 }
+
+  # ---------------------------------------------------------------- 项目规矩提案
+  /api/v1/rule-proposals:
+    get:
+      tags: [记忆]
+      x-owner: biz
+      summary: 项目规矩提案列表（默认 pending）
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, accepted, rejected], default: pending }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/RuleProposal' }
+    post:
+      tags: [记忆]
+      x-owner: biz
+      summary: 提交项目规矩提案（pending；不写 memory / rules.md）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RuleProposalCreate' }
+      responses:
+        '200': { description: '成功：{id,status:"pending",duplicated?}' }
+
+  /api/v1/rule-proposals/{proposalId}/accept:
+    post:
+      tags: [记忆]
+      x-owner: biz
+      summary: 确认项目规矩提案（仅总监/owner/admin；确认才写 memory + 重渲染 rules.md + audit）
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200': { description: '成功：{id,status:"accepted",memoryId,rendered}' }
+        '403': { description: 普通成员 / 非项目成员 }
+        '409': { description: 已处理过 }
+
+  /api/v1/rule-proposals/{proposalId}/reject:
+    post:
+      tags: [记忆]
+      x-owner: biz
+      summary: 否决项目规矩提案（只改状态，不写 memory / 文件）
+      parameters:
+        - $ref: '#/components/parameters/ProposalId'
+      responses:
+        '200': { description: '成功：{id,status:"rejected"}' }
+        '409': { description: 已处理过 }
+
+  # ---------------------------------------------------------------- 记忆候选（Phase1）
+  # 候选只是"待确认"：pending 永远不写 memory、不渲染文件、不进提示；accept 才落 memory。
+  # scope：user=跨项目个人 / project_user=个人×本项目 / project=项目共享（仅总监确认）。
+  /api/v1/memory-candidates:
+    get:
+      tags: [记忆]
+      x-owner: agent
+      summary: 记忆候选列表（默认 pending）
+      description: user/project_user 只能看本人；project 需项目成员。
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string }
+        - name: userId
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, accepted, rejected], default: pending }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/MemoryCandidate' }
+    post:
+      tags: [记忆]
+      x-owner: agent
+      summary: 新建记忆候选（服务端/Agent 写入；只写 pending，不写 memory/rules.md）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemoryCandidateCreate' }
+      responses:
+        '200': { description: '成功：{id,status:"pending"}；重复 pending 返回原 id + duplicated:true' }
+        '400': { description: scope/text/projectId 不合法 }
+        '403': { description: 替他人提交个人候选 / 非项目成员 }
+
+  /api/v1/memory-candidates/{candidateId}/accept:
+    post:
+      tags: [记忆]
+      x-owner: agent
+      summary: 接受候选（user/project_user 本人；project 仅总监/owner/admin）
+      description: |
+        user → memory(scope=user, project_id=NULL) + 重渲染 MEMORY.md/memory_summary.md；
+        project_user → memory(scope=user, project_id=<pid>) + 重渲染个人×项目文件；
+        project → memory(scope=project, source=confirmed) + 重渲染 records/rules.md + audit。
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '200': { description: '成功：{id,status:"accepted",memoryId,rendered?,summary?}' }
+        '403': { description: 非本人 / 普通成员接受项目候选 }
+        '404': { description: 候选不存在 }
+        '409': { description: 已处理过 }
+
+  /api/v1/memory-candidates/{candidateId}/reject:
+    post:
+      tags: [记忆]
+      x-owner: agent
+      summary: 拒绝候选（只改状态；不写 memory / 文件；写 audit）
+      parameters:
+        - $ref: '#/components/parameters/CandidateId'
+      responses:
+        '200': { description: '成功：{id,status:"rejected"}' }
+        '403': { description: 非本人 }
+        '404': { description: 候选不存在 }
+        '409': { description: 已处理过 }
 
   # ---------------------------------------------------------------- 规范
   /api/v1/standards:
@@ -780,6 +963,16 @@ components:
       schema: { type: integer }
     TaskId:
       name: taskId
+      in: path
+      required: true
+      schema: { type: integer }
+    ProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema: { type: integer }
+    CandidateId:
+      name: candidateId
       in: path
       required: true
       schema: { type: integer }
@@ -981,3 +1174,72 @@ components:
               type: array
               items: { type: string }
             text: { type: string }
+
+    # ---------------- 记忆（Phase1 候选 / 旧 /memories / 项目规矩提案）
+    MemoryCreate:
+      type: object
+      required: [scope, ownerId, text]
+      properties:
+        scope: { type: string, enum: [user, project] }
+        ownerId: { type: string, description: scope=user 时是 user_id；scope=project 时是 project_id }
+        projectId: { type: string, description: scope=user 时表示「本项目习惯」；跨项目不传 }
+        text: { type: string, maxLength: 512 }
+        source: { type: string, example: manual }
+        sourceRef: { type: string }
+
+    MemoryCandidateCreate:
+      type: object
+      required: [projectId, userId, scope, text]
+      properties:
+        projectId: { type: string, example: test-sandbox }
+        userId: { type: string, example: '99999' }
+        scope:
+          type: string
+          enum: [user, project_user, project]
+          description: user=跨项目个人 / project_user=个人×本项目 / project=项目共享
+        text: { type: string, maxLength: 512 }
+        evidence: { type: string, description: 用户原话 / 字段改动摘录 }
+        sourceTaskId: { type: integer }
+        sourceMessageId: { type: integer }
+
+    MemoryCandidate:
+      type: object
+      properties:
+        id: { type: integer }
+        projectId: { type: string }
+        userId: { type: string }
+        scope: { type: string, enum: [user, project_user, project] }
+        scopeLabel: { type: string, example: 本项目习惯 }
+        text: { type: string }
+        evidence: { type: string, nullable: true }
+        sourceTaskId: { type: integer, nullable: true }
+        sourceMessageId: { type: integer, nullable: true }
+        status: { type: string, enum: [pending, accepted, rejected] }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, nullable: true }
+        createdAt: { type: string }
+
+    RuleProposalCreate:
+      type: object
+      required: [projectId, text]
+      properties:
+        projectId: { type: string }
+        text: { type: string, maxLength: 512 }
+        source: { type: string, default: agent, example: agent }
+        sourceRef: { type: string }
+        evidence: { type: string }
+
+    RuleProposal:
+      type: object
+      properties:
+        id: { type: integer }
+        project_id: { type: string }
+        user_id: { type: string, nullable: true }
+        text: { type: string }
+        source: { type: string }
+        source_ref: { type: string, nullable: true }
+        evidence: { type: string, nullable: true }
+        status: { type: string, enum: [pending, accepted, rejected] }
+        decided_by: { type: string, nullable: true }
+        decided_at: { type: string, nullable: true }
+        created_at: { type: string }

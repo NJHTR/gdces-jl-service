@@ -16,6 +16,7 @@
 测试项目用 yun-gu-3qi（真实成员：user1=owner, user2=engineer），临时数据全部清理。
 """
 import argparse
+import glob
 import json
 import os
 import subprocess
@@ -67,10 +68,33 @@ def add_project_memory(core, pid, text):
         (pid, text, "project:%s" % pid))
 
 
+def _test_notes(core):
+    """handle_memory_create 写个人笔记的落点：homes/<uid>/memories/extensions/ad_hoc/notes/。
+    返回内容里带测试前缀的 note 文件（QA O1：之前 cleanup 只清 DB，note 会残留）。"""
+    out = []
+    pattern = os.path.join(core.HOMES_ROOT, "*", "memories", "extensions",
+                           "ad_hoc", "notes", "*.md")
+    for path in glob.glob(pattern):
+        try:
+            with open(path, encoding="utf-8") as f:
+                body = f.read()
+        except OSError:
+            continue
+        if PREFIX in body:
+            out.append(path)
+    return out
+
+
 def cleanup(core, biz, pid):
     core.exec_sql("DELETE FROM memory WHERE text LIKE %s", ("%" + PREFIX + "%",))
     core.exec_sql("DELETE FROM memory_candidate WHERE text LIKE %s", ("%" + PREFIX + "%",))
     core.exec_sql("DELETE FROM rule_proposal WHERE text LIKE %s", ("%" + PREFIX + "%",))
+    # QA O1：清 个人笔记 ad_hoc/notes 里的测试 note（只删内容含测试前缀的，不碰真人笔记）
+    for path in _test_notes(core):
+        try:
+            os.remove(path)
+        except OSError:
+            traceback.print_exc()
     try:
         biz.render_rules_md(pid)
         # 个人记忆文件也要把测试行刷掉（测试会写 owner 的 MEMORY.md）
@@ -173,6 +197,7 @@ def run_unit():
     finally:
         cleanup(core, biz, pid)
         check("unit 测试后 rules.md 恢复基线", _read_rules(core, pid) == rules_before)
+        check("O1 unit 测试 ad_hoc note 已清理", not _test_notes(core))
 
 
 # ---------------------------------------------------------------- http（端到端）
@@ -261,6 +286,7 @@ def run_http():
         cleanup(core, biz, pid)
         core.exec_sql("DELETE FROM auth_token WHERE device=%s", ("perm-test",))
         check("HTTP 测试后 rules.md 恢复基线", _read_rules(core, pid) == rules_before)
+        check("O1 HTTP 测试 ad_hoc note 已清理", not _test_notes(core))
 
 
 def _health_ok():
