@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getSchema, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule, annotatePhoto, comparePhotos } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getSchema, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule, annotatePhoto, comparePhotos, sendPhoto } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -263,6 +263,25 @@ const TOOLS = [
     },
   },
   {
+    name: "send_photo",
+    description:
+      "把一张**真实项目现场照片**直接发给用户看（回答里出现这张照片；只引用，不改图）。" +
+      "用户说「发张图片/给我看照片/把照片X发我/随便发张图」时用这个，**不要用文字描述代替图片**。" +
+      "photoId 必须先用 search_photos 查到真实 id（可按部位/日期/描述搜），不能编；" +
+      "照片不存在、不属于本项目或不是图片就如实告诉用户（例如「没有找到这张照片」），不要伪造、不要用 shell/python 画图。" +
+      "同一张照片本轮重复调用会自动去重；单轮最多 4 张图。调完在正文里照常写一句话。" +
+      "命令行格式：jl-tool send_photo '{\"projectId\":\"...\",\"photoId\":<id>,\"caption\":\"...\"}'（argv JSON，不是 stdin/管道）。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        photoId: { type: "number", description: "真实照片 id（先用 search_photos 查）" },
+        caption: { type: "string", description: "图片说明（可选，如 4#楼东侧外架现场）" },
+      },
+      required: ["projectId", "photoId"],
+    },
+  },
+  {
     name: "get_context",
     description: "一次性拿到项目信息 + 项目记忆 + 工作区路径。会话开始时用，省得连调几个工具。",
     inputSchema: {
@@ -288,6 +307,7 @@ const HANDLERS = {
   recall_memory: recallMemory,
   annotate_photo: annotatePhoto,
   compare_photos: comparePhotos,
+  send_photo: sendPhoto,
 };
 
 function send(msg) {
@@ -346,7 +366,7 @@ async function handle(msg) {
         return ok(id, { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
       } catch (e) {
         let extra = "";
-        if (name === "annotate_photo" || name === "compare_photos") {
+        if (name === "annotate_photo" || name === "compare_photos" || name === "send_photo") {
           extra = `\n用法：jl-tool ${name} '<JSON>'（JSON 作为第二个参数，不是 stdin/管道/heredoc）。` +
             "不要把失败改成用 shell/python 自己画图；如实告诉用户失败原因。";
         }

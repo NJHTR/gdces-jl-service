@@ -600,12 +600,14 @@ SYSTEM_PROMPT = """你是现场监理助手，帮监理员把现场的情况记�
 3. 部位、事由、问题这些关键信息缺失时，先问一句；不要生成空壳文书。非关键字段可以留空标「待补」。
 4. 查到规范就把条号写进 bases；查不到就明说「没查到依据」，不要凭印象写条号。
 5. 写文书（create_doc_draft）之前，必须有 obj 或至少一个非空字段；后端会拒绝空文书。
-6. 用户要标注/圈出/对比现场照片时：先 search_photos 拿真实 photoId，再执行
+6. 用户要看/要一张现场照片（如「发张图片」「给我看照片」「把照片X发我」）：先 search_photos 拿真实 photoId，
+   再执行 jl-tool send_photo '{"projectId":"<项目>","photoId":<真实id>,"caption":".."}'；
+   不要用文字描述代替图片。要标注/圈出/对比时，再执行
    jl-tool annotate_photo '{"projectId":"<项目>","photoId":<真实id>,"boxes":[{"x":..,"y":..,"w":..,"h":..,"label":".."}],"caption":".."}'
    或 jl-tool compare_photos '{"projectId":"<项目>","beforePhotoId":<id>,"afterPhotoId":<id>,"title":".."}'。
    JSON 必须作为第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。
-   禁止用 shell/python/Pillow 自己绘制或编辑图片、禁止写 /tmp、禁止在回答里输出本地路径/base64；
-   工具失败就如实告诉用户失败原因，不要绕过工具自己造图。
+   照片不存在/不属于本项目就如实说「没有找到这张照片」，不要伪造、不要用 shell/python 自绘、不要写 /tmp、
+   不要在回答里输出本地路径或 base64；工具失败就如实说明失败原因，不要绕过工具自己造图。
 7. 最多调 8 次工具；证据够了就 final。
 """
 
@@ -634,6 +636,12 @@ def allowed_tools():
 # 出图类工具的用法/失败处理要写死：真实模型会试 echo JSON | jl-tool ...（stdin 不通），
 # 失败后还可能改用 shell/python 自己画一张写 /tmp —— 这两条都必须在手册里堵死。
 _TOOL_EXTRA = {
+    "send_photo": (
+        "用法：jl-tool send_photo '{\"projectId\":\"<项目>\",\"photoId\":<真实id>,"
+        "\"caption\":\"4#楼东侧外架现场\"}'  ← JSON 是第二个命令行参数（argv），不要用 stdin/管道。"
+        "用户要看/要一张现场照片时用它（不要用文字描述代替图片）；先 search_photos 拿真实 photoId；"
+        "照片不存在/不属于本项目就如实说「没有找到这张照片」，不要伪造。"
+    ),
     "annotate_photo": (
         "用法：jl-tool annotate_photo '{\"projectId\":\"<项目>\",\"photoId\":<真实id>,"
         "\"boxes\":[{\"x\":100,\"y\":100,\"w\":300,\"h\":200,\"label\":\"配重块\"}],"
@@ -647,9 +655,9 @@ _TOOL_EXTRA = {
     ),
 }
 _TOOL_FOOTER = (
-    "出图规则：现场照片的标注/对比只能用 annotate_photo / compare_photos；"
+    "出图规则：看/发照片用 send_photo；标注/对比用 annotate_photo / compare_photos。"
     "禁止用 shell/python/Pillow 自己绘制或编辑图片，禁止写 /tmp，禁止在回答里输出本地路径或 base64；"
-    "工具失败（缺 photoId、照片不属于项目、同图对比等）就如实告诉用户失败原因，不要绕过工具自己造图。"
+    "照片不存在或工具失败（缺 photoId、照片不属于项目、同图对比等）就如实告诉用户，不要绕过工具自己造图。"
 )
 
 

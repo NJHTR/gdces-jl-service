@@ -1049,7 +1049,17 @@ def _drain_blocks(ws):
 # 真实模型会绕开工具：用 shell+python/Pillow 自己画一张写到 /tmp，然后在正文给本地路径。
 # 用户一提到照片/标注/对比，就在这一轮的用户消息后面追加硬规则（引擎每轮都会读）。
 _IMAGE_INTENT_RE = re.compile(
-    r"(照片|影像|图片|截图|标注|圈出|圈一下|框出|对比|整改前|整改后|拼版|示意|画一下|画个)")
+    r"(照片|影像|图片|截图|发张|发个图|给我图|看图|看下照|看一眼|标注|圈出|圈一下|框出|"
+    r"对比|整改前|整改后|拼版|示意|画一下|画个)")
+
+# “只是要图”和“要加工图”要分流：前者 send_photo（引用原图），后者 annotate/compare。
+_SEND_PHOTO_HINT = (
+    "- 用户只是要“看/发/给我一张现场照片”（不要求画框、对比）：先 "
+    "`jl-tool search_photos '{\"projectId\":\"<项目>\",\"q\":\"<部位或描述>\"}'` 拿真实 photoId，"
+    "再执行 `jl-tool send_photo '{\"projectId\":\"<项目>\",\"photoId\":<真实id>,\"caption\":\"..\"}'`；"
+    "**不要用文字描述代替图片**。\n"
+    "- 找不到照片 / photoId 不存在或不属于本项目：如实说「没有找到这张照片」，不要伪造或画一张。\n"
+)
 
 
 def _image_turn_guard(text):
@@ -1058,8 +1068,8 @@ def _image_turn_guard(text):
         return text
     guard = (
         "\n\n【出图规则（必须遵守）】\n"
-        "- 现场照片的标注/对比只能调工具：先 "
-        "`jl-tool search_photos '{\"projectId\":\"<项目>\",\"q\":\"<部位>\"}'` 拿真实 photoId，再执行 "
+        + _SEND_PHOTO_HINT +
+        "- 现场照片的标注/对比只能调工具：先 `jl-tool search_photos` 拿真实 photoId，再执行 "
         "`jl-tool annotate_photo '<JSON>'` 或 `jl-tool compare_photos '<JSON>'`；"
         "JSON 必须是第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。\n"
         "- 禁止用 shell/python/Pillow 自己画图或改图，禁止写 /tmp，禁止在回答里输出本地路径/base64/外链。\n"

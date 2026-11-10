@@ -31,6 +31,8 @@ PROJECT = os.environ.get("JL_TEST_PROJECT") or "yun-gu-3qi"
 UID = int(os.environ.get("JL_TEST_USER", "1"))
 PHOTO_ID = int(os.environ.get("JL_TEST_PHOTO", "45"))
 PROMPT = os.environ.get("JL_TEST_PROMPT") or "圈出照片45里的配重块，用标注图给我看"
+EXPECT_ORIGIN = os.environ.get("JL_TEST_EXPECT_ORIGIN") or "derived"
+NEGATIVE = False
 WS = os.path.join(ROOT, "data", "workspaces", PROJECT)
 BLOCKS_FP = os.path.join(WS, ".agent", "blocks.json")
 
@@ -108,6 +110,8 @@ class Attempt(object):
                 traceback.print_exc()
         if self.task_id:
             try:
+                # 连用户消息一起清（之前只删 assistant 会留 user 行）
+                core.exec_sql("DELETE FROM message WHERE task_id=%s", (self.task_id,))
                 core.exec_sql("DELETE FROM task WHERE id=%s", (self.task_id,))
             except Exception:
                 traceback.print_exc()
@@ -166,12 +170,31 @@ def run_attempt(idx, core, av, timeout=420):
 
     att.check("任务 done", data.get("status") == "done", repr(data.get("status")))
     img = next((b for b in blocks if isinstance(b, dict) and b.get("type") == "image_ref"), None)
+    leaks = LOCAL_PATH_RE.findall(body)
+    att.path_leaks = leaks
+
+    if NEGATIVE:
+        # “照片 45 不存在”场景：不能伪造 image_ref，正文必须明确说没有
+        att.check("否定场景不伪造 image_ref", not img, repr(blocks)[:300])
+        said_no = any(k in body for k in ("没有找到", "没有这张", "不存在", "未找到",
+                                          "暂无", "没有照片", "没有图", "查无"))
+        att.check("正文明确说没有这张照片", said_no, body[:300])
+        att.check("正文无本地绝对路径", not leaks, repr(leaks))
+        for hint in BYPASS_HINTS:
+            if hint in trace_text:
+                att.bypass.append(hint)
+        if att.bypass:
+            print("    RISK  否定场景 trace 出现自绘痕迹: %r" % att.bypass)
+        return att
+
     att.check("answer.blocks 有 image_ref", bool(img), repr(blocks)[:300])
     if img:
         att.asset_ids.append(img.get("assetId"))
         refs = img.get("sourceRefs") or []
-        att.check("image_ref sourceRefs 含 photo:45", "photo:%s" % PHOTO_ID in refs, repr(refs))
-        att.check("image_ref origin=derived", img.get("origin") == "derived", repr(img.get("origin")))
+        att.check("image_ref sourceRefs 含 photo:%d" % PHOTO_ID,
+                  "photo:%s" % PHOTO_ID in refs, repr(refs))
+        att.check("image_ref origin=%s" % EXPECT_ORIGIN,
+                  img.get("origin") == EXPECT_ORIGIN, repr(img.get("origin")))
         row = core.q("SELECT asset_id, status, origin, producer, source_refs FROM asset "
                      "WHERE asset_id=%s", (img.get("assetId"),))
         att.check("asset committed", bool(row) and row[0]["status"] == "committed",
@@ -179,14 +202,11 @@ def run_attempt(idx, core, av, timeout=420):
         try:
             st, b, h = get_bytes(img.get("url") or "")
             att.check("短签 GET 200", st == 200, st)
-            att.check("短签 image/png", h.get("Content-Type") == "image/png",
+            att.check("短签是图片", (h.get("Content-Type") or "").startswith("image/"),
                       h.get("Content-Type"))
-            att.check("图片字节非空且是 PNG", len(b) > 1000 and b[:8] == b"\x89PNG\r\n\x1a\n",
-                      len(b))
+            att.check("图片字节非空", len(b) > 1000, len(b))
         except Exception as e:
             att.check("短签 GET", False, repr(e))
-    leaks = LOCAL_PATH_RE.findall(body)
-    att.path_leaks = leaks
     att.check("正文无本地绝对路径", not leaks, repr(leaks))
     for hint in BYPASS_HINTS:
         if hint in trace_text:
@@ -199,13 +219,28 @@ def run_attempt(idx, core, av, timeout=420):
 
 
 def main():
+    global PROJECT, PHOTO_ID, PROMPT, EXPECT_ORIGIN, NEGATIVE, WS, BLOCKS_FP
     ap = argparse.ArgumentParser()
     ap.add_argument("--attempts", type=int, default=3)
     ap.add_argument("--timeout", type=int, default=420)
+    ap.add_argument("--project", default=PROJECT)
+    ap.add_argument("--photo", type=int, default=PHOTO_ID)
+    ap.add_argument("--prompt", default=PROMPT)
+    ap.add_argument("--expect-origin", default=EXPECT_ORIGIN,
+                    choices=("derived", "uploaded"))
+    ap.add_argument("--negative", action="store_true",
+                    help="照片不存在场景：断言不伪造 image_ref 且正文明确说没有")
     args = ap.parse_args()
+    PROJECT = args.project
+    PHOTO_ID = args.photo
+    PROMPT = args.prompt
+    EXPECT_ORIGIN = args.expect_origin
+    NEGATIVE = args.negative
+    WS = os.path.join(ROOT, "data", "workspaces", PROJECT)
+    BLOCKS_FP = os.path.join(WS, ".agent", "blocks.json")
     core, av = load()
-    print("=== 真实 chat 出图复测 project=%s user=%s photo=%s attempts=%d ==="
-          % (PROJECT, UID, PHOTO_ID, args.attempts))
+    print("=== 真实 chat 出图复测 project=%s user=%s photo=%s attempts=%d negative=%s ==="
+          % (PROJECT, UID, PHOTO_ID, args.attempts, NEGATIVE))
     photo_before = int(core.q("SELECT COUNT(*) n FROM photo")[0]["n"])
     results = []
     try:

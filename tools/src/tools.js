@@ -462,7 +462,7 @@ function countBlocks(blocks, type) {
 }
 
 /** 只保留 answer.blocks 协议内字段；校验引用形态，不合法直接拒绝（不伪造块）。 */
-function sanitizeBlock(raw, expectType) {
+function sanitizeBlock(raw, expectType, expectOrigin = "derived") {
   if (!raw || raw.type !== expectType) {
     throw new Error(`服务端没有返回 ${expectType} block，已放弃（不伪造图片）`);
   }
@@ -478,9 +478,11 @@ function sanitizeBlock(raw, expectType) {
   if (!ULID_RE.test(out.assetId)) throw new Error("服务端返回的 assetId 不合法，已放弃");
   if (!out.url.startsWith("/api/v1/assets/")) throw new Error("服务端返回的 url 不合法，已放弃");
   if ((out.sourceRefs || []).some((r) => !/^photo:\d+$/.test(r))) {
-    throw new Error("派生图 sourceRefs 必须指向真实 photo:<id>，已放弃");
+    throw new Error("image_ref 的 sourceRefs 必须指向真实 photo:<id>，已放弃");
   }
-  if (out.origin !== "derived") throw new Error("标注/对比产物必须是 derived，已放弃");
+  if (out.origin !== expectOrigin) {
+    throw new Error(`图片产物必须是 ${expectOrigin}，已放弃`);
+  }
   for (const v of [out.caption, out.url]) {
     if (looksUnsafe(v)) throw new Error("block 含外链/本地路径/base64，已放弃");
   }
@@ -604,5 +606,51 @@ export async function comparePhotos({ projectId, beforePhotoId, afterPhotoId, ti
     ok: true, duplicated: !!merged.duplicated, assetId: block.assetId,
     caption: block.caption, origin: "derived",
     note: merged.duplicated ? "对比图已在本次回答里" : "整改前后对比图已加入本次回答（派生图）",
+  };
+}
+
+/** 直接把一张**真实项目照片**发给用户（引用已有照片，不改图、不复制证据）。 */
+export async function sendPhoto({ projectId, photoId, caption = "" }) {
+  if (!projectId) throw new Error("缺 projectId");
+  const pid = requirePhotoId(photoId);
+  const refs = [`photo:${pid}`];
+  const dup = sameSourceBlock(projectId, refs);
+  if (dup) {
+    return { ok: true, duplicated: true, assetId: dup.assetId, caption: dup.caption,
+             origin: dup.origin || "uploaded", note: "这张照片已在本次回答里，未重复发送" };
+  }
+  const existing = readBlocks(projectId);
+  if (countBlocks(existing, "image_ref") >= IMAGE_BLOCK_CAP) {
+    throw new Error(`本轮图片已达上限 ${IMAGE_BLOCK_CAP} 张，未加入回答；请先回答文字`);
+  }
+  // 走资产服务的 JSON photoId 分支：origin=uploaded、sourceRefs=["photo:<id>"]、
+  // 只把去 EXIF 的展示副本存进 data/assets，不动 photo 表/原图。
+  const data = await bffPost("/api/v1/assets", {
+    projectId, photoId: pid, caption: String(caption || "").slice(0, 120),
+  });
+  if (String(data.kind || "") !== "image") {
+    throw new Error("这个 photoId 不是图片（或不存在），无法作为图片发送；请如实告诉用户");
+  }
+  // 直接发照片：建完就提交（staged → committed），不等本轮结束；
+  // 这样工具立刻可用、90d 生命周期正确，_turn_blocks 仍会做幂等校验。
+  if (data.status !== "committed") {
+    await bffPost(`/api/v1/assets/${data.assetId}/commit`, {});
+    data.status = "committed";
+  }
+  const raw = {
+    type: "image_ref",
+    assetId: data.assetId,
+    caption: data.caption || String(caption || "").slice(0, 120) || "",
+    origin: data.origin,
+    mime: data.mime,
+    sourceRefs: data.sourceRefs,
+    url: data.url,
+  };
+  const block = sanitizeBlock(raw, "image_ref", "uploaded");
+  const merged = mergeBlock(projectId, block);
+  return {
+    ok: true, duplicated: !!merged.duplicated, assetId: block.assetId,
+    caption: block.caption, origin: "uploaded",
+    note: merged.duplicated ? "这张照片已在本次回答里" : "照片已加入本次回答（项目现场照片引用）",
   };
 }

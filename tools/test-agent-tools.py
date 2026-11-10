@@ -29,8 +29,11 @@ ROOT = os.environ.get("JL_ROOT") or "/home/baize/jl-service"
 HOST_ROOT = os.environ.get("JL_HOST_ROOT") or "/home/baize/jl-service"
 BASE = os.environ.get("JL_TEST_BASE") or "http://127.0.0.1:8081"
 PID = os.environ.get("JL_TEST_PROJECT") or "yun-gu-3qi"
+PID2 = os.environ.get("JL_TEST_PROJECT2") or "clean-demo-01"
+PHOTO_2 = int(os.environ.get("JL_TEST_PHOTO2", "46"))
 UID = int(os.environ.get("JL_TEST_USER", "1"))
 WS = os.path.join(HOST_ROOT, "data", "workspaces", PID)
+WS2 = os.path.join(HOST_ROOT, "data", "workspaces", PID2)
 JL_TOOL = os.environ.get("JL_TOOL_BIN") or os.path.join(HOST_ROOT, "scripts", "jl-tool")
 PHOTO_A = int(os.environ.get("JL_TEST_PHOTO_A", "45"))
 PHOTO_B = int(os.environ.get("JL_TEST_PHOTO_B", "44"))
@@ -64,18 +67,20 @@ def load():
 
 
 BLOCKS_FP = os.path.join(WS, ".agent", "blocks.json")
+BLOCKS_FP2 = os.path.join(WS2, ".agent", "blocks.json")
 
 
 def rm_blocks():
-    try:
-        os.remove(BLOCKS_FP)
-    except OSError:
-        pass
+    for fp in (BLOCKS_FP, BLOCKS_FP2):
+        try:
+            os.remove(fp)
+        except OSError:
+            pass
 
 
-def read_blocks_raw():
+def read_blocks_raw(fp=None):
     try:
-        with open(BLOCKS_FP, encoding="utf-8") as f:
+        with open(fp or BLOCKS_FP, encoding="utf-8") as f:
             raw = json.load(f)
         return raw if isinstance(raw, list) else (raw.get("blocks") or [])
     except (OSError, ValueError):
@@ -186,9 +191,17 @@ def main():
         check("compare_photos 描述有整改前后语义",
               "整改前" in descs.get("compare_photos", ""),
               descs.get("compare_photos", "")[:120])
+        check("list 含 send_photo", "send_photo" in names, repr(names))
+        check("send_photo 描述含真实照片/不要文字代替",
+              "真实" in descs.get("send_photo", "")
+              and "文字描述代替" in descs.get("send_photo", ""),
+              descs.get("send_photo", "")[:160])
         manual = core.tool_manual()
         check("tool_manual 列出 annotate_photo", "annotate_photo" in manual)
         check("tool_manual 列出 compare_photos", "compare_photos" in manual)
+        check("tool_manual 列出 send_photo", "send_photo" in manual)
+        check("tool_manual 有「没有找到这张照片」失败处理",
+              "没有找到这张照片" in manual, manual[-260:])
         for f in ("tools.js", "server.js"):
             p = subprocess.run(
                 ["docker", "run", "--rm", "-v", os.path.join(ROOT, "tools", "src") + ":/app/src:ro",
@@ -295,6 +308,52 @@ def main():
         check("不存在 photoId 报错", is_err(out), (out or "")[:200])
         rc, out, err = run_tool("annotate_photo", {"projectId": PID, "boxes": []})
         check("缺 photoId 报错", is_err(out), (out or "")[:200])
+
+        # ---- 5b) send_photo：直接引用真实照片（clean-demo-01 / photo46） ----
+        rm_blocks()
+        photo_before = int(core.q("SELECT COUNT(*) n FROM photo")[0]["n"])
+        rc, out, err = run_tool("send_photo", {
+            "projectId": PID2, "photoId": PHOTO_2,
+            "caption": "现场照片 #%d" % PHOTO_2}, cwd=WS2)
+        obj = parse_out(out)
+        eq("send_photo ok", (obj or {}).get("ok"), True, (out or "")[:300] + (err or "")[:200])
+        said = (obj or {}).get("assetId")
+        if said:
+            created_assets.append(said)
+        blocks2 = read_blocks_raw(BLOCKS_FP2)
+        eq("send_photo 写入 1 条", len(blocks2), 1)
+        b2 = blocks2[0] if blocks2 else {}
+        eq("send_photo block image_ref", b2.get("type"), "image_ref")
+        eq("send_photo origin uploaded", b2.get("origin"), "uploaded")
+        eq("send_photo sourceRefs photo:id", b2.get("sourceRefs"), ["photo:%s" % PHOTO_2])
+        row2 = av._row(said) if said else None
+        check("send_photo 资产 committed/uploaded",
+              bool(row2) and row2["status"] == "committed" and row2["origin"] == "uploaded",
+              repr(row2 and (row2["status"], row2["origin"])))
+        check("send_photo 资产 producer=photo_ref",
+              bool(row2) and row2.get("producer") == "photo_ref",
+              repr((row2 or {}).get("producer")))
+        st, body, h = fetch(b2.get("url") or "")
+        eq("send_photo 短签 200", st, 200)
+        check("send_photo 短签是图片", (h.get("Content-Type") or "").startswith("image/"),
+              h.get("Content-Type"))
+        eq("send_photo 不改 photo 行数",
+           int(core.q("SELECT COUNT(*) n FROM photo")[0]["n"]), photo_before)
+        assets_before2 = int(core.q("SELECT COUNT(*) n FROM asset")[0]["n"])
+        rc, out, err = run_tool("send_photo", {
+            "projectId": PID2, "photoId": PHOTO_2}, cwd=WS2)
+        obj = parse_out(out)
+        eq("send_photo 重复调 duplicated", (obj or {}).get("duplicated"), True, (out or "")[:200])
+        eq("send_photo 重复不改 blocks", len(read_blocks_raw(BLOCKS_FP2)), 1)
+        et("send_photo 重复不新建资产", int(core.q("SELECT COUNT(*) n FROM asset")[0]["n"]),
+           assets_before2)
+        rc, out, err = run_tool("send_photo", {
+            "projectId": PID2, "photoId": PHOTO_A}, cwd=WS2)
+        check("send_photo 他项目照片报错", is_err(out), (out or "")[:200])
+        rc, out, err = run_tool("send_photo", {
+            "projectId": PID2, "photoId": 99999999}, cwd=WS2)
+        check("send_photo 不存在 photoId 报错", is_err(out), (out or "")[:200])
+        rm_blocks()
 
         # ---- 6) BFF 集成：_turn_blocks → answer.blocks → task 轮询 ----
         rm_blocks()
