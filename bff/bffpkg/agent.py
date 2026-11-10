@@ -643,12 +643,28 @@ def handle_bootstrap(params, user):
                     photos = json.loads(photos)
                 except Exception:
                     photos = []
-            photos = photos or _photos_from_parts(m.get("parts"))
+            raw_parts = m.get("parts")
+            if isinstance(raw_parts, str):
+                try:
+                    raw_parts = json.loads(raw_parts)
+                except Exception:
+                    raw_parts = []
+            if not isinstance(raw_parts, list):
+                raw_parts = []
+            photos = photos or _photos_from_parts(raw_parts)
+            audio = next((p for p in raw_parts
+                          if isinstance(p, dict) and p.get("type") == "audio"), None)
             msgs.append({
-                "id": f"m{m['id']}", "type": "me", "text": m["text"] or "",
+                "id": f"m{m['id']}", "type": "me",
+                # 语音消息不把服务端给你看的 [语音]/[空消息] 当成正文
+                "text": "" if audio else (m["text"] or ""),
                 "time": m["created_at"].strftime("%H:%M"), "sync": bool(m["sync"]),
                 "photos": photos,
-                "voice": False,
+                "voice": bool(audio),
+                "dur": (audio or {}).get("dur") or ("语音" if audio else ""),
+                "audioSha": (audio or {}).get("blob") or "",
+                "transcript": (audio or {}).get("transcript") or "",
+                "transcriptShown": False,
             })
         elif m["role"] == "assistant":
             trace = m["trace"]
