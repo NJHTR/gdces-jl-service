@@ -1129,6 +1129,14 @@ def _blob_file(sha):
     return p2 if os.path.exists(p2) else None
 
 
+IMG_MAGIC = (
+    (b"\xff\xd8\xff", ".jpg"),
+    (b"\x89PNG\r\n\x1a\n", ".png"),
+    (b"GIF87a", ".gif"),
+    (b"GIF89a", ".gif"),
+)
+
+
 def materialize_images(parts, limit=20):
     """把 parts 里的图片落到临时目录，返回真实文件路径。
 
