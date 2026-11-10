@@ -472,7 +472,13 @@ def _memory_guard(rows, user):
         return None
     m = rows[0]
     if (m.get("scope") or "") == "project":
-        return guard_project(m.get("owner_id") or "", user)
+        deny = guard_project(m.get("owner_id") or "", user)
+        if deny:
+            return deny
+        from .biz import can_confirm_project_rule
+        if not can_confirm_project_rule(m.get("owner_id") or "", user):
+            return 403, {"code": 403, "message": "项目规矩只能由总监/项目管理员修改"}
+        return None
     if user and str(m.get("owner_id") or "") != str(user.get("id")):
         return 403, {"code": 403, "message": "只能改自己的记忆"}
     return None
@@ -699,8 +705,9 @@ def handle_bootstrap(params, user):
     # ---- 记忆 ----
     # 元数据交给前端展示（来源/次数/是否生效）；停用的也返回，才能"恢复"
     memos = [{"id": f"m{m['id']}", "text": m["text"], "source": m["source"],
+              "projectId": m.get("project_id"),
               "hits": m["hits"], "status": m["status"], "appliesTo": m["applies_to"]}
-             for m in q("SELECT id, text, source, hits, status, applies_to FROM memory "
+             for m in q("SELECT id, text, source, project_id, hits, status, applies_to FROM memory "
                         "WHERE scope='user' AND owner_id=%s "
                         "ORDER BY status DESC, hits DESC, id DESC", (str(user_id),))]
     proj_memos = [{"id": f"p{m['id']}", "text": m["text"], "source": m["source"],
