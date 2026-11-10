@@ -3,7 +3,7 @@
 > 适用范围：jl-service BFF 的记忆候选（Phase 1）与个人域摘要 / 项目域重渲染（Phase 2），
 > 以及旧 `memory` 表、项目规矩提案、文件视图、权限与回滚。
 > 契约源：`contracts/openapi.yaml`（记忆与规矩相关路由已补齐）。
-> 基线：Phase1 `777ddba` → Phase2 `a254c9c` → 权限修复 `5c271f9`；本文档随 task-7 收口提交。
+> 基线：Phase1 `777ddba` → Phase2 `a254c9c` → 权限修复 `5c271f9` → 收口文档 `fe8331d`；本文档随 task-7 收口提交。
 > 线上：`rokid-r640:/home/baize/jl-service`，BFF `0.0.0.0:8081`，MySQL `127.0.0.1:3309/jl`。
 
 ---
@@ -20,22 +20,24 @@
 
 ## 1. 分层与作用域（L0~L4）
 
-后端口径里"记忆"只有四层可落账（L1~L4），L0 是会话来源，不算记忆：
+后端口径里，长期记忆只有 **L1 / L3 / L4** 三类落 `memory` 表；**L0 组织知识**和 **L2 项目证据**不落记忆表。会话/任务只作 provenance，不单独建记忆作用域：
 
 | 层 | 名称 | 语义 | 存储 | 谁能确认 | 现状 |
 |---|---|---|---|---|---|
-| L0 | 会话 | 聊天/任务原文，**只作 provenance** | `task` / `message`；候选的 `source_task_id` / `source_message_id` | 不适用（不注入、不当规则） | 已存在 |
+| L0 | 组织知识 | 模板、规范、公司制度、验收要点；最高权威 | `knowledge/`（只读软链）+ `standard` 表 | 组织知识管理员 / git | 已存在 |
 | L1 | 项目共享 | 这个项目所有人生效的规矩 | `memory(scope='project', owner_id=<project_id>, project_id=NULL)` | 总监 / owner / admin | **已实现** |
-| L2 | 个人 × 本项目 | 这个人在这个项目的习惯 | `memory(scope='user', owner_id=<uid>, project_id=<pid>)` | 本人 | **已实现** |
-| L3 | 个人跨项目 | 这个人所有项目通用的偏好 | `memory(scope='user', owner_id=<uid>, project_id=NULL)` | 本人 | **已实现** |
-| L4 | 组织/全局 | 公司级规则 | 未落生产表 | 需要显式提升 | **预留，未实现**（禁止自动提升） |
+| L2 | 项目事实/证据 | 项目信息、照片、文书、记录、图纸 | `project` / `photo` / `doc` + `records/photos`、`docs/` | 现场采集 / 项目管理员 | 已存在，不是记忆 |
+| L3 | 个人 × 本项目 | 这个人在这个项目的习惯 | `memory(scope='user', owner_id=<uid>, project_id=<pid>)` | 本人 | **已实现** |
+| L4 | 个人跨项目 | 这个人所有项目通用的偏好 | `memory(scope='user', owner_id=<uid>, project_id=NULL)` | 本人 | **已实现** |
+
+会话/任务不是 L0，也不是记忆层：`task` / `message` 只作为候选/提案的 provenance（`source_task_id` / `source_message_id`）。
 
 关键编码事实（读代码时别被 ENUM 骗了）：
 
 - `memory.scope` 只有两个值 `user|project`；**三档语义**用 `project_id` 是否为空区分：
   - `scope='project'` → L1；
-  - `scope='user' && project_id IS NULL` → L3；
-  - `scope='user' && project_id=<pid>` → L2。
+  - `scope='user' && project_id=<pid>` → L3；
+  - `scope='user' && project_id IS NULL` → L4。
 - 候选表 `memory_candidate.scope` 允许 `user|project_user|project`，与上述对应关系：
   `project_user` 确认后写 `memory(scope='user', project_id=<pid>)`。
 - `applies_to` 列存人读的作用域串：`project:<pid>` / `user:<uid>` / `user:<uid>@project:<pid>`。
@@ -50,7 +52,7 @@
 
 | 表 | 作用 | 写入方 |
 |---|---|---|
-| `memory` | 生效记忆账本（L1/L2/L3） | 候选 accept、规矩提案 accept、旧 `/memories` 手动写（个人域） |
+| `memory` | 生效记忆账本（L1/L3/L4） | 候选 accept、规矩提案 accept、旧 `/memories` 手动写（个人域） |
 | `memory_candidate` | 待确认候选（Phase1） | Agent/服务端抽取、API POST；**accept/reject 只改状态** |
 | `rule_proposal` | 项目规矩提案（旧路径，仍在用） | 旧 `/memories scope=project`、agent 工具、`POST /rule-proposals` |
 | `audit_log` | 谁在哪个项目对哪条做了什么 | 创建/接受/拒绝/修改/删除 |
@@ -62,9 +64,9 @@
 | 文件 | 内容 | 生成函数 | 幂等 |
 |---|---|---|---|
 | `data/workspaces/<pid>/records/rules.md` | L1 项目规矩（`memory` active 项目行） | `biz.render_rules_md` / `memorysum.render_project_rules` | 内容不变不写 |
-| `data/memory/users/<uid>/MEMORY.md` | L3 跨项目个人记忆视图 | `biz.render_user_memory` | 是 |
-| `data/memory/users/<uid>/projects/<pid>.md` | L2 个人×项目视图（`JL_ENGINE_MEMORY=0` 时） | `biz.render_user_project_md` | 是 |
-| `data/homes/<uid>/memories/projects/<pid>.md` | L2 视图（线上 `JL_ENGINE_MEMORY=1` 时落这里） | 同上 | 是 |
+| `data/memory/users/<uid>/MEMORY.md` | L4 跨项目个人记忆视图 | `biz.render_user_memory` | 是 |
+| `data/memory/users/<uid>/projects/<pid>.md` | L3 个人×项目视图（`JL_ENGINE_MEMORY=0` 时） | `biz.render_user_project_md` | 是 |
+| `data/homes/<uid>/memories/projects/<pid>.md` | L3 视图（线上 `JL_ENGINE_MEMORY=1` 时落这里） | 同上 | 是 |
 | `data/memory/users/<uid>/memory_summary.md` | 个人域确定性摘要（Phase2） | `memorysum.render_user_summary` | 内容不变不写 |
 | `data/workspaces/<pid>/AGENTS.md` | 只放**指针**（rules/photos/MEMORY/summary 路径）+ 人工区 | `agent.render_agents_md`（`build_context`） | 每次重写 generated 区，human 区保留 |
 | `data/homes/<uid>/memories/extensions/ad_hoc/notes/*.md` | 旧路径：无 projectId 的个人记忆备注 | `handle_memory_create`（历史行为） | 否（测试需清理） |
@@ -94,7 +96,7 @@
 审批硬规则：
 
 1. 候选 pending 不做任何生效动作；accept 才写 `memory`（`status=1`）。
-2. L1 必须人确认；个人域（L2/L3）只允许本人确认/修改/删除。
+2. L1 必须人确认；个人域（L3/L4）只允许本人确认/修改/删除。
 3. 项目域的人工写/改/删/接受，只要调用者是**登录用户且有 project_member 角色行**，就按
    `owner/admin/总监/项目总监` 判——即使 `AUTH_REQUIRED=0` 的演示部署也如此
    （`can_confirm_project_rule` 与 `memcandidate.can_confirm_project_candidate` 同一实现）。
@@ -110,8 +112,8 @@
 - **接口读什么**：`GET /api/v1/memories`（账本，按 scope/owner/project 过滤）、
   `GET /api/v1/memories/recall`（字面关键词，命中 `hits+1`）、
   `GET /api/v1/metrics/memory`（主动写/复用/撤销/提案确认率）。
-- **优先级（概念）**：L1 项目规矩只作用于本项目；L2 覆盖本人在本项目的习惯；L3 是默认个人偏好；
-  L4 预留。文件视图按层分文件，agent 按问题取用。
+- **优先级（概念）**：L0 组织知识/规范最高；本轮明确指令在不违反 L0 的前提下优先；L1 项目规矩作用于本项目；
+  L3 覆盖本人在本项目的习惯；L4 是默认个人偏好；L2 是证据，不参与记忆排序。文件视图按层分文件，agent 按问题取用。
 - **冲突不静默覆盖**：
   - accept 同文本查重：已存在则复用/重新启用该 `memory` 行，不产生两条。
   - 个人摘要：归一化相同 + 包含关系合并并标注"（同义合并 N 条）"；**相近但不同的说法并列**
@@ -153,7 +155,7 @@
 
 | 域 | 做法 | 保证 |
 |---|---|---|
-| 个人域 | 只读 `memory(scope='user', status=1)`（L2+L3），确定性去重/归并 → `data/memory/users/<uid>/memory_summary.md`；个人候选 accept 或小程序 bootstrap 时刷新 | 候选不参与；不调 LLM；幂等；不覆盖既有 `MEMORY.md` / `projects/<pid>.md` 拆分 |
+| 个人域 | 只读 `memory(scope='user', status=1)`（L3+L4），确定性去重/归并 → `data/memory/users/<uid>/memory_summary.md`；个人候选 accept 或小程序 bootstrap 时刷新 | 候选不参与；不调 LLM；幂等；不覆盖既有 `MEMORY.md` / `projects/<pid>.md` 拆分 |
 | 项目域 | 只调 `render_rules_md`，数据源 `memory(scope='project', status=1)` | **不写 memory**、不新增/提升/改写规则；pending 天然不在表内；不把个人记忆升格为项目 |
 
 有意不按 `source='confirmed'` 过滤项目规矩：线上 L1 多数是 `manual/learned` 的人工写入，
@@ -215,7 +217,7 @@ POST /api/v1/memory-candidates/33/reject → {"code":0,"data":{"id":33,"status":
 ## 9. 验收记录（可复现）
 
 所有脚本都在服务器 `/home/baize/jl-service` 跑（Windows 本机没有 Python）。结果基于部署版
-`5c271f9`（task-7 只改 contracts/docs/tools，服务逻辑不变）。
+`fe8331d`（task-7 只改 contracts/docs/tools，服务逻辑与 `5c271f9` 相同）。
 
 ```bash
 # 1) 语法/契约
@@ -239,7 +241,7 @@ python3 tools/test-memory-extract-fake.py             # 14/14
 
 # 6) 线上健康
 curl -s http://127.0.0.1:8081/healthz                # {"ok":true,"engine":"up"}
-head -1 runtime/DEPLOYED                             # 5c271f9（task-7 提交后随部署更新）
+head -1 runtime/DEPLOYED                             # fe8331d（task-7 提交后随部署更新）
 ```
 
 实际记录（2026-11-10）：
@@ -333,11 +335,11 @@ python3 tools/memory-views.py --all                # 全量重建
 3. 个人域摘要为**确定性**去重（完全重复 + 包含关系合并；相近不同并列），未接 LLM consolidate。
 4. **无自动冲突裁决**：不同说法并列，人工确认；`hits` 排序仍在用（MEMORY-V2 的 U×D+UCB 未实现）。
 5. 候选**没有** 14 天过期 / 每 scope 上限任务；`memory_item` 影子表（global、memory_use/衰减等）
-   只在 `jl_m1` 影子库，**未进生产读写路径**，L4/global 未实现。
+   只在 `jl_m1` 影子库，**未进生产读写路径**，组织级 global 未实现（L0 走 knowledge，不进 memory）。
 6. **引擎记忆仍会注入**：`JL_ENGINE_MEMORY=1` 的项目（线上仅 clean-demo-01）里，引擎自家
    `homes/<uid>/memories/MEMORY.md` / `memory_summary.md` 照旧自动注入；BFF 的 `data/memory` 视图
    只是指针目标，不是注入源（MEMORY-V2 M6 未做）。
-7. L2 文件落点受 `JL_ENGINE_MEMORY` 影响（`data/homes/...` vs `data/memory/...`），当前线上=1；
+7. L3 文件落点受 `JL_ENGINE_MEMORY` 影响（`data/homes/...` vs `data/memory/...`），当前线上=1；
    AGENTS 指针同 flag 生成，未发现断链（QA R2 记为待确认）。
 8. `metrics/memory` 的"提案确认率"只统计 `rule_proposal`，**不含** `memory_candidate`。
 9. `render_rules_md` 每次变化会在项目工作区产生一条 git 提交；测试会在 test-sandbox 留"重渲染"
