@@ -415,9 +415,9 @@ export async function recordReview({ docId, verdict, findings = [], counter = []
  *   · 只接受真实 photoId；不生成/伪造现场照片；
  *   · 不写 photo/doc/records/memory/knowledge，产物只走 data/assets（BFF asset 服务）；
  *   · blocks.json 只存引用（assetId/sourceRefs/url），不存 base64、本地路径、外链；
- *   · 同一张源照片本轮重复调只保留一条（不重复生成资产）；单轮图片上限 4 张。
+ *   · 同一张源照片本轮重复调只保留一条（不重复生成资产）；单轮图片上限 9 张。
  * ================================================================ */
-const IMAGE_BLOCK_CAP = 4;
+const IMAGE_BLOCK_CAP = 9;
 const FILE_BLOCK_CAP = 2;
 const CARD_BLOCK_CAP = 3;
 const TEXT_BLOCK_CAP = 6;

@@ -393,15 +393,15 @@ def run_unit():
         ]
         blocks = av.normalize_blocks(pid, uid, unsafe, fallback_text="保底文字")
         check("base64/本地路径/外链文本块被丢弃", isinstance(blocks, list))
-        # 单轮上限：4 图
+        # 单轮上限：9 图
         ids = []
-        for i in range(5):
+        for i in range(10):
             code, p = av.create_asset(png, pid, user=None, mime="image/png",
                                       origin="generated", caption="cap%d" % i)
             ids.append(ctx.track(p))
         blocks = av.normalize_blocks(pid, uid,
                                      [{"type": "image_ref", "assetId": i} for i in ids])
-        eq("单轮最多 4 图", len([b for b in blocks if b["type"] == "image_ref"]), 4)
+        eq("单轮最多 9 图", len([b for b in blocks if b["type"] == "image_ref"]), 9)
 
         # card 只读 + 不新增写 API；外部 data 被过滤
         blocks = av.normalize_blocks(pid, uid, [{

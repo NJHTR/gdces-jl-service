@@ -56,7 +56,7 @@ _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 ASSET_URL_TTL = int(os.environ.get("ASSET_URL_TTL", "3600"))
 
 # 单轮块上限（task-8 §4）
-BLOCK_CAPS = {"text": 6, "image_ref": 4, "file_ref": 2, "card": 3, "audio_ref": 1}
+BLOCK_CAPS = {"text": 6, "image_ref": 9, "file_ref": 2, "card": 3, "audio_ref": 1}
 BLOCK_TYPES = ("text", "image_ref", "file_ref", "card")
 
 
@@ -747,7 +747,7 @@ def normalize_blocks(project_id, user_id, raw_blocks, fallback_text="", task_id=
       · 未知类型丢弃；assetId 不属于本项目/不存在/已删除 → 丢弃该块（文字 fallback 仍在）；
       · image_ref 可直接带 photoId（真实照片引用）：服务端建 uploaded 资产，不复制证据；
       · url 一律由服务端生成；模型给的外链/base64/本地路径 → 丢弃；
-      · 单轮上限 4 图 / 1 音（预留）/ 2 文件 / 3 卡 / 6 文字；
+      · 单轮上限 9 图 / 1 音（预留）/ 2 文件 / 3 卡 / 6 文字；
       · staged 资产在挂上回答时自动 commit（90d/上传引用长效）。
     """
     if not raw_blocks:

@@ -11,7 +11,7 @@
 覆盖：
   · list 里出现两个新工具；node --check 语法
   · annotate_photo 生成 derived 资产 + blocks.json image_ref（sourceRefs=photo:45）
-  · 重复调去重、4 图上限、compare 正常/同图报错、他项目照片/不存在照片报错
+  · 重复调去重、9 图上限、compare 正常/同图报错、他项目照片/不存在照片报错
   · BFF `_turn_blocks` 读取并挂到 message.answer.blocks；GET /tasks/<id> 能拿到
   · photo 表/records/photos/memory/doc/blobs 不变（不写证据）
 """
@@ -261,18 +261,18 @@ def main():
         eq("blocks 仍 1 条", len(read_blocks_raw()), 1)
         et("重复调不新建资产", int(core.q("SELECT COUNT(*) n FROM asset")[0]["n"]), assets_before)
 
-        # ---- 3) 4 图上限 ----
+        # ---- 3) 9 图上限 ----
         fake = [{"type": "image_ref", "assetId": "01J%020d" % i,
                  "caption": "占位 %d" % i, "origin": "derived", "mime": "image/png",
                  "sourceRefs": ["photo:%d" % (900 + i)],
-                 "url": "/api/v1/assets/01J%020d/content?e=1&s=x" % i} for i in range(4)]
+                 "url": "/api/v1/assets/01J%020d/content?e=1&s=x" % i} for i in range(9)]
         os.makedirs(os.path.dirname(BLOCKS_FP), exist_ok=True)
         with open(BLOCKS_FP, "w", encoding="utf-8") as f:
             json.dump({"blocks": fake}, f)
         rc, out, err = run_tool("annotate_photo", {
             "projectId": PID, "photoId": PHOTO_B, "boxes": []})
-        check("4 图上限报错", is_err(out), (out or "")[:200])
-        eq("上限时 blocks 不变", len(read_blocks_raw()), 4)
+        check("9 图上限报错", is_err(out), (out or "")[:200])
+        eq("上限时 blocks 不变", len(read_blocks_raw()), 9)
         et("上限时不新建资产", int(core.q("SELECT COUNT(*) n FROM asset")[0]["n"]), assets_before)
 
         # ---- 4) compare 正常 / 同图报错 ----
