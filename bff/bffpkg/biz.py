@@ -994,6 +994,7 @@ def handle_rule_decide(rid, body, user=None):
     if action == "reject":
         exec_sql("UPDATE rule_proposal SET status='rejected', decided_by=%s, decided_at=NOW(3) "
                  "WHERE id=%s", (who, rid))
+        audit(row["project_id"], who or 1, "rule.reject", "rule:%s" % rid, row["text"])
         return 200, {"code": 0, "data": {"id": rid, "status": "rejected"}}
 
     # 接受 = 全项目生效；只有总监/项目管理员可以确认。
@@ -1016,6 +1017,8 @@ def handle_rule_decide(rid, body, user=None):
     exec_sql("UPDATE rule_proposal SET status='accepted', decided_by=%s, decided_at=NOW(3) "
              "WHERE id=%s", (who, rid))
     rel = render_rules_md(row["project_id"])
+    audit(row["project_id"], who or 1, "rule.accept", "rule:%s" % rid,
+          "memory:%s %s" % (mid, row["text"]))
     return 200, {"code": 0, "data": {"id": rid, "status": "accepted",
                                      "memoryId": mid, "rendered": rel}}
 
