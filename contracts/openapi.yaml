@@ -45,6 +45,8 @@ tags:
     x-owner: agent
   - name: 记忆
     x-owner: agent
+  - name: 多模态
+    x-owner: agent
   - name: 规范
     x-owner: biz
   - name: 审计与统计
@@ -486,6 +488,13 @@ paths:
                   type: string
                   description: 客户端生成的幂等键，重发同一个 clientId 不会产生两个任务
                 text: { type: string }
+                capabilities:
+                  type: array
+                  description: |
+                    新客户端 opt-in。带 "answer.blocks"（或 answer.blocks.v1）时，
+                    回答里才附多模态块；不带 → blocks=[]，旧客户端行为不变。
+                  items: { type: string }
+                  example: ["answer.blocks"]
       responses:
         '202':
           description: 已受理
@@ -827,6 +836,149 @@ paths:
         '404': { description: 候选不存在 }
         '409': { description: 已处理过 }
 
+  # ---------------------------------------------------------------- 多模态资产（Phase1 MVP）
+  # 资产只落 data/assets/<pid>/<assetId>；绝不写 blobs/photos/docs/records/memory/knowledge。
+  # 内容端点既支持 Bearer，也支持短签 URL（小程序 <image> 不能带 header）。
+  /api/v1/assets:
+    post:
+      tags: [多模态]
+      x-owner: agent
+      summary: 签发/上传生成物或派生资产（字节进 data/assets；模型不输出字节）
+      description: |
+        三种 body：
+          1) 原始字节 + Content-Type（image/jpeg|png|webp、audio/mpeg|wav、pdf、txt、docx），
+             query 带 projectId/origin/producer/caption/taskId/messageId/sourceRefs；
+          2) multipart/form-data（file + 同名字段），给工具/小程序上传用；
+          3) application/json {"projectId","photoId","caption"...} = 真实照片引用
+             （origin=uploaded，sourceRefs=["photo:<id>"]，不复制证据、不写 photo 表）。
+        图片会被重编码去 EXIF/GPS；staged 24h，挂到回答后 committed。
+      parameters:
+        - name: projectId
+          in: query
+          schema: { type: string }
+        - name: origin
+          in: query
+          schema: { type: string, enum: [uploaded, derived, generated], default: generated }
+        - name: caption
+          in: query
+          schema: { type: string }
+        - name: taskId
+          in: query
+          schema: { type: integer }
+        - name: messageId
+          in: query
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                projectId: { type: string }
+                origin: { type: string }
+                caption: { type: string }
+          application/json:
+            schema: { $ref: '#/components/schemas/AssetPhotoRef' }
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Asset' }
+        '400': { description: mime 不在白名单 / 内容与 mime 不符 / 参数不合法 }
+        '403': { description: 非项目成员 }
+        '413': { description: 超过大小上限 }
+
+  /api/v1/assets/{assetId}:
+    get:
+      tags: [多模态]
+      x-owner: agent
+      summary: 资产元数据（含短签 url）
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Asset' }
+        '404': { description: 不存在/已删除 }
+    delete:
+      tags: [多模态]
+      x-owner: agent
+      summary: 软删除资产（status=deleted；字节移除，审计保留）
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+      responses:
+        '200': { description: 成功 }
+        '404': { description: 不存在/已删除 }
+
+  /api/v1/assets/{assetId}/content:
+    get:
+      tags: [多模态]
+      x-owner: agent
+      security: []
+      summary: 资产内容（短签 URL；小程序 <image> 可直接加载，不需要 Bearer）
+      description: |
+        两种访问方式：
+          · 短签：`/api/v1/assets/<id>/content?e=<exp>&s=<sig>[&dl=1]`，
+            e/s 由服务端签发，默认 10 分钟有效；<image> 直接可用。
+          · Bearer：没有短签时走正常项目权限校验。
+        响应头带 nosniff / Cache-Control；文件下载加 dl=1。
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+        - name: e
+          in: query
+          schema: { type: integer, description: 过期时间戳（短签） }
+        - name: s
+          in: query
+          schema: { type: string, description: HMAC 短签 }
+        - name: dl
+          in: query
+          schema: { type: string, enum: ['1'] }
+      responses:
+        '200':
+          description: 文件字节
+          content:
+            image/*: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '403': { description: 无权限（无有效短签且非项目成员） }
+        '404': { description: 不存在/已删除 }
+
+  /api/v1/assets/{assetId}/commit:
+    post:
+      tags: [多模态]
+      x-owner: agent
+      summary: 提交 staged 资产（挂 message/task；generated/derived 90 天后过期）
+      parameters:
+        - $ref: '#/components/parameters/AssetId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                messageId: { type: integer }
+                taskId: { type: integer }
+      responses:
+        '200': { description: 成功 }
+        '404': { description: 不存在/已删除 }
+        '409': { description: 状态不可提交 }
+
   # ---------------------------------------------------------------- 规范
   /api/v1/standards:
     get:
@@ -976,6 +1128,12 @@ components:
       in: path
       required: true
       schema: { type: integer }
+    AssetId:
+      name: assetId
+      in: path
+      required: true
+      description: 26 位 ULID
+      schema: { type: string, pattern: '^[0-9A-HJKMNP-TV-Z]{26}$' }
 
   responses:
     NotFound:
@@ -1125,6 +1283,12 @@ components:
         messages:
           type: array
           items: { $ref: '#/components/schemas/Message' }
+        blocks:
+          type: array
+          description: |
+            多模态 answer.blocks v1（_pollTask 可直接用；也可从 messages[].answer.blocks 取）。
+            客户端没在 chat.body.capabilities 里 opt-in 时为空数组。
+          items: { $ref: '#/components/schemas/AnswerBlock' }
 
     Message:
       type: object
@@ -1243,3 +1407,81 @@ components:
         decided_by: { type: string, nullable: true }
         decided_at: { type: string, nullable: true }
         created_at: { type: string }
+
+    # ---------------- 多模态资产 / answer.blocks v1
+    AssetPhotoRef:
+      type: object
+      required: [projectId, photoId]
+      properties:
+        projectId: { type: string }
+        photoId: { type: integer, description: 真实照片 id（引用，不复制证据） }
+        caption: { type: string }
+        taskId: { type: integer }
+        messageId: { type: integer }
+        producer: { type: string, default: photo_ref }
+
+    Asset:
+      type: object
+      properties:
+        assetId: { type: string, description: 26 位 ULID }
+        projectId: { type: string }
+        kind: { type: string, enum: [image, audio, file] }
+        mime: { type: string, example: image/jpeg }
+        size: { type: integer }
+        sha256: { type: string, description: 去元数据后的字节 sha }
+        origin: { type: string, enum: [uploaded, derived, generated] }
+        status: { type: string, enum: [staged, committed, quarantined, deleted] }
+        caption: { type: string, nullable: true }
+        sourceRefs:
+          type: array
+          items: { type: string }
+          description: '如 ["photo:55"] / ["asset:<ulid>"]'
+        url:
+          type: string
+          description: 短签内容 URL（小程序 <image> 可直接加载，不需要 Bearer）
+          example: /api/v1/assets/01J.../content?e=1760000000&s=abc
+        downloadUrl:
+          type: string
+          description: file 类型的短期下载 URL（dl=1）
+        createdAt: { type: string }
+        expiresAt: { type: string, nullable: true }
+
+    AnswerBlock:
+      type: object
+      required: [type]
+      description: |
+        answer.blocks v1。硬规则：模型/工具只给引用（assetId/photoId/docId），
+        url 由服务端签发；data:base64、本地绝对路径、外部 http(s) 链接整块丢弃，
+        文字 fallback 始终保留（answer.text 不变）。未知/他项目 assetId 丢弃。
+      properties:
+        type: { type: string, enum: [text, image_ref, file_ref, card] }
+        text: { type: string, description: type=text 时 }
+        assetId: { type: string, description: type=image_ref/file_ref 时 }
+        caption: { type: string }
+        origin:
+          type: string
+          enum: [uploaded, derived, generated]
+          description: 缺失时前端显示中性「附件」
+        mime: { type: string }
+        name: { type: string, description: file_ref 的文件名 }
+        url:
+          type: string
+          description: image_ref/file_ref 的短签 URL；card 为只读 deep link
+        downloadUrl: { type: string, description: file_ref 的短期下载 URL }
+        sourceRefs:
+          type: array
+          items: { type: string }
+          description: '如 ["photo:55"]'
+        docId: { type: integer, description: type=card 时，只读文书 id }
+        title: { type: string, description: type=card 时 }
+        data:
+          type: object
+          additionalProperties: true
+          description: type=card 时的只读展示数据（不含外链/本地路径/base64）
+        actions:
+          type: array
+          description: card 只读动作；只允许 open / readonly，不新增写 API
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [open, readonly] }

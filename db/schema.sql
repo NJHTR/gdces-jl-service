@@ -278,6 +278,39 @@ CREATE TABLE IF NOT EXISTS memory_candidate (
   KEY idx_cand_status_created (status, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='记忆候选（pending 不生效；接受后才写 memory 并重渲染文件）';
 
+-- ============ 多模态资产（Phase1 MVP） ============
+-- 资产只存 data/assets/<pid>/<asset_id>；绝不写 blobs/photos/docs/records/memory/knowledge。
+-- 由 BFF 启动时 ensure_asset_table() 幂等创建；staged 24h，generated/derived 90d，软删除。
+CREATE TABLE IF NOT EXISTS asset (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  asset_id     CHAR(26) NOT NULL COMMENT 'ULID；对外 id，也是 data/assets/<pid>/ 下的文件名',
+  project_id   VARCHAR(32) NOT NULL,
+  user_id      BIGINT UNSIGNED NULL COMMENT '创建者；uploaded 引用是引用发起人',
+  task_id      BIGINT UNSIGNED NULL,
+  message_id   BIGINT UNSIGNED NULL,
+  kind         ENUM('image','audio','file') NOT NULL,
+  mime         VARCHAR(96) NOT NULL,
+  size         INT UNSIGNED NOT NULL,
+  sha256       CHAR(64) NOT NULL COMMENT '去元数据后的字节 sha',
+  origin       ENUM('uploaded','derived','generated') NOT NULL
+               COMMENT 'uploaded=引用现场照片/用户上传；derived=加工；generated=生成',
+  producer     VARCHAR(32) NOT NULL DEFAULT 'bff' COMMENT 'photo_ref / annotate / compose / tool 名',
+  model        VARCHAR(64) NULL,
+  prompt_hash  CHAR(64) NULL,
+  source_refs  JSON NULL COMMENT '来源引用，如 ["photo:55","asset:<ulid>"]',
+  caption      VARCHAR(300) NULL,
+  is_stored    TINYINT NOT NULL DEFAULT 1 COMMENT '1=字节在 data/assets',
+  path         VARCHAR(255) NULL COMMENT 'data/assets 下的相对路径',
+  status       ENUM('staged','committed','quarantined','deleted') NOT NULL DEFAULT 'staged',
+  expires_at   DATETIME NULL,
+  deleted_at   DATETIME NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_asset_id (asset_id),
+  KEY idx_asset_project_status (project_id, status),
+  KEY idx_asset_message (message_id),
+  KEY idx_asset_expires (status, expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='多模态资产（独立 data/assets；staged 不对外当最终产物）';
+
 -- 复核复议：一次、有界（同一条复核只能被申请一次；结果落库可追溯）
 CREATE TABLE IF NOT EXISTS review_appeal (
   id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

@@ -834,12 +834,13 @@ def _split_num(s):
 
 
 # ---------------------------------------------------------------- build_answer
-def build_answer(doc, cites, text):
+def build_answer(doc, cites, text, blocks=None):
     """结构一律从数据来，不从模型的话里抠。
 
     gaps  —— 按 schema 校验文书字段（validate_fields）
     cites —— 工具输出（search_standards 的结果）里带的条号
     text  —— 模型自己的话，原样保留，只做基础清洗
+    blocks —— 多模态 answer.blocks v1（可空；旧客户端只读 text/rich，天然兼容）
     """
     text = clean_reply(text)
 
@@ -858,6 +859,8 @@ def build_answer(doc, cites, text):
         "rich": rich_reply(text, missing if missing else None),
         "gaps": missing,
         "text": text,
+        # 旧客户端读 text/rich 不受影响；新客户端 opt-in 读 blocks（可为空数组）
+        "blocks": blocks if isinstance(blocks, list) else [],
         # 卡片必须跟着消息一起落库：否则刷新/重进页面，聊天里只剩文字，
         # 文书卡片消失（前端只从 task 的即时返回里拿 artifact）。
         "artifact": ({

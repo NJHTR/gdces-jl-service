@@ -23,6 +23,7 @@ from .appserver import _client, run_isolated, run_stream
 from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob)
 from .memcandidate import extract_memory_candidates
+from . import assetsvc
 
 
 # ---------------------------------------------------------------- Engine
@@ -676,6 +677,9 @@ def handle_bootstrap(params, user):
                     answer = json.loads(answer) if answer else None
                 except Exception:
                     answer = None
+            # 历史回答里的短签 URL 会过期：读的时候重签（不信任库里旧签名）
+            if isinstance(answer, dict):
+                answer = assetsvc.resign_answer(answer)
             artifact = (answer or {}).get("artifact") if isinstance(answer, dict) else None
             if not artifact:
                 artifact = artifact_by_task.get(m.get("task_id"))
@@ -767,6 +771,8 @@ def handle_bootstrap(params, user):
         "msgs": msgs, "records": records, "docs": docs,
         "memos": memos, "projMemos": proj_memos, "project": project_view,
         "pendingRules": pending_rules,
+        # 多模态 capability 广告：新客户端据此决定是否读 answer.blocks
+        "capabilities": ["answer.blocks.v1"],
     }}
 
 
@@ -1012,6 +1018,64 @@ def _drain_cites(ws, since):
             "source": "标准原文（公司购买版）",
         })
     return out[:5]
+
+
+# ---------------------------------------------------------------- _drain_blocks
+def _drain_blocks(ws):
+    """取走工具/技能这一轮写的多模态块：<ws>/.agent/blocks.json。
+
+    协议与 cites 一样：模型/工具只写"引用"（assetId / photoId / docId），
+    不写字节、不写本地路径、不写外链；BFF 负责校验、签短 URL、过滤越权引用。
+    支持 [block,...] 或 {"blocks":[...]} 两种写法。
+    """
+    fp = os.path.join(ws, ".agent", "blocks.json")
+    try:
+        if not os.path.exists(fp):
+            return []
+        with open(fp, encoding="utf-8") as f:
+            data = json.load(f)
+        os.remove(fp)
+    except (OSError, ValueError) as e:
+        sys.stderr.write("[blocks] 取块失败 %s: %r\n" % (fp, e))
+        return []
+    if isinstance(data, dict):
+        data = data.get("blocks") or []
+    return data if isinstance(data, list) else []
+
+
+def _client_wants_blocks(task_id):
+    """新客户端 opt-in：chat body.capabilities 里带 answer.blocks 才挂 blocks。
+
+    旧客户端不发 capabilities → blocks=[]，行为与现在完全一致（只有 text/rich）。
+    """
+    try:
+        rows = q("SELECT payload FROM task WHERE id=%s", (task_id,))
+        payload = rows[0].get("payload") if rows else None
+        if isinstance(payload, str):
+            payload = json.loads(payload or "{}")
+    except Exception as e:
+        sys.stderr.write("[blocks] 读 task capability 失败 %s: %r\n" % (task_id, e))
+        return False
+    caps = (payload or {}).get("capabilities")
+    if isinstance(caps, dict):
+        return bool(caps.get("blocks") or caps.get("answer.blocks"))
+    if isinstance(caps, list):
+        return any(str(c).strip() in ("blocks", "answer.blocks", "answer.blocks.v1")
+                   for c in caps)
+    return False
+
+
+def _turn_blocks(project_id, user_id, task_id):
+    """一轮结束时统一产出 blocks（文件协议 + capability + 校验 + 短签）。"""
+    ws = os.path.join(WS_ROOT, project_id)
+    raw = _drain_blocks(ws)     # 无论旧客户端是否 opt-in 都要清掉，避免串到下一轮
+    if not raw or not _client_wants_blocks(task_id):
+        return []
+    try:
+        return assetsvc.normalize_blocks(project_id, user_id, raw, task_id=task_id)
+    except Exception:
+        traceback.print_exc()
+        return []
 
 
 # ---------------------------------------------------------------- _cites_from_output
@@ -1703,7 +1767,11 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         sys.stderr.write("[perf] task %s turn=%dms total=%dms cmds=%d (复核转后台)\n"
                          % (task_id, turn_ms, turn_ms, len(trace)))
 
-        answer = build_answer(doc_row, cites, final_text)
+        # 多模态块：新客户端 opt-in 才有；旧客户端 blocks=[]（只有 text/rich）。
+        # 工具只写引用，这里统一校验 + 签短 URL + 挂 task。
+        blocks = _turn_blocks(project_id, user_id, task_id)
+
+        answer = build_answer(doc_row, cites, final_text, blocks)
 
         # 对账：文件写了但没入库的，要让人看见（不然用户以为系统里有，其实没有）
         try:
@@ -1725,15 +1793,24 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
              json.dumps(cites, ensure_ascii=False) if cites else None,
              json.dumps(answer, ensure_ascii=False) if answer else None))
 
+        # 多模态块只挂到本回答的 message（便于回查/审计；块本身已 commit）
+        try:
+            assetsvc.attach_message(blocks, message_id)
+        except Exception:
+            traceback.print_exc()
+
         # 有文书且开复核 → 复核是加分项，**不能挡 done**：
         # 先落 done（用户马上能拿到文书），再把复核丢后台；结果回写 message.answer.review
         # 和 task.result.review（客户端据此显示"复核中/复核通过/需修改"）。
         review_on = bool(doc_row and (os.environ.get("REVIEW_PASS") or "1") != "0" and message_id)
         done_doc = doc_row["id"] if doc_row else (new_doc[0]["id"] if new_doc else None)
+        result_obj = {"review": "pending"} if review_on else {}
+        if blocks:
+            result_obj["blocks"] = blocks
         exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, result=%s, "
                  "finished_at=NOW(3) WHERE id=%s",
                  (thread_id, done_doc,
-                  json.dumps({"review": "pending"}) if review_on else None, task_id))
+                  json.dumps(result_obj, ensure_ascii=False) if result_obj else None, task_id))
         sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令, "
                          f"review={'pending' if review_on else 'off'})\n")
 
@@ -1970,12 +2047,24 @@ def handle_chat(body, headers=None):
         return 200, {"code": 0, "data": {"duplicated": True, "messageId": dup[0]["id"],
                                         "taskId": dup[0].get("task_id")}}
 
+    # 新客户端 opt-in：capabilities 里带 answer.blocks 才挂多模态 blocks。
+    # 旧客户端不发 → 落库 caps=[]，回答只有 text/rich，行为完全不变。
+    caps = body.get("capabilities")
+    if isinstance(caps, dict):
+        caps = [k for k, v in caps.items() if v]
+    elif isinstance(caps, str):
+        caps = [caps]
+    elif not isinstance(caps, list):
+        caps = []
+    caps = [str(c)[:40] for c in caps][:10]
+
     task_id = exec_sql(
         "INSERT INTO task (project_id, user_id, client_id, kind, payload, status) "
         "VALUES (%s,%s,%s,'chat',%s,'queued')",
         (project_id, user_id, client_id,
          json.dumps({"text": prompt_text, "transcripts": transcripts,
-                     "images": [i.get("blob") or i.get("sha") for i in images]},
+                     "images": [i.get("blob") or i.get("sha") for i in images],
+                     "capabilities": caps},
                     ensure_ascii=False)))
 
     # 按 parts 组装：以前用 or 链，图片消息 transcripts 为空时
@@ -2094,6 +2183,24 @@ def handle_task(task_id, user=None):
     except (ValueError, TypeError):
         review_state = "off"
 
+    def _answer_of(m):
+        try:
+            a = json.loads(m["answer"]) if isinstance(m["answer"], str) else (m["answer"] or None)
+        except (ValueError, TypeError):
+            a = None
+        # 短签 URL 过期要重签；块里的 assetId 不变
+        return assetsvc.resign_answer(a) if isinstance(a, dict) else a
+
+    # _pollTask 直接拿 blocks：取最后一条带 blocks 的 assistant 回答
+    poll_blocks = []
+    for m in reversed(msgs):
+        if m.get("role") != "assistant":
+            continue
+        a = _answer_of(m)
+        if isinstance(a, dict) and isinstance(a.get("blocks"), list) and a["blocks"]:
+            poll_blocks = a["blocks"]
+            break
+
     return 200, {"code": 0, "data": {
         "progress": progress,
         "reviewStatus": review_state,
@@ -2101,6 +2208,8 @@ def handle_task(task_id, user=None):
         "queueAhead": queue_ahead,
         "artifact": artifact,
         "noSource": _no_source(msgs),
+        # 多模态：客户端轮询任务时能直接拿 blocks（也可从 messages[].answer.blocks 取）
+        "blocks": poll_blocks,
         "id": t["id"], "status": t["status"], "error": t["error"],
         "threadId": t["thread_id"], "turnId": t["turn_id"],
         "createdAt": str(t["created_at"]), "finishedAt": str(t["finished_at"]),
@@ -2109,7 +2218,7 @@ def handle_task(task_id, user=None):
              "trace": json.loads(m["trace"]) if m["trace"] else None,
                           "traceSum": m["trace_sum"], "ms": m["ms"], "msLabel": ms_label(m["ms"]),
              "cites": json.loads(m["cites"]) if isinstance(m["cites"], str) else (m["cites"] or []),
-             "answer": json.loads(m["answer"]) if isinstance(m["answer"], str) else (m["answer"] or None)}
+             "answer": _answer_of(m)}
             for m in msgs
         ],
     }}

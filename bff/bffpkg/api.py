@@ -23,6 +23,9 @@ from .biz import (
 from .agent import (Engine, _cites_from_output, _parse_cli_jsonl, _run_agent_loop_inner, _run_cli_turn, _set_progress, _user_lock, build_context, engine, handle_bootstrap, handle_chat, handle_memory_create, handle_memory_delete, handle_memory_list, handle_memory_patch, handle_messages, handle_memory_recall, handle_task, handle_task_cancel, handle_task_list, handle_task_retry, learn_from_turn, render_agents_md, run_agent_loop, run_turn, sweeper)
 from .memcandidate import (ensure_memory_candidate_table, handle_candidate_create,
                            handle_candidate_decide, handle_candidate_list)
+from .assetsvc import (delete_asset, ensure_asset_table, get_asset_content, get_asset_meta,
+                       handle_asset_commit, handle_asset_create_json, handle_asset_issue,
+                       is_content_path, maybe_gc)
 
 
 # ---------------------------------------------------------------- Handler
@@ -61,10 +64,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_asset_bytes(self, body, ctype, download=False):
+        """资产内容：短签可直连（小程序 <image> 不带 header）；加安全响应头。"""
+        self.send_response(200)
+        self.send_header("Content-Type", ctype or "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "private, max-age=300")
+        if download:
+            self.send_header("Content-Disposition", "attachment")
+        else:
+            self.send_header("Content-Disposition", "inline")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         try:
             path = urlparse(self.path).path
-            if AUTH_REQUIRED and path not in ("/healthz", "/admin", "/admin/", "/api/v1/bootstrap"):
+            # 资产内容走"短签 URL"：小程序 <image> 不能带 Bearer header，
+            # 所以这一条不能被全局鉴权拦住（handler 内验签/验项目权限）。
+            if AUTH_REQUIRED and path not in ("/healthz", "/admin", "/admin/", "/api/v1/bootstrap") \
+                    and not is_content_path(path):
                 if not resolve_token(bearer(self.headers)):
                     return self._send(401, {"code": 401, "message": "未登录或令牌失效"})
             if path == "/healthz":
@@ -191,6 +211,22 @@ class Handler(BaseHTTPRequestHandler):
             m2 = re.match(r"^/api/v1/blobs/([a-f0-9]{64})$", path)
             if m2:
                 return self._send(*handle_blob(m2.group(1)))
+            # ---- 多模态资产：短签内容 / 元数据 ----
+            qs3 = parse_qs(urlparse(self.path).query)
+            m3 = re.match(r"^/api/v1/assets/([0-9A-HJKMNP-TV-Z]{26})/content$", path)
+            if m3:
+                got = get_asset_content(
+                    m3.group(1), resolve_token(bearer(self.headers)),
+                    exp=q1(qs3, "e"), sig=q1(qs3, "s"),
+                    dl=(q1(qs3, "dl") or "") in ("1", "true", "yes"))
+                if got and got[0] == 200 and isinstance(got[1], bytes):
+                    return self._send_asset_bytes(
+                        got[1], got[2], got[3] if len(got) > 3 else False)
+                return self._send(*got)
+            m3 = re.match(r"^/api/v1/assets/([0-9A-HJKMNP-TV-Z]{26})$", path)
+            if m3:
+                return self._send(*get_asset_meta(
+                    m3.group(1), resolve_token(bearer(self.headers))))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
@@ -205,6 +241,10 @@ class Handler(BaseHTTPRequestHandler):
             if m:
                 return self._send(*handle_memory_delete(int(m.group(1)),
                                                         resolve_token(bearer(self.headers))))
+            m = re.match(r"^/api/v1/assets/([0-9A-HJKMNP-TV-Z]{26})$", path)
+            if m:
+                return self._send(*delete_asset(m.group(1),
+                                                resolve_token(bearer(self.headers))))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
@@ -285,6 +325,32 @@ class Handler(BaseHTTPRequestHandler):
                     if d.get("sha256"):
                         d["url"] = f"/api/v1/blobs/{d['sha256']}"
                 return self._send(code, payload)
+
+            # ---- 多模态资产签发：原始字节 / multipart / JSON（photoId 真实照片引用）----
+            if path == "/api/v1/assets":
+                usr = resolve_token(bearer(self.headers))
+                ctype = self.headers.get("Content-Type") or ""
+                if "application/json" in ctype:
+                    try:
+                        abody = json.loads(raw or b"{}")
+                    except Exception:
+                        abody = {}
+                    return self._send(*handle_asset_create_json(abody, usr))
+                if "multipart/form-data" in ctype:
+                    data, fields = parse_multipart_full(raw, ctype)
+                    for k, v in (fields or {}).items():
+                        qs.setdefault(k, [v])
+                    return self._send(*handle_asset_issue(qs, data, usr))
+                qs.setdefault("contentType", [ctype])
+                return self._send(*handle_asset_issue(qs, raw, usr))
+            am = re.match(r"^/api/v1/assets/([0-9A-HJKMNP-TV-Z]{26})/commit$", path)
+            if am:
+                try:
+                    cbody = json.loads(raw or b"{}")
+                except Exception:
+                    cbody = {}
+                return self._send(*handle_asset_commit(
+                    am.group(1), cbody, resolve_token(bearer(self.headers))))
 
             try:
                 body = json.loads(raw or b"{}")
@@ -461,6 +527,12 @@ def main():
         traceback.print_exc()
     # Phase1 记忆候选表：服务自己保证存在（部署不传 db/；重启不丢表）
     ensure_memory_candidate_table()
+    # 多模态资产表：同样服务自己 ensure；顺带跑一次过期回收
+    ensure_asset_table()
+    try:
+        maybe_gc()
+    except Exception:
+        traceback.print_exc()
     # 监听 0.0.0.0：MCP 工具容器在 jl-net（172.19.0.0/16）里，
     # 只绑 127.0.0.1 的话容器永远 fetch failed，文书就入不了库（踩过）。
     # 要收回只给本机访问，设 BIND_HOST=127.0.0.1。
