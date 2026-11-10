@@ -66,6 +66,17 @@ def load_bff():
     return core, biz, mc
 
 
+def user_project_md_paths(core, uid, pid):
+    """个人×项目记忆文件可能落两处（看服务进程的 JL_ENGINE_MEMORY）：
+    引擎记忆开 → data/homes/<uid>/memories/projects/<pid>.md；
+    引擎记忆关 → data/memory/projects/<uid>/<pid>.md。
+    测试进程的环境不等于服务进程，所以两处都看。"""
+    return [
+        os.path.join(core.HOMES_ROOT, str(uid), "memories", "projects", "%s.md" % pid),
+        os.path.join(core.WS_ROOT, "..", "memory", "projects", str(uid), "%s.md" % pid),
+    ]
+
+
 # ---------------------------------------------------------------- HTTP
 def api(method, path, body=None, token=None, base=None):
     base = base or DEFAULT_BASE
@@ -202,7 +213,8 @@ def run_http(args):
 
         # ---- 3) pending 不改变 rules.md / memory ----
         check("pending 项目候选不改 records/rules.md", rules_text() == rules_before)
-        check("pending 不写 memory", memory_rows(PREFIX + "%") == [])
+        pending_mem = memory_rows(PREFIX + "%")
+        check("pending 不写 memory", not pending_mem, repr(pending_mem)[:300])
 
         # ---- 4) 接受 user / project_user ----
         code, p = api("POST", "/api/v1/memory-candidates/%s/accept" % u["id"],
@@ -240,15 +252,19 @@ def run_http(args):
         check("project_user 写 memory(project_id=项目)",
               bool(m2) and m2["scope"] == "user" and str(m2["project_id"]) == str(pid),
               repr(m2))
-        pm_path = os.path.join(core.WS_ROOT, "..", "memory", "projects", str(uid),
-                               "%s.md" % pid)
+        pm_paths = user_project_md_paths(core, uid, pid)
         pm_text = ""
-        try:
-            with open(pm_path, encoding="utf-8") as f:
-                pm_text = f.read()
-        except OSError:
-            pass
-        check("个人×项目文件已刷新", texts["project_user"] in pm_text, pm_path)
+        pm_used = ""
+        for cand_path in pm_paths:
+            try:
+                with open(cand_path, encoding="utf-8") as f:
+                    pm_text = f.read()
+                pm_used = cand_path
+                break
+            except OSError:
+                continue
+        check("个人×项目文件已刷新", texts["project_user"] in pm_text,
+              "%r（找过 %r）" % (texts["project_user"], pm_paths))
 
         # ---- 5) 拒绝 project 候选：不写 memory / 不改 rules ----
         code, p = api("POST", "/api/v1/memory-candidates/%s/reject" % pr["id"],
@@ -310,10 +326,13 @@ def run_http(args):
             biz.render_user_memory(uid)
             biz.render_user_project_md(uid, pid)
             biz.render_rules_md(pid)
-            shutil.rmtree(os.path.join(core.WS_ROOT, "..", "memory", "users", str(uid)),
-                          ignore_errors=True)
-            shutil.rmtree(os.path.join(core.WS_ROOT, "..", "memory", "projects", str(uid)),
-                          ignore_errors=True)
+            if str(uid).startswith("9999"):     # 只清测试账号的渲染目录，别碰真人
+                shutil.rmtree(os.path.join(core.WS_ROOT, "..", "memory", "users", str(uid)),
+                              ignore_errors=True)
+                shutil.rmtree(os.path.join(core.WS_ROOT, "..", "memory", "projects", str(uid)),
+                              ignore_errors=True)
+                shutil.rmtree(os.path.join(core.HOMES_ROOT, str(uid), "memories", "projects"),
+                              ignore_errors=True)
             print("  (清理候选 %d 条 / 记忆 %d 条)" % (n1, n2))
         except Exception:
             traceback.print_exc()
