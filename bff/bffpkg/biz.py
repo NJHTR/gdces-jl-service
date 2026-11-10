@@ -996,6 +996,11 @@ def handle_rule_decide(rid, body, user=None):
                  "WHERE id=%s", (who, rid))
         return 200, {"code": 0, "data": {"id": rid, "status": "rejected"}}
 
+    # 接受 = 全项目生效；只有总监/项目管理员可以确认。
+    if not can_confirm_project_rule(row["project_id"], user):
+        return 403, {"code": 403,
+                     "message": "项目规矩需要总监/项目管理员确认；你提交的会留在待确认里"}
+
     # 确认：同一个项目里已有同样内容的规矩就不重复写
     dup = q("SELECT id FROM memory WHERE scope='project' AND owner_id=%s AND text=%s LIMIT 1",
             (row["project_id"], row["text"]))
@@ -2208,5 +2213,17 @@ def guard_project(project_id, user):
     if member_of(project_id, user):
         return None
     return 403, {"code": 403, "message": "无权访问该项目"}
+
+
+def can_confirm_project_rule(project_id, user):
+    """项目全员规矩只能由总监/项目管理员确认，普通成员只能提案。"""
+    if not AUTH_REQUIRED:
+        return True
+    if not user:
+        return False
+    rows = q("SELECT role FROM project_member WHERE project_id=%s AND user_id=%s",
+             (project_id, user["id"]))
+    role = (rows[0].get("role") or "").strip().lower() if rows else ""
+    return role in ("owner", "admin", "总监", "项目总监")
 
 

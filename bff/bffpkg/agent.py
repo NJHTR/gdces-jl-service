@@ -386,6 +386,25 @@ def handle_memory_create(body):
     pid = (body.get("projectId") or "").strip()
     if scope == "project":
         pid = str(owner)
+        # 项目规矩不能由任何一个成员直接写生效；先进入待确认队列。
+        # 确认后由 handle_rule_decide 写 memory + 渲染 records/rules.md。
+        try:
+            dup = q("SELECT id, status FROM rule_proposal "
+                    "WHERE project_id=%s AND text=%s LIMIT 1", (pid, kept))
+            if dup:
+                return 200, {"code": 0, "data": {
+                    "id": dup[0]["id"], "status": dup[0]["status"],
+                    "pending": dup[0]["status"] == "pending", "duplicated": True}}
+            rid = exec_sql(
+                "INSERT INTO rule_proposal (project_id, user_id, text, source, source_ref) "
+                "VALUES (%s,%s,%s,%s,%s)",
+                (pid, None, kept, (body.get("source") or "manual").strip()[:32],
+                 (body.get("sourceRef") or "").strip()[:64] or None))
+            return 200, {"code": 0, "data": {
+                "id": rid, "status": "pending", "pending": True, "proposal": True}}
+        except Exception as e:
+            sys.stderr.write("[memory] 建项目规矩提案失败: %r\n" % (e,))
+            return 500, {"code": 500, "message": "项目规矩提案没写进去，请重试"}
     if scope == "user" and pid:
         applies_to = "user:%s@project:%s" % (owner, pid)
     else:
@@ -737,6 +756,20 @@ def learn_from_turn(project_id, user_id, user_text, assistant_text, trace):
         if scope not in ("user", "project") or len(text) < 4:
             continue
         owner = str(user_id) if scope == "user" else project_id
+        # 项目级抽取只能进候选，不能直接写生效的 memory。
+        if scope == "project":
+            try:
+                dup = q("SELECT id FROM rule_proposal WHERE project_id=%s AND text=%s LIMIT 1",
+                        (project_id, text[:512]))
+                if not dup:
+                    rid = exec_sql(
+                        "INSERT INTO rule_proposal (project_id, user_id, text, source) "
+                        "VALUES (%s,%s,%s,'learned')",
+                        (project_id, str(user_id), text[:512]))
+                    added.append({"id": rid, "scope": "proposal", "text": text[:512]})
+            except Exception as e:
+                sys.stderr.write("[learn] 写项目候选失败: %r\n" % (e,))
+            continue
         # 去重：同 owner 下已有相同或高度相似的，就跳过
         # 去重：跨 user/project 一起比 —— 同一条习惯被模型时而判成 user 时而 project，
         # 只按同 scope 比会重复。宁可少记，不要记两遍。
