@@ -1059,7 +1059,55 @@ def render_user_project_md(user_id, project_id):
     return path
 
 
-# ---------------------------------------------------------------- render_rules_md
+# ---------------------------------------------------------------- render_user_memory
+def render_user_memory(user_id):
+    """个人记忆的工作区视图：data/memory/users/<uid>/MEMORY.md
+
+    memory 表是账本；模型不查数据库，直接读这个文件。
+    项目内个人习惯另见 data/memory/projects/<uid>/<pid>.md。
+    """
+    d = os.path.join(WS_ROOT, "..", "memory", "users", str(user_id))
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError as e:
+        sys.stderr.write("[mem] 建个人记忆目录失败 %s: %r\n" % (d, e))
+        return None
+    rows = q("SELECT text, project_id FROM memory WHERE scope='user' AND owner_id=%s "
+             "AND status=1 ORDER BY id", (str(user_id),))
+    cross, per_project = [], []
+    for r in rows:
+        t = (r.get("text") or "").strip()
+        if not t:
+            continue
+        if r.get("project_id"):
+            per_project.append((r.get("project_id"), t))
+        else:
+            cross.append(t)
+    lines = ["# 我的记忆", "",
+             "> 由 memory 表渲染；跨项目偏好在「跨项目」，项目内习惯在「项目内」。", ""]
+    lines.append("## 跨项目")
+    lines.extend(["- %s" % t for t in cross] or ["- （暂无）"])
+    lines.append("")
+    lines.append("## 项目内")
+    if per_project:
+        for pid, t in per_project:
+            lines.append("- [%s] %s" % (pid, t))
+    else:
+        lines.append("- （暂无）")
+    body = "\n".join(lines).rstrip() + "\n"
+    path = os.path.join(d, "MEMORY.md")
+    try:
+        old = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                old = f.read()
+        if old != body:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(body)
+    except OSError as e:
+        sys.stderr.write("[mem] 写个人记忆失败 %s: %r\n" % (path, e))
+        return None
+    return path
 def render_rules_md(project_id):
     """把项目规矩渲染成 <ws>/records/rules.md（memory 表是条目账本，这里是视图）。
 

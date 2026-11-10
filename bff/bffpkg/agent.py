@@ -21,7 +21,7 @@ import pymysql
 """
 from .appserver import _client, run_isolated, run_stream
 from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
-from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob)
+from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob)
 
 
 # ---------------------------------------------------------------- Engine
@@ -284,6 +284,11 @@ def build_context(project_id, user_id, query=None):
         mine.append("摘要 `%s`" % os.path.join(mem_base, "memory_summary.md"))
     if os.path.isfile(os.path.join(mem_base, "MEMORY.md")):
         mine.append("跨项目记忆 `%s`" % os.path.join(mem_base, "MEMORY.md"))
+    # BFF 渲染的个人记忆视图（memory 表是账本，这个是可读文件）
+    user_mem = os.path.abspath(os.path.join(WS_ROOT, "..", "memory", "users",
+                                             str(user_id), "MEMORY.md"))
+    if os.path.isfile(user_mem):
+        mine.append("我的记忆 `%s`" % user_mem)
     if os.environ.get("JL_ENGINE_MEMORY", "0") == "1":
         proj_mem = os.path.join(mem_base, "projects", "%s.md" % project_id)
     else:
@@ -395,6 +400,8 @@ def handle_memory_create(body):
             exec_sql("UPDATE memory SET hits=hits+1, status=1, updated_at=NOW(3) WHERE id=%s",
                      (dup[0]["id"],))
             _rerender_if_project(scope, str(owner))
+            if scope == "user":
+                render_user_memory(owner)
             return 200, {"code": 0, "data": {"id": dup[0]["id"], "duplicated": True,
                                              "saved_to": "", "rendered": None,
                                              "applies_to": applies_to}}
@@ -429,6 +436,8 @@ def handle_memory_create(body):
         (scope, str(owner), pid or None, kept, body.get("source") or "manual",
          source_ref, applies_to))
     rendered = _rerender_if_project(scope, str(owner))
+    if scope == "user":
+        render_user_memory(owner)
     # 个人×项目：必须在 INSERT 之后再渲染（渲染是查表生成的，先渲染会写成"（空）"）
     if scope == "user" and pid:
         from .biz import render_user_project_md
@@ -464,6 +473,8 @@ def handle_memory_patch(mid, body, user=None):
         exec_sql("UPDATE memory SET status=%s, updated_at=NOW(3) WHERE id=%s",
                  (1 if body["status"] else 0, mid))
     rendered = _rerender_if_project(rows[0]["scope"], rows[0]["owner_id"])
+    if rows[0].get("scope") == "user":
+        render_user_memory(rows[0]["owner_id"])
     if rows[0].get("project_id"):
         from .biz import render_user_project_md
         rendered = render_user_project_md(rows[0]["owner_id"], rows[0]["project_id"]) or rendered
@@ -478,6 +489,8 @@ def handle_memory_delete(mid, user=None):
         return deny
     exec_sql("DELETE FROM memory WHERE id=%s", (mid,))
     rendered = _rerender_if_project(rows[0]["scope"], rows[0]["owner_id"]) if rows else None
+    if rows and rows[0].get("scope") == "user":
+        render_user_memory(rows[0]["owner_id"])
     # 个人×项目的行删掉后，那个人的项目记忆文件也要重渲染（否则文件里还留着）
     if rows and rows[0].get("project_id"):
         from .biz import render_user_project_md
