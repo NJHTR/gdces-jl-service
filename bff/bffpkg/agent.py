@@ -22,6 +22,7 @@ import pymysql
 from .appserver import _client, run_isolated, run_stream
 from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob)
+from .memcandidate import extract_memory_candidates
 
 
 # ---------------------------------------------------------------- Engine
@@ -809,6 +810,27 @@ def learn_from_turn(project_id, user_id, user_text, assistant_text, trace):
     return added
 
 
+# ---------------------------------------------------------------- _post_turn_learn
+def _post_turn_learn(project_id, user_id, user_text, assistant_text, trace):
+    """任务收尾的统一学习入口。
+
+    · MEMORY_LEARN=1：旧学习路径（默认关；直接写 memory 的历史开关，别动默认值）
+    · MEMORY_EXTRACT=1：Phase1 候选抽取（默认关；只写 memory_candidate 的 pending）
+    两条都必须"学习失败不影响任务 done"。
+    """
+    try:
+        learn_from_turn(project_id, user_id, user_text, assistant_text, trace)
+    except Exception:
+        traceback.print_exc()
+    try:
+        got = extract_memory_candidates(project_id, user_id, user_text, assistant_text, trace)
+        if got:
+            sys.stderr.write("[memcand] 抽取候选 %d 条: " % len(got) +
+                             " | ".join("%s:%s" % (g["scope"], g["text"][:20]) for g in got) + "\n")
+    except Exception:
+        traceback.print_exc()
+
+
 # ---------------------------------------------------------------- run_agent_loop
 def run_agent_loop(task_id, project_id, user_id, text):
     """模型决定调哪个工具，BFF 负责执行 —— 不依赖引擎的 shell"""
@@ -897,7 +919,7 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
         sys.stderr.write(f"[loop] task {task_id} done ({ms}ms, {len(trace)} 次工具)\n")
 
         # 收尾后学一手：这轮有没有值得记住的习惯/规矩
-        learn_from_turn(project_id, user_id, text, final_text, trace)
+        _post_turn_learn(project_id, user_id, text, final_text, trace)
 
     except Exception as e:
         traceback.print_exc()
@@ -1284,7 +1306,7 @@ def _review_async(task_id, project_id, user_id, text, images, doc_id, final_text
         except Exception:
             traceback.print_exc()
         try:
-            learn_from_turn(project_id, user_id, text, final_text, trace)
+            _post_turn_learn(project_id, user_id, text, final_text, trace)
         except Exception as e:
             # 这条绝对不能静默：学习功能曾 403 几个月没人发现（R5）
             print("[learn] 学习失败 project=%s user=%s: %r" % (project_id, user_id, e), flush=True)
@@ -1686,7 +1708,7 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                              % (task_id, message_id, doc_row["id"]))
             return
 
-        learn_from_turn(project_id, user_id, text, final_text, trace)
+        _post_turn_learn(project_id, user_id, text, final_text, trace)
 
     except subprocess.TimeoutExpired:
         exec_sql("UPDATE task SET status='failed', error='超时（10 分钟）', finished_at=NOW(3) WHERE id=%s",

@@ -117,16 +117,23 @@ CREATE TABLE IF NOT EXISTS photo (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='影像元数据（本体在 data/blobs）';
 
 -- ============ 记忆 ============
+-- 注意：线上 memory 表比旧版 schema 多了 project_id / source_ref / applies_to / updated_at，
+-- 这里按线上实际结构同步（2026-11-10）。改动线上表前先 SHOW CREATE TABLE 对一遍。
 CREATE TABLE IF NOT EXISTS memory (
   id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   scope      ENUM('user','project') NOT NULL,
   owner_id   VARCHAR(32) NOT NULL COMMENT 'scope=user 时是 user_id，等于 project 时是 project_id',
+  project_id VARCHAR(32) NULL COMMENT 'scope=user 且只在本项目生效时=项目 id；跨项目/项目共享为空',
   text       VARCHAR(512) NOT NULL,
   source     ENUM('manual','auto','learned','confirmed','correction') NOT NULL DEFAULT 'manual',
+  source_ref VARCHAR(64) NULL COMMENT '来源引用：proposal:<id> / candidate:<id>',
+  applies_to VARCHAR(64) NULL COMMENT 'user:<uid> / user:<uid>@project:<pid> / project:<pid>',
   hits       INT NOT NULL DEFAULT 0 COMMENT '被引用次数',
   status     TINYINT NOT NULL DEFAULT 1 COMMENT '1=生效 0=停用',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_owner (scope, owner_id, status)
+  updated_at DATETIME(3) NULL,
+  KEY idx_owner (scope, owner_id, status),
+  KEY idx_mem_proj (scope, owner_id, project_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='记忆（三层里的两层，会话层在引擎里）';
 
 -- ============ 任务 ============
@@ -248,6 +255,28 @@ CREATE TABLE IF NOT EXISTS rule_proposal (
   KEY idx_pending (project_id, status),
   KEY idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='项目规矩提案（待确认）';
+
+-- 记忆候选（Phase1）：服务端/Agent 只能"提"，人确认后才进 memory（再重渲染文件视图）。
+-- pending 永远不进 memory / records/rules.md / 提示；表由 BFF 启动时 ensure 幂等创建。
+CREATE TABLE IF NOT EXISTS memory_candidate (
+  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  project_id        VARCHAR(32) NOT NULL COMMENT '发起/归属项目（user 候选也记来源项目）',
+  user_id           VARCHAR(32) NOT NULL COMMENT '候选归属人（个人域）；project 候选是提交人',
+  scope             ENUM('user','project_user','project') NOT NULL
+                    COMMENT 'user=跨项目个人 / project_user=个人×本项目 / project=项目共享',
+  text              VARCHAR(512) NOT NULL,
+  evidence          TEXT NULL COMMENT '为什么提这条（用户原话/字段改动摘录）',
+  source_task_id    BIGINT UNSIGNED NULL,
+  source_message_id BIGINT UNSIGNED NULL,
+  status            ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending'
+                    COMMENT 'pending 永远不进 memory / 文件',
+  decided_by        VARCHAR(32) NULL,
+  decided_at        DATETIME(3) NULL,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_cand_pending (project_id, scope, status),
+  KEY idx_cand_user (user_id, status),
+  KEY idx_cand_status_created (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='记忆候选（pending 不生效；接受后才写 memory 并重渲染文件）';
 
 -- 复核复议：一次、有界（同一条复核只能被申请一次；结果落库可追溯）
 CREATE TABLE IF NOT EXISTS review_appeal (
