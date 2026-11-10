@@ -600,7 +600,8 @@ SYSTEM_PROMPT = """你是现场监理助手，帮监理员把现场的情况记�
 3. 部位、事由、问题这些关键信息缺失时，先问一句；不要生成空壳文书。非关键字段可以留空标「待补」。
 4. 查到规范就把条号写进 bases；查不到就明说「没查到依据」，不要凭印象写条号。
 5. 写文书（create_doc_draft）之前，必须有 obj 或至少一个非空字段；后端会拒绝空文书。
-6. 最多调 8 次工具；证据够了就 final。
+6. 用户要看现场图时：先用 search_photos 拿到真实 photoId，再调 annotate_photo（标注）或 compare_photos（整改前后对比）；图会自动挂到本次回答上，正文照常写一句话。不要编造照片、不要输出图片字节或本地路径；没有真实 photoId 就不要调这两个工具。
+7. 最多调 8 次工具；证据够了就 final。
 """
 
 
@@ -710,6 +711,14 @@ def describe_tool(name, args):
     if name == "search_records":
         place = a.get("place") or a.get("keyword") or ""
         return f"查历史记录" + (f" · {place}" if place else "")
+    if name == "search_photos":
+        q = a.get("q") or a.get("place") or ""
+        return f"查现场照片" + (f" · {q}" if q else "")
+    if name == "annotate_photo":
+        return "标注现场照片 #%s" % (a.get("photoId") or "?")
+    if name == "compare_photos":
+        return "整改前后对比 #%s ↔ #%s" % (a.get("beforePhotoId") or "?",
+                                          a.get("afterPhotoId") or "?")
     if name == "get_project":
         return "读工程概况"
     if name == "get_context":

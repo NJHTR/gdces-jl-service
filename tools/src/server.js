@@ -2,7 +2,7 @@
 // MCP stdio 服务（JSON-RPC 2.0），零依赖协议实现，业务在 tools.js
 // stdout 只走协议，日志一律走 stderr
 import { createInterface } from "node:readline";
-import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getSchema, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule } from "./tools.js";
+import { getProject, searchRecords, searchStandards, createDocDraft, validateDoc, getSchema, getContext, captionPhoto, searchPhotos, recordReview, recallMemory, proposeRule, annotatePhoto, comparePhotos } from "./tools.js";
 import { health } from "./db.js";
 
 const SERVER = { name: "jl-tools", version: "0.1.0" };
@@ -208,6 +208,57 @@ const TOOLS = [
     },
   },
   {
+    name: "annotate_photo",
+    description:
+      "把一张**真实现场照片**做成标注图并放进本次回答（回答里会出现这张图）。" +
+      "photoId 必须是先用 search_photos 查到的真实 id，不能编；它只给原图画框/编号/标签，图上会带「派生图·基于现场照片」角标，**不是现场原图**。" +
+      "不会生成或伪造现场照片；没有真实 photoId 就不要调用。" +
+      "同一张照片本轮重复调用会自动去重；单轮最多 4 张图。调完在正文里照常写一句话即可。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        photoId: { type: "number", description: "真实照片 id（先用 search_photos 查）" },
+        boxes: {
+          type: "array",
+          description: "要标注的框，坐标是原图像素；最多 20 个",
+          items: {
+            type: "object",
+            properties: {
+              x: { type: "number" },
+              y: { type: "number" },
+              w: { type: "number" },
+              h: { type: "number" },
+              label: { type: "string", description: "框旁短标签，如 裂缝 / 整改前后" },
+            },
+            required: ["x", "y", "w", "h"],
+          },
+        },
+        caption: { type: "string", description: "图片底部说明（可选，别写外链）" },
+      },
+      required: ["projectId", "photoId"],
+    },
+  },
+  {
+    name: "compare_photos",
+    description:
+      "把两张**真实现场照片**拼成「整改前 / 整改后」对比图并放进本次回答。" +
+      "两个 id 必须先用 search_photos 查到真实照片，且不能是同一张；图上两侧会带来源水印（现场照片#id/日期/部位）和「派生图」角标，" +
+      "不伪造现场。单轮最多 4 张图（含标注图）；同一对照片本轮重复调用会自动去重。调完在正文里照常写一句话。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string" },
+        beforePhotoId: { type: "number", description: "整改前真实照片 id" },
+        afterPhotoId: { type: "number", description: "整改后真实照片 id" },
+        title: { type: "string", description: "拼版标题，如 4#楼东侧外架整改前后" },
+        beforeLabel: { type: "string", description: "左侧标签，默认 整改前" },
+        afterLabel: { type: "string", description: "右侧标签，默认 整改后" },
+      },
+      required: ["projectId", "beforePhotoId", "afterPhotoId"],
+    },
+  },
+  {
     name: "get_context",
     description: "一次性拿到项目信息 + 项目记忆 + 工作区路径。会话开始时用，省得连调几个工具。",
     inputSchema: {
@@ -231,6 +282,8 @@ const HANDLERS = {
   record_review: recordReview,
   propose_rule: proposeRule,
   recall_memory: recallMemory,
+  annotate_photo: annotatePhoto,
+  compare_photos: comparePhotos,
 };
 
 function send(msg) {

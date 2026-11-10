@@ -379,6 +379,8 @@ paths:
         源图必须是本项目 photo（按 photoId 读 blob）；输出 PNG 落 data/assets，
         asset(origin=derived, producer=annotate, sourceRefs=["photo:<id>"], model=pillow, prompt_hash, status=committed)。
         角标「派生图·基于现场照片」；boxes 使用原图像素坐标，越界会裁剪，全部越界返回 400。
+        Agent 侧工具：`jl-tool annotate_photo`（同一实现；模型需先用 search_photos 拿真实 photoId，
+        产物自动写入本轮 `.agent/blocks.json` 并挂到 answer.blocks；不伪造现场照片）。
       requestBody:
         required: true
         content:
@@ -408,6 +410,8 @@ paths:
       description: |
         两张源图都必须是本项目 photo；两侧带来源水印（现场照片#id/日期/部位）与「整改前/整改后」标签，
         角标「派生图·基于现场照片」。同一张照片做对比返回 400（不伪造现场）。
+        Agent 侧工具：`jl-tool compare_photos`（同一实现；模型先用 search_photos 拿两个真实 photoId，
+        产物自动挂到 answer.blocks）。
       requestBody:
         required: true
         content:

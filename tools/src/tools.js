@@ -402,3 +402,207 @@ export async function recordReview({ docId, verdict, findings = [], counter = []
   }
   return payload.data;
 }
+
+/* ================================================================
+ * 多模态：真实照片标注 / 整改前后对比（把 image_ref 写进本轮回答）
+ *
+ * 链路：模型先 search_photos 拿真实 photoId → 调这里 →
+ *   这里只调 BFF 的 /api/v1/photos/annotate|compare（不自己画图、不写证据）→
+ *   BFF 返回 image_ref block → 合并写入 <ws>/.agent/blocks.json →
+ *   本轮结束时 BFF `_turn_blocks` 取走并挂到 message.answer.blocks。
+ *
+ * 硬边界：
+ *   · 只接受真实 photoId；不生成/伪造现场照片；
+ *   · 不写 photo/doc/records/memory/knowledge，产物只走 data/assets（BFF asset 服务）；
+ *   · blocks.json 只存引用（assetId/sourceRefs/url），不存 base64、本地路径、外链；
+ *   · 同一张源照片本轮重复调只保留一条（不重复生成资产）；单轮图片上限 4 张。
+ * ================================================================ */
+const IMAGE_BLOCK_CAP = 4;
+const FILE_BLOCK_CAP = 2;
+const CARD_BLOCK_CAP = 3;
+const TEXT_BLOCK_CAP = 6;
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+function blocksFilePath(projectId) {
+  return path.join(wsPath(projectId), ".agent", "blocks.json");
+}
+
+function looksUnsafe(s) {
+  const text = String(s || "");
+  if (!text) return false;
+  return /data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,/i.test(text)
+    || /(https?:\/\/|file:\/\/)/i.test(text)
+    || /(^|[\s"'(])(\/(home|tmp|var|etc)\/|[A-Za-z]:[\\/])/.test(text);
+}
+
+function readBlocks(projectId) {
+  try {
+    const fp = blocksFilePath(projectId);
+    if (!fs.existsSync(fp)) return [];
+    const raw = JSON.parse(fs.readFileSync(fp, "utf8"));
+    const arr = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.blocks) ? raw.blocks : []);
+    return arr.filter((b) => b && typeof b === "object" && b.type);
+  } catch (e) {
+    console.error("[blocks] 读失败（按空处理）:", e && e.message);
+    return [];
+  }
+}
+
+function writeBlocks(projectId, blocks) {
+  const fp = blocksFilePath(projectId);
+  fs.mkdirSync(path.dirname(fp), { recursive: true });
+  const tmp = fp + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify({ blocks }, null, 2), "utf8");
+  fs.renameSync(tmp, fp);
+  return fp;
+}
+
+function countBlocks(blocks, type) {
+  return blocks.filter((b) => b.type === type).length;
+}
+
+/** 只保留 answer.blocks 协议内字段；校验引用形态，不合法直接拒绝（不伪造块）。 */
+function sanitizeBlock(raw, expectType) {
+  if (!raw || raw.type !== expectType) {
+    throw new Error(`服务端没有返回 ${expectType} block，已放弃（不伪造图片）`);
+  }
+  const out = {
+    type: raw.type,
+    assetId: String(raw.assetId || ""),
+    caption: String(raw.caption || "").slice(0, 300),
+    origin: raw.origin || "",
+    mime: raw.mime || "",
+    sourceRefs: Array.isArray(raw.sourceRefs) ? raw.sourceRefs.map(String) : [],
+    url: String(raw.url || ""),
+  };
+  if (!ULID_RE.test(out.assetId)) throw new Error("服务端返回的 assetId 不合法，已放弃");
+  if (!out.url.startsWith("/api/v1/assets/")) throw new Error("服务端返回的 url 不合法，已放弃");
+  if ((out.sourceRefs || []).some((r) => !/^photo:\d+$/.test(r))) {
+    throw new Error("派生图 sourceRefs 必须指向真实 photo:<id>，已放弃");
+  }
+  if (out.origin !== "derived") throw new Error("标注/对比产物必须是 derived，已放弃");
+  for (const v of [out.caption, out.url]) {
+    if (looksUnsafe(v)) throw new Error("block 含外链/本地路径/base64，已放弃");
+  }
+  return out;
+}
+
+function mergeBlock(projectId, block) {
+  const blocks = readBlocks(projectId);
+  const caps = { image_ref: IMAGE_BLOCK_CAP, file_ref: FILE_BLOCK_CAP, card: CARD_BLOCK_CAP };
+  if (countBlocks(blocks, block.type) >= (caps[block.type] || 99)) {
+    throw new Error(`本轮 ${block.type} 已达上限 ${caps[block.type]}，未加入回答`);
+  }
+  const dup = blocks.some((b) => b.type === block.type &&
+    (b.assetId === block.assetId ||
+     JSON.stringify((b.sourceRefs || []).slice().sort()) === JSON.stringify((block.sourceRefs || []).slice().sort())));
+  if (dup) return { blocks, duplicated: true };
+  blocks.push(block);
+  writeBlocks(projectId, blocks);
+  return { blocks, duplicated: false };
+}
+
+function sameSourceBlock(projectId, sourceRefs) {
+  const want = JSON.stringify(sourceRefs.slice().sort());
+  return readBlocks(projectId).find((b) => b.type === "image_ref" &&
+    JSON.stringify((b.sourceRefs || []).slice().sort()) === want) || null;
+}
+
+function requirePhotoId(photoId, field = "photoId") {
+  const n = Number(photoId);
+  if (!Number.isInteger(n) || n <= 0) throw new Error(`${field} 必须是真实照片 id（先用 search_photos 查）`);
+  return n;
+}
+
+function normalizeBoxes(boxes) {
+  if (boxes === undefined || boxes === null) return [];
+  if (!Array.isArray(boxes)) throw new Error("boxes 必须是数组 [{x,y,w,h,label?}]");
+  if (boxes.length > 20) throw new Error("标注框最多 20 个");
+  return boxes.map((b, i) => {
+    if (!b || typeof b !== "object") throw new Error(`boxes[${i}] 不是对象`);
+    const out = {};
+    for (const k of ["x", "y", "w", "h"]) {
+      const v = Number(b[k]);
+      if (!Number.isFinite(v)) throw new Error(`boxes[${i}].${k} 必须是数字`);
+      out[k] = v;
+    }
+    if (out.w <= 0 || out.h <= 0) throw new Error(`boxes[${i}] 宽高必须大于 0`);
+    if (b.label !== undefined) out.label = String(b.label).slice(0, 24);
+    return out;
+  });
+}
+
+async function bffPost(pathname, body) {
+  const bff = process.env.BFF_URL || "http://host.docker.internal:8081";
+  const resp = await fetch(`${bff}${pathname}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload = await resp.json().catch(() => ({}));
+  if (!resp.ok || payload.code !== 0) {
+    const msg = (payload && payload.message) || JSON.stringify(payload).slice(0, 300);
+    throw new Error(`${pathname} 失败: HTTP ${resp.status} ${msg}`);
+  }
+  return payload.data || {};
+}
+
+/** 在真实照片上标注 → 派生图 → 加入本轮回答。 */
+export async function annotatePhoto({ projectId, photoId, boxes, caption = "" }) {
+  if (!projectId) throw new Error("缺 projectId");
+  const pid = requirePhotoId(photoId);
+  const normBoxes = normalizeBoxes(boxes);
+  const refs = [`photo:${pid}`];
+  // 去重：同一张源照片本轮已加过 → 不重复生成资产
+  const dup = sameSourceBlock(projectId, refs);
+  if (dup) {
+    return { ok: true, duplicated: true, assetId: dup.assetId, caption: dup.caption,
+             note: "这张照片已在本次回答里，未重复生成" };
+  }
+  const existing = readBlocks(projectId);
+  if (countBlocks(existing, "image_ref") >= IMAGE_BLOCK_CAP) {
+    throw new Error(`本轮图片已达上限 ${IMAGE_BLOCK_CAP} 张，未加入回答；请先回答文字`);
+  }
+  const data = await bffPost("/api/v1/photos/annotate", {
+    projectId, photoId: pid, boxes: normBoxes, caption: String(caption || "").slice(0, 120),
+  });
+  const block = sanitizeBlock(data.block, "image_ref");
+  const merged = mergeBlock(projectId, block);
+  return {
+    ok: true, duplicated: !!merged.duplicated, assetId: block.assetId,
+    caption: block.caption, origin: "derived",
+    note: merged.duplicated ? "这张照片已在本次回答里" : "标注图已加入本次回答（派生图，不是现场原图）",
+  };
+}
+
+/** 整改前后对比拼版 → 派生图 → 加入本轮回答。 */
+export async function comparePhotos({ projectId, beforePhotoId, afterPhotoId, title = "",
+                                     beforeLabel = "整改前", afterLabel = "整改后" }) {
+  if (!projectId) throw new Error("缺 projectId");
+  const before = requirePhotoId(beforePhotoId, "beforePhotoId");
+  const after = requirePhotoId(afterPhotoId, "afterPhotoId");
+  if (before === after) throw new Error("对比需要两张不同照片（同一张不能做前后对比）");
+  const refs = [`photo:${before}`, `photo:${after}`];
+  const dup = sameSourceBlock(projectId, refs);
+  if (dup) {
+    return { ok: true, duplicated: true, assetId: dup.assetId, caption: dup.caption,
+             note: "这两张照片的对比图已在本次回答里，未重复生成" };
+  }
+  const existing = readBlocks(projectId);
+  if (countBlocks(existing, "image_ref") >= IMAGE_BLOCK_CAP) {
+    throw new Error(`本轮图片已达上限 ${IMAGE_BLOCK_CAP} 张，未加入回答；请先回答文字`);
+  }
+  const data = await bffPost("/api/v1/photos/compare", {
+    projectId, beforePhotoId: before, afterPhotoId: after,
+    title: String(title || "").slice(0, 80),
+    beforeLabel: String(beforeLabel || "整改前").slice(0, 12),
+    afterLabel: String(afterLabel || "整改后").slice(0, 12),
+  });
+  const block = sanitizeBlock(data.block, "image_ref");
+  const merged = mergeBlock(projectId, block);
+  return {
+    ok: true, duplicated: !!merged.duplicated, assetId: block.assetId,
+    caption: block.caption, origin: "derived",
+    note: merged.duplicated ? "对比图已在本次回答里" : "整改前后对比图已加入本次回答（派生图）",
+  };
+}
