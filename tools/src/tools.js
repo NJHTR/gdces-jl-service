@@ -170,6 +170,16 @@ function renderDoc({ kind, obj, fields, bases, missingKeys = [] }) {
 export async function createDocDraft({ projectId, kind, obj, fields, bases = [], body }) {
   if (!kind) throw new Error("缺 kind");
 
+  // “自然确认 / 目测 / 经验”不是依据；没有条文号或照片依据时不能拿来过 required。
+  const basis = String((fields || {}).依据 || "").trim();
+  const pseudo = ["自然确认", "现场确认", "目测", "经验", "无", "暂无", "N/A", "n/a", "/", "-"];
+  if (basis && !(bases || []).length && pseudo.indexOf(basis) >= 0) {
+    throw new Error(
+      "依据不能只写「" + basis + "」：它不是条文、图纸/方案号，也不是照片依据。" +
+      " 查不到规范就留空并问用户，或有现场照片就放进 bases；不要拿历史文书的假依据过关。"
+    );
+  }
+
   // schema 是唯一出处：先拿正式字段校验，字段名不在表里就拒绝写文件。
   let chk;
   try {

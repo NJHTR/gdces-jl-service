@@ -1411,6 +1411,26 @@ def handle_doc_validate(body, user=None):
     )}
 
 
+# ---------------------------------------------------------------- basis guard
+# 这些不是“依据”：没有条文号、图纸/方案号，也没有照片/记录依据。
+# 模型有时从历史文书抄「自然确认」来骗过 required 校验，必须当缺项。
+_PSEUDO_BASIS = ("自然确认", "现场确认", "目测", "经验", "无", "暂无", "N/A", "n/a", "/", "-")
+
+
+def basis_is_real(fields, bases):
+    val = str((fields or {}).get("依据") or "").strip()
+    if not val:
+        return False
+    if bases:
+        return True
+    if val in _PSEUDO_BASIS:
+        return False
+    try:
+        return bool(_parse_ref("rule", val))
+    except Exception:
+        return False
+
+
 def handle_doc_register(body, user=None):
     """登记文书：只写数据库，不写文件。
 
@@ -1446,6 +1466,11 @@ def handle_doc_register(body, user=None):
     # 齐不齐由 schema 说了算（依据也算必填；占位词「待补」也算缺）
     check = validate_fields(kind, fields)
     missing = list(check["missing"]) + list(check["placeholder"])
+    # 依据不能是「自然确认」这类假依据：没有 bases/条文号就当缺项。
+    if str(fields.get("依据") or "").strip() and not basis_is_real(fields, bases):
+        fields.pop("依据", None)
+        if "依据" not in missing:
+            missing.append("依据")
     # 状态只由 schema 决定，不接受客户端传的 state。
     state = "待补" if missing else "待签"
 
@@ -1683,6 +1708,10 @@ def handle_doc_patch(doc_id, body, user=None):
     # 缺项以 schema 为准（不是「当前 fields 里为空的键」）
     chk = validate_fields(d["kind"], fields)
     missing = list(chk.get("missing") or []) + list(chk.get("placeholder") or [])
+    if str(fields.get("依据") or "").strip() and not basis_is_real(fields, bases):
+        fields.pop("依据", None)
+        if "依据" not in missing:
+            missing.append("依据")
 
     wanted = (body.get("state") or "").strip()
     # 新建时缺字段会被降级成「待补」；这里必须一致 ——
