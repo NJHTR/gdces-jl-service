@@ -2219,14 +2219,25 @@ def guard_project(project_id, user):
 
 
 def can_confirm_project_rule(project_id, user):
-    """项目全员规矩只能由总监/项目管理员确认，普通成员只能提案。"""
-    if not AUTH_REQUIRED:
+    """项目全员规矩只能由总监/项目管理员确认。
+
+    口径（QA F1-F3 修复，必须与 memcandidate.can_confirm_project_candidate 一致）：
+      · 有登录用户且在该项目有 project_member 角色行 → **只看角色**，即使 AUTH_REQUIRED=0
+        演示环境也按 owner/admin/总监 判（普通 member/engineer 一律 403）；
+      · 只有匿名（无 user）或该项目无角色行时，才按演示模式放行。
+    这样生产演示部署里，登录普通成员不能改写/删除/接受项目规矩；
+    预览环境没有角色记录的账号仍能点通，不会把 UX 卡死。
+    """
+    if not AUTH_REQUIRED and not user:
         return True
     if not user:
         return False
     rows = q("SELECT role FROM project_member WHERE project_id=%s AND user_id=%s",
              (project_id, user["id"]))
     role = (rows[0].get("role") or "").strip().lower() if rows else ""
-    return role in ("owner", "admin", "总监", "项目总监")
+    if role:
+        return role in ("owner", "admin", "总监", "项目总监")
+    # 演示模式下没有成员记录：放行（否则预览环境没人能确认）；鉴权模式下 guard_project 已挡非成员
+    return not AUTH_REQUIRED
 
 

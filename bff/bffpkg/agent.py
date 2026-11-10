@@ -264,9 +264,9 @@ def build_context(project_id, user_id, query=None):
     ws = f"{WS_ROOT}/{project_id}"
     here = []
     if os.path.exists(f"{ws}/records/rules.md"):
-        here.append("项目规矩 `records/rules.md`")
+        here.append("项目规矩 `records/rules.md`（这个项目约定怎么写、怎么签；按需读）")
     if os.path.exists(f"{ws}/records/photos.md"):
-        here.append("现场影像索引 `records/photos.md`")
+        here.append("现场影像索引 `records/photos.md`（按部位分组；问'这个部位以前查过什么'先看这里）")
     try:
         if os.path.isdir(f"{ws}/.easycode/skills") and os.listdir(f"{ws}/.easycode/skills"):
             here.append("项目技能 `.easycode/skills/`（目录见系统技能清单，正文按需读）")
@@ -305,10 +305,8 @@ def build_context(project_id, user_id, query=None):
     if mine:
         parts.append("【我的记忆】" + " · ".join(mine) + "（按需读，别全量复述）")
 
-    if os.path.isfile(f"{ws}/records/photos.md"):
-        here.append("影像索引 `records/photos.md`（按部位分组；问'这个部位以前查过什么'先看这里）")
-    if os.path.isfile(f"{ws}/records/rules.md"):
-        here.insert(0, "项目规矩 `records/rules.md`（这个项目约定怎么写、怎么签；按需读）")
+    # 注意：records/rules.md 与 records/photos.md 的指针已经在上面的 here 里加过一次，
+    # 这里不要再 append（QA R3：以前同一个指针出现两次，AGENTS.md 里重复）。
     if os.path.isdir(f"{ws}/knowledge"):
         here.insert(0, "组织知识 `knowledge/`（模板、填写示例、验收要点；只读）")
     if here:
@@ -336,6 +334,9 @@ def handle_memory_recall(params, user=None):
     query = (q1(params, "q") or "").strip()
     if not pid or not query:
         return 400, {"code": 400, "message": "projectId 和 q 必填"}
+    # QA R1：登录用户只能 recall 自己的个人记忆；传别人的 userId 直接 403。
+    if user and uid and str(uid) != str(user.get("id")):
+        return 403, {"code": 403, "message": "只能查询自己的记忆"}
     deny = guard_project(pid, user)
     if deny:
         return deny
@@ -371,6 +372,9 @@ def handle_memory_list(params, user=None):
         deny = guard_project(owner, user)
         if deny:
             return deny
+    # QA R1：个人记忆只有本人可按 ownerId 查；登录用户查他人一律 403（演示匿名保持旧行为）
+    if scope == "user" and user and str(owner) != str(user.get("id")):
+        return 403, {"code": 403, "message": "只能查看自己的记忆"}
     pid = q1(params, "projectId")
     where = "scope=%s AND owner_id=%s" + (" AND project_id=%s" if pid else "")
     args = (scope, owner, pid) if pid else (scope, owner)
@@ -381,12 +385,16 @@ def handle_memory_list(params, user=None):
 
 
 # ---------------------------------------------------------------- handle_memory_create
-def handle_memory_create(body):
+def handle_memory_create(body, user=None):
+    """写记忆。项目规矩只进 proposal；个人记忆只能写自己的（QA R1）。"""
     scope = body.get("scope")
     owner = body.get("ownerId")
     text = (body.get("text") or "").strip()
     if scope not in ("user", "project") or not owner or not text:
         return 400, {"code": 400, "message": "scope/ownerId/text 必填"}
+    # QA R1：登录用户不能替别人写个人记忆
+    if scope == "user" and user and str(owner) != str(user.get("id")):
+        return 403, {"code": 403, "message": "只能写自己的记忆"}
     kept = text[:512]
     # 作用域三档：项目级 / 个人×某项目 / 个人跨项目
     pid = (body.get("projectId") or "").strip()
@@ -394,6 +402,9 @@ def handle_memory_create(body):
         pid = str(owner)
         # 项目规矩不能由任何一个成员直接写生效；先进入待确认队列。
         # 确认后由 handle_rule_decide 写 memory + 渲染 records/rules.md。
+        deny = guard_project(pid, user)
+        if deny:
+            return deny
         try:
             dup = q("SELECT id, status FROM rule_proposal "
                     "WHERE project_id=%s AND text=%s LIMIT 1", (pid, kept))

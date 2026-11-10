@@ -21,6 +21,7 @@ import threading
 from .core import AUTH_REQUIRED, exec_sql, llm, parse_step, q, q1, similar
 from .biz import (
     audit,
+    can_confirm_project_rule,
     guard_project,
     render_rules_md,
     render_user_memory,
@@ -144,20 +145,11 @@ def _member_project_ids(user):
 def can_confirm_project_candidate(project_id, user):
     """项目全域候选能不能被这个人接受。
 
-    口径与既有 rule_proposal 一致：只有项目 owner/admin/总监可以确认；普通成员只能提。
-    演示模式（AUTH_REQUIRED=0）没有登录用户时放行，让本地/预览能点通；
-    **登录用户存在时仍按项目角色判**，所以普通工程师点接受会拿到 403（小程序提示需总监确认）。
-    这是对"项目候选 accepted 只能总监确认"的落地，同时不破坏现有演示模式。
+    口径与 rule_proposal **完全同源**（QA F1-F3 要求）：直接复用
+    biz.can_confirm_project_rule —— 有登录用户且有 project_member 角色行时只看角色，
+    即使 AUTH_REQUIRED=0；匿名/无角色行才演示放行。避免两条项目确认路径各判一套。
     """
-    if not user:
-        return not AUTH_REQUIRED
-    rows = q("SELECT role FROM project_member WHERE project_id=%s AND user_id=%s",
-             (project_id, user["id"]))
-    role = (rows[0].get("role") or "").strip().lower() if rows else ""
-    if role:
-        return role in ("owner", "admin", "总监", "项目总监")
-    # 演示模式下没有成员记录：放行（否则预览环境没人能确认）；鉴权模式下 guard_project 已挡掉非成员
-    return not AUTH_REQUIRED
+    return can_confirm_project_rule(project_id, user)
 
 
 def _can_decide_personal(candidate, user):

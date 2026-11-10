@@ -436,7 +436,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/v1/projects":
                 return self._send(*handle_project_create(body))
             if path == "/api/v1/memories":
-                return self._send(*handle_memory_create(body))
+                return self._send(*handle_memory_create(
+                    body, resolve_token(bearer(self.headers))))
             return self._send(404, {"code": 404, "message": "not found"})
         except Exception as e:
             traceback.print_exc()
