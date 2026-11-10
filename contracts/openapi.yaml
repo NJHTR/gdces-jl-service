@@ -368,6 +368,67 @@ paths:
       responses:
         '200': { description: 成功 }
 
+  # 真实照片派生图（task-9）：只读 photo/blob，产物落 data/assets（origin=derived），
+  # 不写 photo/doc/records/memory/knowledge；返回可直接挂 answer.blocks 的 image_ref 块。
+  /api/v1/photos/annotate:
+    post:
+      tags: [影像]
+      x-owner: agent
+      summary: 在真实照片上标注框/编号/标签 → 派生图资产 + image_ref block
+      description: |
+        源图必须是本项目 photo（按 photoId 读 blob）；输出 PNG 落 data/assets，
+        asset(origin=derived, producer=annotate, sourceRefs=["photo:<id>"], model=pillow, prompt_hash, status=committed)。
+        角标「派生图·基于现场照片」；boxes 使用原图像素坐标，越界会裁剪，全部越界返回 400。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PhotoAnnotateRequest' }
+      responses:
+        '200':
+          description: '成功：{asset, block, fallbackText}'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PhotoCraftResult' }
+        '400': { description: 参数/坐标不合法 }
+        '403': { description: 非项目成员 }
+        '404': { description: 照片不存在/不属于该项目 }
+        '413': { description: 原图或结果过大 }
+
+  /api/v1/photos/compare:
+    post:
+      tags: [影像]
+      x-owner: agent
+      summary: 整改前后对比拼版（两张真实照片）→ 派生图资产 + image_ref block
+      description: |
+        两张源图都必须是本项目 photo；两侧带来源水印（现场照片#id/日期/部位）与「整改前/整改后」标签，
+        角标「派生图·基于现场照片」。同一张照片做对比返回 400（不伪造现场）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PhotoCompareRequest' }
+      responses:
+        '200':
+          description: '成功：{asset, block, fallbackText}'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PhotoCraftResult' }
+        '400': { description: 参数不合法/同一张照片 }
+        '403': { description: 非项目成员 }
+        '404': { description: 照片不存在/不属于该项目 }
+        '413': { description: 原图或结果过大 }
+
   /api/v1/upload:
     post:
       tags: [基础设施]
@@ -1485,3 +1546,50 @@ components:
             type: object
             properties:
               type: { type: string, enum: [open, readonly] }
+
+    # ---------------- 真实照片派生图（task-9）
+    PhotoAnnotateRequest:
+      type: object
+      required: [projectId, photoId]
+      properties:
+        projectId: { type: string }
+        photoId: { type: integer, description: 本项目真实照片 id（只读源图） }
+        boxes:
+          type: array
+          maxItems: 20
+          description: 原图像素坐标；越界裁剪，全部越界返回 400
+          items:
+            type: object
+            required: [x, y, w, h]
+            properties:
+              x: { type: number }
+              y: { type: number }
+              w: { type: number }
+              h: { type: number }
+              label: { type: string, maxLength: 24, example: 裂缝 }
+        caption: { type: string, description: 底部说明；外链/本地路径会被清空 }
+        taskId: { type: integer }
+        messageId: { type: integer }
+
+    PhotoCompareRequest:
+      type: object
+      required: [projectId, beforePhotoId, afterPhotoId]
+      properties:
+        projectId: { type: string }
+        beforePhotoId: { type: integer, description: 整改前现场照片 id }
+        afterPhotoId: { type: integer, description: 整改后现场照片 id（不能与 before 相同） }
+        title: { type: string, example: 4#楼东侧外架整改前后 }
+        beforeLabel: { type: string, default: 整改前 }
+        afterLabel: { type: string, default: 整改后 }
+        taskId: { type: integer }
+        messageId: { type: integer }
+
+    PhotoCraftResult:
+      type: object
+      properties:
+        asset: { $ref: '#/components/schemas/Asset' }
+        block:
+          allOf:
+            - $ref: '#/components/schemas/AnswerBlock'
+            - description: 可直接放进 answer.blocks 的 image_ref 块
+        fallbackText: { type: string, description: 失败/降级时用的文字 }

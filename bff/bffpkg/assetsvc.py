@@ -732,6 +732,14 @@ def _block_from_asset(row, btype, caption):
     return block
 
 
+def block_for_asset(asset_id, btype="image_ref", caption=None):
+    """给内部工具（如标注/拼版）把已 commit 的资产转成 answer.blocks 里的块。"""
+    row = _row(asset_id)
+    if not row or row.get("status") in ("deleted", "quarantined"):
+        return None
+    return _block_from_asset(row, btype, caption=caption)
+
+
 def normalize_blocks(project_id, user_id, raw_blocks, fallback_text="", task_id=None):
     """把工具/Agent 写出的 blocks 校验成 answer.blocks。
 
