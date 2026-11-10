@@ -142,7 +142,32 @@ def main():
     base = snapshots(core)
     rm_blocks()
     try:
-        # ---- 0) 工具已注册 + JS 语法 ----
+        # ---- 0) 输出侧清洗（task-14）：本地绝对路径 / 假图提示 ----
+        leaked = ("标注图已生成，文件保存在 /tmp/photo45_annotated.jpg，"
+                  "也可看 file:///home/baize/x.png 或 C:\\tmp\\a.png")
+        cleaned = core.clean_reply(leaked)
+        check("清洗 /tmp 路径", "/tmp/" not in cleaned and "photo45_annotated" not in cleaned,
+              cleaned)
+        check("清洗 file:// 与 C:\\ 路径", "file://" not in cleaned and "C:\\" not in cleaned,
+              cleaned)
+        check("「文件已保存在」被替换/清掉", "文件已保存在" not in cleaned, cleaned)
+        keep = core.clean_reply("见 /api/v1/assets/x/content 与 records/rules.md")
+        check("新清洗不影响 /api/ 与相对路径",
+              "/api/v1/assets/x/content" in keep and "records/rules.md" in keep, keep)
+        raw_keep = core.strip_local_paths("docs/2026-01-01/a.md /api/v1/x records/y.md")
+        check("strip_local_paths 不影响 docs//api/相对路径",
+              "docs/2026-01-01/a.md" in raw_keep and "/api/v1/x" in raw_keep
+              and "records/y.md" in raw_keep, raw_keep)
+        hint = core.ensure_image_fallback("标注图已生成，请看。", [])
+        check("有图声明但 blocks 空 → 补提示", "未生成可展示的图片" in hint, hint)
+        no_hint = core.ensure_image_fallback("标注图已生成。", [{"type": "image_ref"}])
+        check("有 blocks 不补提示", "未生成可展示的图片" not in no_hint, no_hint)
+        manual = core.tool_manual()
+        check("tool_manual 有 argv JSON 用法", "第二个命令行参数" in manual, manual[:200])
+        check("tool_manual 禁止 shell/python 自绘",
+              "shell/python" in manual and "/tmp" in manual, manual[-200:])
+
+        # ---- 0b) 工具已注册 + JS 语法 ----
         rc, out, err = run_tool("list", {})
         names, descs = [], {}
         try:
@@ -261,7 +286,7 @@ def main():
         eq("同图报错不改 blocks", len(read_blocks_raw()), 1)
 
         # ---- 5) 错误：他项目照片 / 不存在 / 参数 ----
-        other_ws = os.path.join(ROOT, "data", "workspaces", "test-sandbox")
+        other_ws = os.path.join(HOST_ROOT, "data", "workspaces", "test-sandbox")
         rc, out, err = run_tool("annotate_photo", {
             "projectId": "test-sandbox", "photoId": PHOTO_A, "boxes": []}, cwd=other_ws)
         check("他项目照片报错（不伪造）", is_err(out), (out or "")[:200])

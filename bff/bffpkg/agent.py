@@ -20,7 +20,7 @@ import pymysql
 留 Python：它跟子进程、文件、git 打交道。
 """
 from .appserver import _client, run_isolated, run_stream
-from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
+from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, ensure_image_fallback, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob)
 from .memcandidate import extract_memory_candidates
 from . import assetsvc
@@ -953,6 +953,8 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
             and t.get("kind") in ("cmd", "shell", None)
         ]
         trace_sum = ("调了 " + "、".join(short.get(t["tool"], t["tool"]) for t in ok_steps[:3])) if ok_steps else None
+        # 这条路径没有多模态 blocks；正文若声称有图，补明确提示
+        final_text = ensure_image_fallback(final_text, [])
 
         exec_sql(
             "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync) "
@@ -1041,6 +1043,30 @@ def _drain_blocks(ws):
     if isinstance(data, dict):
         data = data.get("blocks") or []
     return data if isinstance(data, list) else []
+
+
+# ---------------------------------------------------------------- 出图提示守卫
+# 真实模型会绕开工具：用 shell+python/Pillow 自己画一张写到 /tmp，然后在正文给本地路径。
+# 用户一提到照片/标注/对比，就在这一轮的用户消息后面追加硬规则（引擎每轮都会读）。
+_IMAGE_INTENT_RE = re.compile(
+    r"(照片|影像|图片|截图|标注|圈出|圈一下|框出|对比|整改前|整改后|拼版|示意|画一下|画个)")
+
+
+def _image_turn_guard(text):
+    text = text or ""
+    if not _IMAGE_INTENT_RE.search(text):
+        return text
+    guard = (
+        "\n\n【出图规则（必须遵守）】\n"
+        "- 现场照片的标注/对比只能调工具：先 "
+        "`jl-tool search_photos '{\"projectId\":\"<项目>\",\"q\":\"<部位>\"}'` 拿真实 photoId，再执行 "
+        "`jl-tool annotate_photo '<JSON>'` 或 `jl-tool compare_photos '<JSON>'`；"
+        "JSON 必须是第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。\n"
+        "- 禁止用 shell/python/Pillow 自己画图或改图，禁止写 /tmp，禁止在回答里输出本地路径/base64/外链。\n"
+        "- 工具失败（缺 photoId、照片不属于项目、同图对比等）就如实说明失败原因，不要绕过工具自己造图。\n"
+        "- 工具成功后图片会自动挂到本次回答，正文写一句话即可。"
+    )
+    return text + guard
 
 
 def _client_wants_blocks(task_id):
@@ -1770,6 +1796,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         # 多模态块：新客户端 opt-in 才有；旧客户端 blocks=[]（只有 text/rich）。
         # 工具只写引用，这里统一校验 + 签短 URL + 挂 task。
         blocks = _turn_blocks(project_id, user_id, task_id)
+        # 正文声称有图但 blocks 为空 → 补明确提示，别让用户以为能看到一张不存在的图
+        final_text = ensure_image_fallback(final_text, blocks)
 
         answer = build_answer(doc_row, cites, final_text, blocks)
 
@@ -2035,6 +2063,8 @@ def handle_chat(body, headers=None):
     if audios and not transcripts:
         prompt_text = (prompt_text + "\n\n" if prompt_text else "") + \
             "[用户发来一段语音，ASR 暂时没识别出文字；先按收到语音处理，必要时请用户再说一遍或补文字]"
+    # 出图请求：在用户消息后追加硬规则，堵住"shell/python 自绘 + /tmp 路径"的绕过
+    prompt_text = _image_turn_guard(prompt_text)
 
     deny = guard_project(project_id, resolve_token(bearer(headers)))
     if deny:

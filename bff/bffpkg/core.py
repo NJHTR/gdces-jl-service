@@ -600,7 +600,12 @@ SYSTEM_PROMPT = """你是现场监理助手，帮监理员把现场的情况记�
 3. 部位、事由、问题这些关键信息缺失时，先问一句；不要生成空壳文书。非关键字段可以留空标「待补」。
 4. 查到规范就把条号写进 bases；查不到就明说「没查到依据」，不要凭印象写条号。
 5. 写文书（create_doc_draft）之前，必须有 obj 或至少一个非空字段；后端会拒绝空文书。
-6. 用户要看现场图时：先用 search_photos 拿到真实 photoId，再调 annotate_photo（标注）或 compare_photos（整改前后对比）；图会自动挂到本次回答上，正文照常写一句话。不要编造照片、不要输出图片字节或本地路径；没有真实 photoId 就不要调这两个工具。
+6. 用户要标注/圈出/对比现场照片时：先 search_photos 拿真实 photoId，再执行
+   jl-tool annotate_photo '{"projectId":"<项目>","photoId":<真实id>,"boxes":[{"x":..,"y":..,"w":..,"h":..,"label":".."}],"caption":".."}'
+   或 jl-tool compare_photos '{"projectId":"<项目>","beforePhotoId":<id>,"afterPhotoId":<id>,"title":".."}'。
+   JSON 必须作为第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。
+   禁止用 shell/python/Pillow 自己绘制或编辑图片、禁止写 /tmp、禁止在回答里输出本地路径/base64；
+   工具失败就如实告诉用户失败原因，不要绕过工具自己造图。
 7. 最多调 8 次工具；证据够了就 final。
 """
 
@@ -626,6 +631,28 @@ def allowed_tools():
 
 
 # ---------------------------------------------------------------- tool_manual
+# 出图类工具的用法/失败处理要写死：真实模型会试 echo JSON | jl-tool ...（stdin 不通），
+# 失败后还可能改用 shell/python 自己画一张写 /tmp —— 这两条都必须在手册里堵死。
+_TOOL_EXTRA = {
+    "annotate_photo": (
+        "用法：jl-tool annotate_photo '{\"projectId\":\"<项目>\",\"photoId\":<真实id>,"
+        "\"boxes\":[{\"x\":100,\"y\":100,\"w\":300,\"h\":200,\"label\":\"配重块\"}],"
+        "\"caption\":\"...\"}'  ← JSON 是第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。"
+        "先 search_photos 拿真实 photoId；没有 photoId 就如实说，不要自己画图。"
+    ),
+    "compare_photos": (
+        "用法：jl-tool compare_photos '{\"projectId\":\"<项目>\",\"beforePhotoId\":<id>,"
+        "\"afterPhotoId\":<id>,\"title\":\"整改前后\"}'  ← JSON 是第二个命令行参数（argv）。"
+        "先 search_photos 拿两张真实照片 id；同一张不能做前后对比。"
+    ),
+}
+_TOOL_FOOTER = (
+    "出图规则：现场照片的标注/对比只能用 annotate_photo / compare_photos；"
+    "禁止用 shell/python/Pillow 自己绘制或编辑图片，禁止写 /tmp，禁止在回答里输出本地路径或 base64；"
+    "工具失败（缺 photoId、照片不属于项目、同图对比等）就如实告诉用户失败原因，不要绕过工具自己造图。"
+)
+
+
 def tool_manual():
     """把工具的清单和一句话说明列出来。
 
@@ -648,6 +675,10 @@ def tool_manual():
         short = desc.split("。")[0][:60]
         # 必须带完整路径：agent 的 shell 里没有 PATH 里的 jl-tool
         lines.append("  %s %s  # %s" % (JL_TOOL_BIN, name, short))
+        extra = _TOOL_EXTRA.get(name)
+        if extra:
+            lines.append("      " + extra)
+    lines.append("  # " + _TOOL_FOOTER)
     return "\n".join(lines)
 
 
@@ -851,7 +882,7 @@ def build_answer(doc, cites, text, blocks=None):
     text  —— 模型自己的话，原样保留，只做基础清洗
     blocks —— 多模态 answer.blocks v1（可空；旧客户端只读 text/rich，天然兼容）
     """
-    text = clean_reply(text)
+    text = ensure_image_fallback(clean_reply(text), blocks)
 
     missing = []
     if doc:
@@ -966,6 +997,41 @@ def split_gaps(text):
     return items[:6]
 
 
+# ---------------------------------------------------------------- 本地路径清洗 / 出图提示
+# 模型在 shell 路径里自己画图时，会把 /tmp/xxx.png、/home/...、C:\...、file:// 写进正文。
+# 这些路径对用户不可访问，也不是资产；统一清洗掉（相对 docs/、/api/ 正常路径不受影响）。
+_FILE_URL = r"file://[^\s，。；：）)、！？】\"'`]+"
+_POSIX_LOCAL = r"/(?:tmp|home|var|etc|opt|usr|root|mnt|media)/[^\s，。；：）)、！？】\"'`]*"
+_WIN_LOCAL = r"(?<![A-Za-z0-9])[A-Za-z]:[\\/](?!/)[^\s，。；：）)、！？】\"'`]*"
+_LOCAL_ABS_RE = re.compile("(?:" + "|".join([_FILE_URL, _POSIX_LOCAL, _WIN_LOCAL]) + ")", re.I)
+_LOCAL_SAVE_PHRASE_RE = re.compile(
+    r"(?:文件)?(?:已)?(?:保存|写入|输出|导出|存放|存|放)(?:在|到)\s*[：:]?\s*"
+    + "(?:" + "|".join([_FILE_URL, _POSIX_LOCAL, _WIN_LOCAL]) + ")", re.I)
+
+_IMAGE_CLAIM_RE = re.compile(
+    r"(标注图|对比图|拼版|图片已|图像已|图已(?:生成|保存|输出)|已(?:生成|保存|输出|做好).{0,8}图"
+    r"|见附图|附图[:：]|图片如下|标注如下)", re.I)
+
+
+def strip_local_paths(text):
+    """把正文里的本地绝对路径 / file:// / 「文件已保存在…」整段替换掉。"""
+    if not text:
+        return ""
+    t = _LOCAL_SAVE_PHRASE_RE.sub("（本地文件不展示）", text)
+    t = _LOCAL_ABS_RE.sub("", t)
+    return t
+
+
+def ensure_image_fallback(text, blocks):
+    """正文声称有图、但 blocks 为空时，补一句明确提示，避免用户以为能看到图。"""
+    t = text or ""
+    if blocks:
+        return t
+    if _IMAGE_CLAIM_RE.search(t) and "未生成可展示的图片" not in t:
+        t = t.rstrip() + "\n\n（提示：本次未生成可展示的图片，可以让我重新标注一次。）"
+    return t
+
+
 # ---------------------------------------------------------------- clean_reply
 def clean_reply(text):
     """把模型的话清洗成能给用户看的样子。
@@ -982,7 +1048,8 @@ def clean_reply(text):
     # 2) 行内代码 / 代码块围栏
     t = re.sub(r"```[a-zA-Z]*\n?", "", t)
     t = t.replace("`", "")
-    # 3) 服务器绝对路径
+    # 3) 服务器绝对路径 / 本地临时路径 / file://（/tmp、/home、C:\ 等）
+    t = strip_local_paths(t)
     t = re.sub(r"/home/[^\s，。；：）)、]+", "", t)
     t = re.sub(r"data/workspaces/[^\s，。；：）)、]+", "", t)
     t = re.sub(r"docs/\d{4}-\d{2}-\d{2}/[^\s，。；：）)、]*\.md", "", t)
