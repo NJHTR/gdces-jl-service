@@ -1213,13 +1213,14 @@ def prepare_bases(fields, bases):
     返回 (fields, bases)。
     """
     bases = list(bases or [])
-    if not bases and isinstance(fields, dict) and str(fields.get("依据") or "").strip():
-        for _it in [x.strip() for x in re.split(r"[；;、,，]", str(fields["依据"])) if x.strip()]:
+    basis_value = str((fields or {}).get("检查依据") or (fields or {}).get("依据") or "").strip()
+    if not bases and basis_value:
+        for _it in [x.strip() for x in re.split(r"[；;、,，]", basis_value) if x.strip()]:
             _p = _parse_ref("rule", _it)
             if _p:
                 bases.append({"kind": "rule", "ref": _p[0], "text": _it[:120]})
 
-    if bases and isinstance(fields, dict) and not str(fields.get("依据") or "").strip():
+    if bases and not basis_value:
         _refs = []
         for _b in bases:
             _k, _r = _base_ref(_b)
@@ -1229,7 +1230,7 @@ def prepare_bases(fields, bases):
             elif isinstance(_b, dict) and (_b.get("ref") or _b.get("text")):
                 _refs.append((_b.get("ref") or _b.get("text"))[:60])
         if _refs:
-            fields["依据"] = "；".join(_refs)[:200]
+            fields["检查依据" if "检查依据" in fields else "依据"] = "；".join(_refs)[:200]
 
     record_citations(bases)
     return fields, bases
@@ -1418,7 +1419,7 @@ _PSEUDO_BASIS = ("自然确认", "现场确认", "目测", "经验", "无", "暂
 
 
 def basis_is_real(fields, bases):
-    val = str((fields or {}).get("依据") or "").strip()
+    val = str((fields or {}).get("依据") or (fields or {}).get("检查依据") or "").strip()
     if not val:
         return False
     if bases:
@@ -1467,9 +1468,13 @@ def handle_doc_register(body, user=None):
     check = validate_fields(kind, fields)
     missing = list(check["missing"]) + list(check["placeholder"])
     # 依据不能是「自然确认」这类假依据：没有 bases/条文号就当缺项。
-    if str(fields.get("依据") or "").strip() and not basis_is_real(fields, bases):
+    if str(fields.get("依据") or fields.get("检查依据") or "").strip() and not basis_is_real(fields, bases):
         fields.pop("依据", None)
-        if "依据" not in missing:
+        fields.pop("检查依据", None)
+        required = (load_schema(kind) or {}).get("fields", [])
+        if "检查依据" not in missing and "检查依据" in required:
+            missing.append("检查依据")
+        elif "依据" not in missing:
             missing.append("依据")
     # 状态只由 schema 决定，不接受客户端传的 state。
     state = "待补" if missing else "待签"
@@ -1501,8 +1506,13 @@ _FIELD_ALIASES = {
         "钢筋保护层厚度实测值": "实测值",
         "保护层厚度实测值": "实测值",
         "实测值(mm)": "实测值",
-        "检查事项": "检查内容",
-        "检查情况": "检查内容",
+        "检查日期": "检查时间",
+        "部位": "检查部位",
+        "检查内容": "检查项目",
+        "检查事项": "检查项目",
+        "检查情况": "检查记录",
+        "依据": "检查依据",
+        "处理意见": "处理记录",
     },
     "旁站记录": {
         "旁站部位": "关键部位工序",
@@ -1638,6 +1648,7 @@ def handle_doc_patch(doc_id, body, user=None):
         except Exception:
             fields = {}
     fields = dict(fields or {})
+    fields = normalize_fields(d["kind"], fields)
 
     bases = d["bases"]
     if isinstance(bases, str):
@@ -1708,9 +1719,13 @@ def handle_doc_patch(doc_id, body, user=None):
     # 缺项以 schema 为准（不是「当前 fields 里为空的键」）
     chk = validate_fields(d["kind"], fields)
     missing = list(chk.get("missing") or []) + list(chk.get("placeholder") or [])
-    if str(fields.get("依据") or "").strip() and not basis_is_real(fields, bases):
+    if str(fields.get("依据") or fields.get("检查依据") or "").strip() and not basis_is_real(fields, bases):
         fields.pop("依据", None)
-        if "依据" not in missing:
+        fields.pop("检查依据", None)
+        required = (load_schema(d["kind"]) or {}).get("fields", [])
+        if "检查依据" not in missing and "检查依据" in required:
+            missing.append("检查依据")
+        elif "依据" not in missing:
             missing.append("依据")
 
     wanted = (body.get("state") or "").strip()

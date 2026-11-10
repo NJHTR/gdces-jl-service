@@ -405,15 +405,18 @@ def build_form_docx(project_id, doc_id):
             if v:
                 basis_parts.append(v.replace("standard://", ""))
         mapped = dict(fields)
+        record = fields.get("检查记录") or fields.get("检查情况") or ""
+        if fields.get("实测值"):
+            record = (record + "；" if record else "") + "实测值：" + str(fields.get("实测值"))
         mapped.update({
-            "检查时间": fields.get("检查日期") or fields.get("检查时间") or "",
+            "检查时间": fields.get("检查时间") or fields.get("检查日期") or "",
             "检查部位": fields.get("检查部位") or fields.get("部位") or "",
-            "检查项目": fields.get("检查事项") or fields.get("检查内容") or "",
+            "检查项目": fields.get("检查项目") or fields.get("检查事项") or fields.get("检查内容") or "",
             "检查方法": fields.get("检查方法") or "",
-            "检查依据": "；".join(basis_parts) or fields.get("依据") or fields.get("检查依据") or "",
-            "检查记录": fields.get("检查情况") or fields.get("检查记录") or "",
+            "检查依据": "；".join(basis_parts) or fields.get("检查依据") or fields.get("依据") or "",
+            "检查记录": record,
             "检查结论": fields.get("检查结论") or "",
-            "处理记录": fields.get("处理意见") or fields.get("处理记录") or fields.get("备注") or "",
+            "处理记录": fields.get("处理记录") or fields.get("处理意见") or fields.get("备注") or "",
             "检查人": fields.get("检查人") or fields.get("监理人员") or "",
             "复核人": fields.get("复核人") or "",
         })

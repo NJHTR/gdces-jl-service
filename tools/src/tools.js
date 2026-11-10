@@ -171,7 +171,7 @@ export async function createDocDraft({ projectId, kind, obj, fields, bases = [],
   if (!kind) throw new Error("缺 kind");
 
   // “自然确认 / 目测 / 经验”不是依据；没有条文号或照片依据时不能拿来过 required。
-  const basis = String((fields || {}).依据 || "").trim();
+  const basis = String((fields || {}).依据 || (fields || {}).检查依据 || "").trim();
   const pseudo = ["自然确认", "现场确认", "目测", "经验", "无", "暂无", "N/A", "n/a", "/", "-"];
   if (basis && !(bases || []).length && pseudo.indexOf(basis) >= 0) {
     throw new Error(
