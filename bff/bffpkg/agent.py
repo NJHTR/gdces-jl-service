@@ -1927,14 +1927,21 @@ def handle_chat(body, headers=None):
     transcripts = [p.get("transcript") for p in parts
                    if p.get("type") == "audio" and p.get("transcript")]
     images = [p for p in parts if p.get("type") == "image"]
+    audios = [p for p in parts if p.get("type") == "audio"]
 
-    if not project_id or not (text or transcripts or images):
-        return 400, {"code": 400, "message": "projectId 和 内容 必填"}
+    if not project_id:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    # 语音是合法内容：ASR 偶发没识别出文字时，不能把它当成“没内容”拒掉。
+    if not (text or transcripts or images or audios):
+        return 400, {"code": 400, "message": "内容必填（文字、图片或语音都没有）"}
 
     # 语音转写要进 prompt，否则模型只知道"有段录音"
     prompt_text = text
     for t in transcripts:
         prompt_text = (prompt_text + "\n\n" if prompt_text else "") + "[语音转写] " + t
+    if audios and not transcripts:
+        prompt_text = (prompt_text + "\n\n" if prompt_text else "") + \
+            "[用户发来一段语音，ASR 暂时没识别出文字；先按收到语音处理，必要时请用户再说一遍或补文字]"
 
     deny = guard_project(project_id, resolve_token(bearer(headers)))
     if deny:
