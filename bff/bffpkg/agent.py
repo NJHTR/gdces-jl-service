@@ -290,6 +290,11 @@ def build_context(project_id, user_id, query=None):
                                              str(user_id), "MEMORY.md"))
     if os.path.isfile(user_mem):
         mine.append("我的记忆 `%s`" % user_mem)
+    # Phase2 个人域摘要（去重/归并后的总览）：AGENTS.md 只放指针，不整份注入
+    user_sum = os.path.abspath(os.path.join(WS_ROOT, "..", "memory", "users",
+                                             str(user_id), "memory_summary.md"))
+    if os.path.isfile(user_sum):
+        mine.append("记忆摘要 `%s`（去重后的个人习惯总览，按需读）" % user_sum)
     if os.environ.get("JL_ENGINE_MEMORY", "0") == "1":
         proj_mem = os.path.join(mem_base, "projects", "%s.md" % project_id)
     else:
@@ -555,6 +560,13 @@ def handle_bootstrap(params, user):
         return deny
 
     user_id = user["id"] if user else 1
+    # Phase2：个人域摘要（确定性、幂等；候选不计入）。打开小程序即刷新，
+    # 保证接下来 build_context/AGENTS.md 的指针有文件可指。
+    try:
+        from .memorysum import render_user_summary
+        render_user_summary(user_id)
+    except Exception:
+        traceback.print_exc()
     # 预热：打开小程序就把常驻会话和线程起好。
     # 冷启动第一单实测要 86 秒，预热后第二单只要 21 秒 —— 差别就在线程初始化。
     def _warm():

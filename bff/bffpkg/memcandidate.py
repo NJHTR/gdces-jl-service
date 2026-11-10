@@ -26,6 +26,7 @@ from .biz import (
     render_user_memory,
     render_user_project_md,
 )
+from .memorysum import render_user_summary
 
 SCOPES = ("user", "project_user", "project")
 SCOPE_LABELS = {
@@ -397,9 +398,17 @@ def handle_candidate_decide(cid, action, user=None):
                  "decided_at=NOW(3) WHERE id=%s", (who, cid))
         audit(pid, _actor_id(user, who), "memory_candidate.accept", "candidate:%s" % cid,
               "memory:%s %s %s" % (mid, cand["scope"], (cand.get("text") or "")[:80]))
+        # Phase2：个人域摘要跟着刷新（确定性、幂等；不写 memory）
+        summary = ""
+        try:
+            summary = render_user_summary(cand["user_id"]) or ""
+        except Exception as e:
+            sys.stderr.write("[memcand] 刷新个人摘要失败: %r\n" % (e,))
         data = {"id": cid, "status": "accepted", "memoryId": mid, "rendered": rendered}
         if note:
             data["renderedProject"] = note
+        if summary:
+            data["summary"] = summary
         return 200, {"code": 0, "data": data}
 
     # project 候选：只能总监/owner/admin 接受
