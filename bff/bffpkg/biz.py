@@ -347,14 +347,55 @@ def default_project_id():
     return rows[0]["id"] if rows else None
 
 
+def _photo_ext(data):
+    """按文件头选扩展名，保证 view_image 能识别工作区里的副本。"""
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    return ".jpg"
+
+
+def materialize_photo(project_id, sha, blob_path, at=None):
+    """把照片原图落到项目工作区，返回相对路径。
+
+    影像不是聊天附件，而是项目证据。落到 records/photos/ 后，Agent 可以像
+    查代码一样 find/read/view_image，不需要依赖上一轮聊天有没有带图片。
+    """
+    src = blob_path or os.path.join(BLOB_ROOT, sha[:2], sha)
+    if not os.path.isfile(src):
+        return ""
+    at_text = str(at or "").strip()
+    day = at_text[:10] if len(at_text) >= 10 else time.strftime("%Y-%m-%d")
+    hhmm = at_text[11:16].replace(":", "") if len(at_text) >= 16 else time.strftime("%H%M")
+    try:
+        with open(src, "rb") as f:
+            ext = _photo_ext(f.read(16))
+    except OSError:
+        ext = ".jpg"
+    rel = "records/photos/%s/%s-%s%s" % (day, hhmm, sha[:8], ext)
+    dst = os.path.join(WS_ROOT, project_id, rel)
+    if not os.path.exists(dst):
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+        except OSError as e:
+            sys.stderr.write("[photos] 落工作区失败 %s: %r\n" % (dst, e))
+            return ""
+    return rel
+
+
 def render_photos_md(project_id):
     """把影像索引渲染成 <ws>/records/photos.md —— 按部位分组，一图一行。
 
     以前是"写完描述追加一行"：同一张图换个描述就多一行、部位没标的堆一堆，
     根本没法回答"这个部位以前查过什么"。现在 DB 是账本，文件是视图（同 rules.md）。
+    同时把原图落到 records/photos/，让 Agent 能直接 view_image。
     """
     ws = f"{WS_ROOT}/{project_id}"
-    rows = q("SELECT sha256, place, caption, note, work, shot_at, created_at FROM photo "
+    rows = q("SELECT sha256, blob_path, place, caption, note, work, shot_at, created_at FROM photo "
              "WHERE project_id=%s ORDER BY COALESCE(shot_at, created_at)", (project_id,))
     latest = {}
     for r in rows:
@@ -365,7 +406,7 @@ def render_photos_md(project_id):
         groups.setdefault(place, []).append((sha, r))
     lines = ["# 现场影像索引（按部位）", "",
              "> 一条一张图，按部位分组；原图取 /api/v1/blobs/<sha>。",
-             "> 由服务从数据库渲染，不要手改。", ""]
+             "> 工作区副本在 file 行，可直接 view_image；由服务从数据库渲染，不要手改。", ""]
     for place in sorted(groups):
         items = sorted(groups[place],
                        key=lambda x: str(x[1].get("shot_at") or x[1].get("created_at") or ""))
@@ -374,6 +415,10 @@ def render_photos_md(project_id):
             at = str(r.get("shot_at") or r.get("created_at") or "")[:16].replace("T", " ")
             cap = (r.get("caption") or r.get("note") or r.get("work") or "").strip().replace("\n", " ")[:160]
             lines.append("- %s · %s · sha %s" % (at, cap or "（未描述）", sha[:12]))
+            rel = materialize_photo(project_id, sha, r.get("blob_path"),
+                                    r.get("shot_at") or r.get("created_at"))
+            if rel:
+                lines.append("  file: %s" % rel)
         lines.append("")
     body = "\n".join(lines).rstrip() + "\n"
     path = os.path.join(ws, "records", "photos.md")
@@ -1983,8 +2028,8 @@ def handle_photo_search(params, user=None):
     argv = [pid]
     if kw:
         like = "%" + kw + "%"
-        sql += " AND (caption LIKE %s OR place LIKE %s)"
-        argv += [like, like]
+        sql += " AND (caption LIKE %s OR place LIKE %s OR sha256 LIKE %s)"
+        argv += [like, like, like]
     if place:
         sql += " AND place LIKE %s"
         argv.append("%" + place + "%")
@@ -2003,17 +2048,23 @@ def handle_photo_search(params, user=None):
         r["shot_at"] = str(r["shot_at"]) if r.get("shot_at") else None
         r["created_at"] = str(r["created_at"]) if r.get("created_at") else None
         # easyCode 的 view_image 只认本地路径，不认 sha/url。
-        # 把候选图复制到项目工作区里的缓存目录，模型才能真的“看图”而不是只看 caption。
+        # 优先用工作区里真正的 records/photos 副本，让 Agent 能 find 到并看图。
         try:
-            src = r.get("blob_path") or os.path.join(BLOB_ROOT, r["sha256"][:2], r["sha256"])
-            if src and os.path.isfile(src):
-                cache = os.path.join(WS_ROOT, pid, ".cache", "photos")
-                os.makedirs(cache, exist_ok=True)
-                ext = os.path.splitext(src)[1] or ".jpg"
-                dst = os.path.join(cache, r["sha256"] + ext)
-                if not os.path.exists(dst):
-                    shutil.copyfile(src, dst)
-                r["path"] = dst
+            rel = materialize_photo(pid, r["sha256"], r.get("blob_path"),
+                                    r.get("shot_at") or r.get("created_at"))
+            if rel:
+                r["path"] = os.path.join(WS_ROOT, pid, rel)
+                r["file"] = rel
+            else:
+                src = r.get("blob_path") or os.path.join(BLOB_ROOT, r["sha256"][:2], r["sha256"])
+                if src and os.path.isfile(src):
+                    cache = os.path.join(WS_ROOT, pid, ".cache", "photos")
+                    os.makedirs(cache, exist_ok=True)
+                    ext = os.path.splitext(src)[1] or ".jpg"
+                    dst = os.path.join(cache, r["sha256"] + ext)
+                    if not os.path.exists(dst):
+                        shutil.copyfile(src, dst)
+                    r["path"] = dst
         except Exception as e:
             sys.stderr.write("[photo] 准备 view_image 路径失败 %s: %r\n" % (r.get("sha256"), e))
     return 200, {"code": 0, "data": rows, "total": len(rows)}
