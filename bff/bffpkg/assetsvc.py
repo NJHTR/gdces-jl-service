@@ -52,8 +52,8 @@ PID_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 # 短签 URL：小程序 <image> 不能自定义 header，只能把签名放查询参数。
-# 默认 10 分钟有效；读取历史时用 resign_answer() 重新签，库里存的是旧签名也不怕。
-ASSET_URL_TTL = int(os.environ.get("ASSET_URL_TTL", "600"))
+# 默认 1 小时有效；读取历史时用 resign_answer() 重新签，库里存的是旧签名也不怕。
+ASSET_URL_TTL = int(os.environ.get("ASSET_URL_TTL", "3600"))
 
 # 单轮块上限（task-8 §4）
 BLOCK_CAPS = {"text": 6, "image_ref": 4, "file_ref": 2, "card": 3, "audio_ref": 1}
