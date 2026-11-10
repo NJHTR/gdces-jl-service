@@ -661,7 +661,7 @@ def handle_bootstrap(params, user):
                 "time": m["created_at"].strftime("%H:%M"), "sync": bool(m["sync"]),
                 "photos": photos,
                 "voice": bool(audio),
-                "dur": (audio or {}).get("dur") or ("语音" if audio else ""),
+                "dur": (audio or {}).get("dur") or ("0:00" if audio else ""),
                 "audioSha": (audio or {}).get("blob") or "",
                 "transcript": (audio or {}).get("transcript") or "",
                 "transcriptShown": False,
