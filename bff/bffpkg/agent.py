@@ -21,7 +21,7 @@ import pymysql
 """
 from .appserver import _client, run_isolated, run_stream
 from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, ensure_image_fallback, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
-from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob)
+from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob, is_image_sha)
 from .memcandidate import extract_memory_candidates
 from . import assetsvc
 
@@ -737,6 +737,9 @@ def handle_bootstrap(params, user):
         })
     for ph in q("SELECT id, sha256, place, shot_at FROM photo WHERE project_id=%s "
                 "ORDER BY id DESC LIMIT 100", (project_id,)):
+        # 历史 photo 表混入过语音 blob；记录页只展示真正可解码的图片
+        if not is_image_sha(ph.get("sha256") or ""):
+            continue
         docs.append({
             "id": f"p{ph['id']}", "kind": "影像",
             "name": f"{ph['place'] or '现场'} · 现场影像",

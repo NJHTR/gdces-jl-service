@@ -258,6 +258,14 @@ def handle_upload(project_id, params, data, user=None):
         return deny
 
     sha, blob_path, size = store_blob(data)
+    # 只有真正的照片才进 photo 证据表；语音/附件不建影像记录，
+    # 否则「记录 → 现场影像」会出现一堆无法解码的音频占位图。
+    kind = (q1(params, "kind") or "photo").strip().lower()
+    if kind != "photo":
+        return 200, {"code": 0, "data": {
+            "sha256": sha, "sha": sha, "size": size,
+            "url": f"/api/v1/blobs/{sha}", "kind": kind,
+        }}
     # params 里已经合并了 query + 表单字段（见 api.py）
     place = q1(params, "place")
     weather = q1(params, "weather")
@@ -323,6 +331,7 @@ def handle_photo_list(params):
     limit = min(int(q1(params, "limit", 20)), 100)
     rows = q("SELECT id, sha256, blob_path, place, weather, shot_at, src, git_commit, caption "
              "FROM photo WHERE project_id=%s ORDER BY id DESC LIMIT %s", (project_id, limit))
+    rows = [r for r in rows if is_image_sha(r.get("sha256") or "")]
     for r in rows:
         r["url"] = f"/api/v1/blobs/{r['sha256']}"
     return 200, {"code": 0, "data": rows}
@@ -338,7 +347,40 @@ def handle_blob(sha):
         return 404, {"code": 404, "message": "not found"}
     with open(path, "rb") as f:
         data = f.read()
-    return 200, data, "application/octet-stream"
+    return 200, data, _blob_mime(data)
+
+
+def _blob_mime(data):
+    """按文件头返回正确 MIME：<image> 对 octet-stream 的行为不稳定。"""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:3] == b"ID3" or data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio/mpeg"
+    if data[:4] == b"%PDF":
+        return "application/pdf"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
+    if data[:4] == b"\x1aE\xdf\xa3":
+        return "audio/webm"
+    return "application/octet-stream"
+
+
+def is_image_sha(sha):
+    """photo 表历史上混入过语音 blob；只把真正可解码的图片当影像。"""
+    try:
+        path = os.path.join(BLOB_ROOT, sha[:2], sha)
+        with open(path, "rb") as f:
+            return _blob_mime(f.read(16)).startswith("image/")
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------- default_project_id
@@ -2086,6 +2128,7 @@ def handle_photo_search(params, user=None):
     argv.append(limit)
 
     rows = q(sql, tuple(argv))
+    rows = [r for r in rows if is_image_sha(r.get("sha256") or "")]
     for r in rows:
         r["url"] = "/api/v1/blobs/" + r["sha256"]
         r["shot_at"] = str(r["shot_at"]) if r.get("shot_at") else None
