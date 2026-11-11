@@ -267,7 +267,7 @@ const TOOLS = [
         },
         caption: { type: "string", description: "图片底部说明（可选，别写外链）" },
       },
-      required: ["projectId", "photoId"],
+      required: ["projectId", "photoId", "detectLabels"],
     },
   },
   {

@@ -584,9 +584,8 @@ export async function annotatePhoto({ projectId, photoId, boxes, annotations, de
   const pid = requirePhotoId(photoId);
   let rawBoxes = boxes;
   let rawAnnotations = annotations;
-  if ((!Array.isArray(rawBoxes) || !rawBoxes.length) &&
-      (!Array.isArray(rawAnnotations) || !rawAnnotations.length) &&
-      Array.isArray(detectLabels) && detectLabels.length) {
+  if (Array.isArray(detectLabels) && detectLabels.length) {
+    // detectLabels 是首选路径：即使模型同时塞了 boxes，也以检测结果为准。
     const labels = detectLabels.map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
     const det = await bffPost("/api/v1/vision/detect", {
       projectId, photoId: pid, labels, threshold: 0.2,
@@ -598,9 +597,13 @@ export async function annotatePhoto({ projectId, photoId, boxes, annotations, de
         w: Number(b.x2) - Number(b.x1), h: Number(b.y2) - Number(b.y1),
         label: String(b.label || labels[0] || "").slice(0, 24),
       }));
+    rawAnnotations = null;
     if (!rawBoxes.length) {
       throw new Error("目标检测没有找到可标注的目标；请换一个更明确的标签，或如实告诉用户没有找到");
     }
+  } else {
+    throw new Error("annotate_photo 必须传 detectLabels（英文目标名）；不要自己用坐标估框。"
+      + "例如 {\"detectLabels\":[\"cardboard box\",\"carton\"],\"maxBoxes\":3}");
   }
   const normBoxes = normalizeBoxes(rawBoxes, rawAnnotations);
   const refs = [`photo:${pid}`];
