@@ -1427,7 +1427,13 @@ components:
         startedAt: { type: string, nullable: true }
         endedAt: { type: string, nullable: true }
         summary: { type: string }
-        stepCount: { type: integer }
+        stepCount:
+          type: integer
+          description: |
+            折叠后的工作项数：按 stepId（无 stepId 用 seq 兜底）合并起止事件后，
+            状态为终态（succeeded/failed/cancelled/skipped/retrying）的事件数；
+            包含 plan/artifact/subagent/validation 等工作项，**不含** kind=status
+            （开始/结束/取消这类 run 级状态事件）。例如 843 的 41 条事件折叠后为 22。
 
     TraceView:
       type: object
@@ -1449,7 +1455,16 @@ components:
         大输出只给 preview，完整内容走 /tasks/{id}/events/{seq}/detail。
       properties:
         seq: { type: integer }
-        stepId: { type: string, nullable: true }
+        stepId:
+          type: string
+          nullable: true
+          description: |
+            仅「成对步骤」事件有值：tool/file_read/file_write/image_read/validation/artifact
+            等 kind 的起始与完成事件共享同一 stepId，用于 upsert 配对。
+            status/plan/note/error/subagent 等独立事件 **stepId=null**（没有起止配对，
+            语义上不是一个 step）；客户端用 `"s"+seq` 兜底生成 wx:key 即可，
+            (seq, stepId) 去重不会撞键。需要按 step 分组时先过滤 stepId!=null，
+            独立事件按 seq 单独展示；子智能体树用 parentSeq 关联父 step。
         parentSeq:
           type: integer
           nullable: true
