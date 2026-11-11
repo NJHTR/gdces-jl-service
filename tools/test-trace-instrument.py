@@ -265,6 +265,17 @@ def main():
                           "status": "failed", "exitCode": 2,
                           "aggregatedOutput": "err"})
         eq("exitCode=2 → ok=false", tl[0].get("ok"), False)
+        # appserver 原生事件用 snake_case exit_code（实测），必须正确识别成功
+        tl = parse_items({"type": "command_execution", "id": "u5",
+                          "command": "jl-tool search_standards '{}'",
+                          "status": "completed", "exit_code": 0,
+                          "aggregatedOutput": "ok"})
+        eq("appserver exit_code=0 → ok=true", tl[0].get("ok"), True)
+        tl = parse_items({"type": "command_execution", "id": "u6",
+                          "command": "jl-tool search_standards '{}'",
+                          "status": "completed", "exit_code": 3,
+                          "aggregatedOutput": "err"})
+        eq("appserver exit_code=3 → ok=false", tl[0].get("ok"), False)
 
         # ---- 10) B1：bootstrap 与 /messages 的 v2 字段同源 ----
         t8 = new_task(core, "bootstrap")

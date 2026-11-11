@@ -116,6 +116,16 @@ def _tool_event_def(tool):
     return _TOOL_KIND.get(tool, ("tool", "act", "run"))
 
 
+def _event_exit_code(it):
+    """退出码字段兼容：appserver 原生事件是 snake_case（exit_code），
+    CLI exec 路径是 camelCase（exitCode）。显式 None 也保留（未知，不得当成功）。"""
+    if it.get("exitCode") is not None:
+        return it.get("exitCode")
+    if "exitCode" in it:
+        return it.get("exitCode")
+    return it.get("exit" "_code")
+
+
 def _emit_tool_start(task_id, tool, label, args_text, cid, *, attempt=1,
                      retry_of_seq=None, status="running", parent_seq=None,
                      kind_override=None):
@@ -1606,7 +1616,7 @@ def _parse_cli_jsonl(stdout, ctx=None):
             # 引擎字段是 camelCase（实测 keys：aggregatedOutput / exitCode / durationMs）。
             # 未知 exitCode（None/缺失）绝不能当成功：只有明确的 0 才算 ok，
             # 否则旧 trace/progress 会把失败命令显示成"完成"（QA task-19 B2）。
-            exit_code = it.get("exitCode")
+            exit_code = _event_exit_code(it)
             out = it.get("aggregatedOutput") or ""
             status_now = (it.get("status") or "").lower()
             ok_flag = (exit_code == 0 and status_now not in ("failed", "error"))
@@ -2028,9 +2038,9 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     cur["secs"] = round(now - cur.get("t0", now), 1)
                     cur.pop("t0", None)
                     ok = (it.get("status") not in ("failed", "error")
-                          and it.get("exitCode") == 0)
+                          and _event_exit_code(it) == 0)
                     out = (it.get("aggregatedOutput") or it.get("output") or "")
-                    ec = it.get("exitCode")
+                    ec = _event_exit_code(it)
                     if ok:
                         err = None
                     elif ec is None:
@@ -2068,8 +2078,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     status=("retrying" if attempt > 1 else "running"))
                 if step["state"] == "done":
                     ok = (it.get("status") not in ("failed", "error")
-                          and it.get("exitCode") == 0)
-                    ec = it.get("exitCode")
+                          and _event_exit_code(it) == 0)
+                    ec = _event_exit_code(it)
                     if ok:
                         err = None
                     elif ec is None:
