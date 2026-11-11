@@ -86,6 +86,47 @@ def _kind_of(name):
     return "tool"
 
 
+def shell_step(task_id, cmd, label, *, phase="gather", kind="file_read"):
+    """真跑一条 shell 命令（如 cat 大文件），用真实输出做「长输出截断」样例。"""
+    seq = tm.append_event(task_id, kind, label, phase=phase, status="running",
+                          started=True, step_id="fx-sh-%d-%d" % (task_id, time.time() * 1000),
+                          input_text=cmd[:300],
+                          meta={"tool": "shell", "label": label, "icon": "run",
+                                "legacy_kind": "shell"})
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                           cwd=WS, timeout=120)
+        out = (p.stdout or "") + (("\n" + p.stderr) if p.stderr else "")
+        ok = p.returncode == 0
+        return tm.finish_event(task_id, seq, "succeeded" if ok else "failed",
+                               output_text=out or "(no output)",
+                               error=(None if ok else "exit code %r" % p.returncode),
+                               meta_extra={"secs": 0.3})
+    except Exception as e:
+        return tm.finish_event(task_id, seq, "failed", error="%r" % (e,))
+
+
+def ensure_message(task_id, text):
+    """给 fixture 任务挂一条 assistant 消息（历史回放/消息列表联调用）。"""
+    try:
+        rows = core.q("SELECT id FROM message WHERE task_id=%s LIMIT 1", (task_id,))
+        if rows:
+            return rows[0]["id"]
+        tr = tm.project_message_trace(task_id) or []
+        ans = {"text": text, "blocks": [], "rich": []}
+        mid = core.exec_sql(
+            "INSERT INTO message (project_id, user_id, client_id, role, text, trace, "
+            "trace_sum, ms, task_id, sync, answer) "
+            "VALUES (%s,%s,%s,'assistant',%s,%s,%s,1000,%s,1,%s)",
+            (PROJECT, UID, "fixture-msg-%s" % task_id, text,
+             json.dumps(tr, ensure_ascii=False), "调了 查规范、写文书", task_id,
+             json.dumps(ans, ensure_ascii=False)))
+        return mid
+    except Exception as e:
+        print("建消息失败:", e)
+        return None
+
+
 def make_short():
     tid, cid = new_fixture_task("short")
     tm.append_event(tid, "plan", "任务理解", phase="plan", status="succeeded",
@@ -177,7 +218,18 @@ def make_short():
                                     "fields": {"部位": "4#楼东侧外架",
                                                "问题": "连墙件缺失"}},
               phase="finish", prefix="校验文书")
+    # 补齐到 30+ 步（真实工具调用，覆盖 gather/act 两个阶段）
+    for query in ("安全帽 佩戴", "临时用电 三级配电", "脚手架 剪刀撑", "洞口 防护"):
+        tool_step(tid, "search_standards", {"query": query}, phase="gather")
+    tool_step(tid, "search_records", {"projectId": PROJECT, "keyword": "整改"},
+              phase="gather", prefix="查整改记录")
+    tool_step(tid, "get_context", {"projectId": PROJECT}, phase="understand",
+              prefix="再读上下文")
+    # 长输出截断样例：读真实的大文件（>4KB），完整内容落 gz、事件只留 preview
+    shell_step(tid, "cat /home/baize/jl-service/data/knowledge/MANIFEST.md",
+               "读取知识库清单", phase="gather")
     tm.finish_run(tid, "succeeded", summary="联调样例完成")
+    ensure_message(tid, "trace 联调样例：查规范/照片 → 标注/对比 → 校验（含失败与重试）")
     return tid, cid
 
 
@@ -185,6 +237,8 @@ def make_long(n=124):
     tid, cid = new_fixture_task("long")
     tm.append_event(tid, "plan", "任务理解", phase="plan", status="succeeded",
                     started=True, finished=True, summary="长链路折叠样例（%d 步）" % n)
+    tm.append_event(tid, "tool", "汇总检索", phase="gather", status="succeeded",
+                    started=True, finished=True, summary="先检索资料再逐步处理")
     last = None
     for i in range(n):
         kind = ("tool", "image_read", "file_read", "file_write", "validation")[i % 5]
@@ -202,6 +256,7 @@ def make_long(n=124):
             tm.append_event(tid, "note", "阶段小结", phase="finish", status="succeeded",
                             started=True, finished=True, summary="已完成 %d 步" % (i + 1))
     tm.finish_run(tid, "succeeded", summary="长链路样例完成")
+    ensure_message(tid, "trace 长链路折叠样例（120+ 步）")
     return tid, cid
 
 
