@@ -830,6 +830,11 @@ def handle_bootstrap(params, user):
     last_day = None
     rows = q("SELECT id, role, text, photos, parts, trace, trace_sum, ms, sync, created_at, cites, answer, task_id "
              "FROM message WHERE project_id=%s ORDER BY id", (project_id,))
+    # v2：bootstrap 是客户端刷新后的唯一入口，assistant 消息必须和 /messages 一样
+    # 带 traceVersion/events/taskId（否则三层 trace 会回退成旧扁平数组）。
+    ev_map = _events_for_tasks([m.get("task_id") for m in rows
+                                if m.get("role") == "assistant"])
+    last_assistant_id = max([m["id"] for m in rows if m.get("role") == "assistant"] or [0])
     # 旧消息的 answer 里没有 artifact，但 task.doc_id 还在；批量补出来，
     # 否则重新进页面后聊天里的文书卡片会消失。
     artifact_by_task = {}
@@ -908,6 +913,16 @@ def handle_bootstrap(params, user):
                 "cites": json.loads(m["cites"]) if isinstance(m["cites"], str) else (m["cites"] or []),
                 "answer": answer,
                 "artifact": artifact,
+                # 刷新后仍可渲染 v2 三层 trace（与 /messages 字段一致）
+                "taskId": int(m["task_id"]) if m.get("task_id") else None,
+                "traceVersion": (2 if (ev_map.get(int(m["task_id"])) if m.get("task_id") else None)
+                                 else 1),
+                "events": (ev_map.get(int(m["task_id"])) or []) if m.get("task_id") else [],
+                "lastSeq": ((ev_map.get(int(m["task_id"])) or [])[-1]["seq"]
+                            if (m.get("task_id") and ev_map.get(int(m["task_id"]))) else 0),
+                # 最后一条 assistant 附 run，客户端刷新后可直接拿状态/步数
+                **({"run": tracemod.run_view(int(m["task_id"]))}
+                   if (m["id"] == last_assistant_id and m.get("task_id")) else {}),
             })
 
     # ---- 记录（按天分组）----
@@ -987,13 +1002,26 @@ def handle_bootstrap(params, user):
     for _r in pending_rules:
         _r["createdAt"] = str(_r.get("created_at") or "")
 
-    return 200, {"code": 0, "data": {
+    # bootstrap 顶层也给最后一条 assistant 的 v2 视图（与 /tasks/{id} 同源），
+    # 客户端只用 bootstrap 也能判定 v2；无事件的历史任务 traceVersion=1。
+    latest_task = None
+    for _m in reversed(rows):
+        if _m.get("role") == "assistant" and _m.get("task_id"):
+            latest_task = int(_m["task_id"])
+            break
+    _data = {
         "msgs": msgs, "records": records, "docs": docs,
         "memos": memos, "projMemos": proj_memos, "project": project_view,
         "pendingRules": pending_rules,
         # 多模态 capability 广告：新客户端据此决定是否读 answer.blocks
         "capabilities": ["answer.blocks.v1"],
-    }}
+    }
+    if latest_task:
+        _evs = ev_map.get(latest_task) or []
+        _data["traceVersion"] = 2 if _evs else 1
+        _data["lastSeq"] = _evs[-1]["seq"] if _evs else 0
+        _data["run"] = tracemod.run_view(latest_task)
+    return 200, {"code": 0, "data": _data}
 
 
 # ---------------------------------------------------------------- learn_from_turn
@@ -1576,10 +1604,12 @@ def _parse_cli_jsonl(stdout, ctx=None):
                 continue
             status = it.get("status")
             # 引擎字段是 camelCase（实测 keys：aggregatedOutput / exitCode / durationMs）。
-            # 以前读成下划线 → 输出永远空、退出码永远 None → 失败也显示成功。
-            out = it.get("aggregatedOutput") or ""
+            # 未知 exitCode（None/缺失）绝不能当成功：只有明确的 0 才算 ok，
+            # 否则旧 trace/progress 会把失败命令显示成"完成"（QA task-19 B2）。
             exit_code = it.get("exitCode")
-            ok_flag = exit_code in (0, None)
+            out = it.get("aggregatedOutput") or ""
+            status_now = (it.get("status") or "").lower()
+            ok_flag = (exit_code == 0 and status_now not in ("failed", "error"))
 
             m = re.search(r"jl-tool\s+([a-z_]+)", cmd)
             label = m.group(1) if m else "shell"
@@ -1998,11 +2028,16 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     cur["secs"] = round(now - cur.get("t0", now), 1)
                     cur.pop("t0", None)
                     ok = (it.get("status") not in ("failed", "error")
-                          and it.get("exitCode") in (None, 0))
+                          and it.get("exitCode") == 0)
                     out = (it.get("aggregatedOutput") or it.get("output") or "")
                     ec = it.get("exitCode")
-                    err = it.get("error") or (
-                        None if ec in (None, 0) else "exit code %r" % (ec,))
+                    if ok:
+                        err = None
+                    elif ec is None:
+                        err = "unknown exit code（引擎未返回退出码，按失败处理）"
+                    else:
+                        err = "exit code %r" % (ec,)
+                    err = it.get("error") or err
                     cseq = _emit_tool_finish(task_id, cur.get("_seq"), ok, out, err,
                                              cur["secs"])
                     if cseq:
@@ -2033,13 +2068,18 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     status=("retrying" if attempt > 1 else "running"))
                 if step["state"] == "done":
                     ok = (it.get("status") not in ("failed", "error")
-                          and it.get("exitCode") in (None, 0))
+                          and it.get("exitCode") == 0)
                     ec = it.get("exitCode")
+                    if ok:
+                        err = None
+                    elif ec is None:
+                        err = "unknown exit code（引擎未返回退出码，按失败处理）"
+                    else:
+                        err = "exit code %r" % (ec,)
                     cseq = _emit_tool_finish(
                         task_id, step["_seq"], ok,
                         it.get("aggregatedOutput") or it.get("output") or "",
-                        it.get("error") or (None if ec in (None, 0)
-                                            else "exit code %r" % (ec,)), 0)
+                        it.get("error") or err, 0)
                     if cseq:
                         step["_done_seq"] = cseq
                         last_tool_seq = cseq

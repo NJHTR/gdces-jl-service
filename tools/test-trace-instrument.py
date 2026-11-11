@@ -232,6 +232,85 @@ def main():
               not (ref and os.path.exists(
                   os.path.join(os.path.dirname(os.path.dirname(tm.TRACE_ROOT)), ref))))
 
+        # ---- 9) B2：未知 exitCode 不得算成功（_parse_cli_jsonl 旧 trace）----
+        def parse_items(*items):
+            lines = "\n".join(json.dumps(
+                {"type": "item.completed", "item": it}, ensure_ascii=False) for it in items)
+            return agent._parse_cli_jsonl(lines, ctx={})[2]
+
+        tl = parse_items({"type": "command_execution", "id": "u1",
+                          "command": "jl-tool search_standards '{}'",
+                          "status": "failed", "exitCode": None,
+                          "aggregatedOutput": ""})
+        eq("未知 exitCode+failed → ok=false", tl[0].get("ok"), False)
+        check("未知 exitCode 文本标失败", "失败" in (tl[0].get("text") or ""),
+              repr(tl[0].get("text")))
+        tl = parse_items({"type": "command_execution", "id": "u2",
+                          "command": "jl-tool search_standards '{}'",
+                          "status": "completed", "exitCode": None,
+                          "aggregatedOutput": "out"})
+        eq("exitCode 缺失+completed → ok=false（unknown）", tl[0].get("ok"), False)
+        tl = parse_items({"type": "command_execution", "id": "u3",
+                          "command": "jl-tool search_standards '{}'",
+                          "status": "completed", "exitCode": 0,
+                          "aggregatedOutput": "ok"})
+        eq("exitCode=0 → ok=true", tl[0].get("ok"), True)
+        tl = parse_items({"type": "command_execution", "id": "u4",
+                          "command": "jl-tool search_standards '{}'",
+                          "status": "failed", "exitCode": 2,
+                          "aggregatedOutput": "err"})
+        eq("exitCode=2 → ok=false", tl[0].get("ok"), False)
+
+        # ---- 10) B1：bootstrap 与 /messages 的 v2 字段同源 ----
+        t8 = new_task(core, "bootstrap")
+        task_ids.append(t8)
+        tm.start_run(t8)
+        for i in range(3):
+            s = tm.append_event(t8, "tool", "boot 步骤%d" % i, phase="act",
+                                status="running", step_id="b-%d" % i,
+                                meta={"tool": "search_standards", "label": "boot 步骤%d" % i})
+            tm.finish_event(t8, s, "succeeded", output_text="结果%d" % i)
+        mid = core.exec_sql(
+            "INSERT INTO message (project_id, user_id, client_id, role, text, trace, "
+            "trace_sum, ms, task_id, sync, answer) "
+            "VALUES (%s,%s,%s,'assistant',%s,%s,%s,100,%s,1,%s)",
+            (PROJECT, UID, PREFIX + "-boot-msg", "bootstrap 投影回答",
+             json.dumps(tm.project_message_trace(t8), ensure_ascii=False), "调了 查规范",
+             t8, json.dumps({"text": "bootstrap 投影回答"}, ensure_ascii=False)))
+        # 预热线程会连引擎；单测里替换掉，避免测试期间额外起会话
+        _orig_client = getattr(agent, "_client", None)
+        agent._client = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError("skip warm in test"))
+        try:
+            code, bpayload = agent.handle_bootstrap({"projectId": PROJECT}, None)
+        finally:
+            if _orig_client is not None:
+                agent._client = _orig_client
+        bdata = bpayload.get("data") or {}
+        bmsg = [m for m in (bdata.get("msgs") or [])
+                if m.get("type") == "agent" and m.get("id") == "a%d" % mid]
+        check("bootstrap 返回 assistant 消息", bool(bmsg), repr(bdata.get("msgs"))[:200])
+        if bmsg:
+            bm = bmsg[0]
+            eq("bootstrap 消息 traceVersion=2", bm.get("traceVersion"), 2)
+            eq("bootstrap 消息 taskId", bm.get("taskId"), t8)
+            eq("bootstrap 消息 events 数", len(bm.get("events") or []), tm.last_seq(t8))
+            eq("bootstrap 消息 lastSeq", bm.get("lastSeq"), tm.last_seq(t8))
+            eq("bootstrap 消息 run.status", (bm.get("run") or {}).get("status"), "running")
+            eq("bootstrap 顶层 traceVersion=2", bdata.get("traceVersion"), 2)
+            eq("bootstrap 顶层 lastSeq", bdata.get("lastSeq"), tm.last_seq(t8))
+            check("bootstrap 顶层带 run", bool(bdata.get("run")))
+            code2, mpayload = agent.handle_messages(
+                {"projectId": PROJECT, "after": mid - 1})
+            mm = [m for m in (mpayload.get("data") or {}).get("list") or []
+                  if m.get("id") == mid]
+            check("bootstrap 与 /messages 事件一致",
+                  bool(mm) and [e["seq"] for e in (mm[0].get("events") or [])]
+                  == [e["seq"] for e in (bm.get("events") or [])],
+                  repr([e["seq"] for e in (bm.get("events") or [])]))
+            eq("bootstrap 旧 message.trace 保留",
+               isinstance(bm.get("trace"), list) and len(bm.get("trace")) > 0, True)
+
     except Exception:
         traceback.print_exc()
         check("测试脚本无异常", False, "见 traceback")
@@ -244,6 +323,10 @@ def main():
         try:
             core.exec_sql("DELETE FROM message WHERE client_id LIKE %s", (PREFIX + "%",))
             core.exec_sql("DELETE FROM task WHERE client_id LIKE %s", (PREFIX + "%",))
+            # bootstrap 预热会给测试用户写个人摘要（仅 99999），一并清
+            import shutil
+            shutil.rmtree(os.path.join(ROOT, "data", "memory", "users", str(UID)),
+                          ignore_errors=True)
         except Exception:
             traceback.print_exc()
         left = core.q("SELECT COUNT(*) n FROM task WHERE client_id LIKE %s", (PREFIX + "%",))

@@ -581,7 +581,11 @@ paths:
       tags: [对话]
       x-owner: agent
       summary: 首屏聚合（项目 + 消息 + 记录 + 文书 + 记忆）
-      description: 小程序打开时只调这一个接口，减少往返。
+      description: |
+        小程序打开时只调这一个接口，减少往返。
+        v2 投影：assistant 消息带 traceVersion/events/taskId/lastSeq（与 /messages 同源，
+        历史无 task_event 的任务 traceVersion=1）；最后一条 assistant 消息还带 run；
+        顶层也带最新 assistant 的 traceVersion/lastSeq/run，客户端只用 bootstrap 也能判定 v2。
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       responses:
@@ -1462,8 +1466,9 @@ components:
             仅「成对步骤」事件有值：tool/file_read/file_write/image_read/validation/artifact
             等 kind 的起始与完成事件共享同一 stepId，用于 upsert 配对。
             status/plan/note/error/subagent 等独立事件 **stepId=null**（没有起止配对，
-            语义上不是一个 step）；客户端用 `"s"+seq` 兜底生成 wx:key 即可，
-            (seq, stepId) 去重不会撞键。需要按 step 分组时先过滤 stepId!=null，
+            语义上不是一个 step）；另外单发事件即使 kind 属于上述成对类型（例如直接生成的
+            一张 artifact/image_read 事件）也可能为 null —— 一律可用 `"s"+seq` 兜底生成
+            wx:key，(seq, stepId) 去重不会撞键。需要按 step 分组时先过滤 stepId!=null，
             独立事件按 seq 单独展示；子智能体树用 parentSeq 关联父 step。
         parentSeq:
           type: integer
