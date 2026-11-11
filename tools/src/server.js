@@ -215,8 +215,11 @@ const TOOLS = [
       "不会生成或伪造现场照片；没有真实 photoId 就不要调用。" +
       "同一张照片本轮重复调用会自动去重；单轮最多 9 张图。调完在正文里照常写一句话即可。" +
       "要标注必须给标注框：只用 caption 不会画出任何圈，不算完成标注。" +
+      "**首选 detectLabels**：用开放词汇检测模型返回真实 bbox；不要让语言模型自己估坐标。" +
+      "detectLabels 用英文目标名，如 [\"cardboard box\",\"carton\"]、[\"worker\",\"safety helmet\"]；maxBoxes 控制取前几个。" +
+      "只有检测不可用时才用 boxes/annotations 手动画框。" +
       "坐标以完整原图为基准（含底部项目信息条），不要按聊天里裁剪/缩放后的图估算；框要刚好包住目标。" +
-      "优先用 boxes（原图像素 x/y/w/h）；也兼容 annotations（x1/y1/x2/y2，可为 0..1 归一化）。" +
+      "boxes 为原图像素 x/y/w/h；annotations 为 x1/y1/x2/y2，可为 0..1 归一化。" +
       "若改用命令行调用，格式是 argv JSON：jl-tool annotate_photo '{\"projectId\":\"...\",\"photoId\":<id>,\"boxes\":[...]}'；" +
       "不要用 echo/管道/stdin/heredoc，也禁止用 shell/python/Pillow 自己画图或写 /tmp。工具失败就如实告诉用户失败原因，不要绕过。",
     inputSchema: {
@@ -224,6 +227,12 @@ const TOOLS = [
       properties: {
         projectId: { type: "string" },
         photoId: { type: "number", description: "真实照片 id（先用 search_photos 查）" },
+        detectLabels: {
+          type: "array",
+          description: "首选：英文开放词汇目标名，交给检测模型返回真实 bbox",
+          items: { type: "string" },
+        },
+        maxBoxes: { type: "number", description: "检测后最多取几个框，默认 20" },
         boxes: {
           type: "array",
           description: "要标注的框，坐标是原图像素；最多 20 个",

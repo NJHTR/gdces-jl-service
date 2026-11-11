@@ -27,7 +27,7 @@ from .memcandidate import (ensure_memory_candidate_table, handle_candidate_creat
 from .assetsvc import (delete_asset, ensure_asset_table, get_asset_content, get_asset_meta,
                        handle_asset_commit, handle_asset_create_json, handle_asset_issue,
                        is_content_path, maybe_gc)
-from .photocraft import handle_annotate, handle_compare
+from .photocraft import handle_annotate, handle_compare, handle_detect
 
 
 # ---------------------------------------------------------------- Handler
@@ -408,6 +408,8 @@ class Handler(BaseHTTPRequestHandler):
             # 真实照片的派生图：标注 / 整改前后对比拼版（只读原图 → data/assets）
             if path == "/api/v1/photos/annotate":
                 return self._send(*handle_annotate(body, resolve_token(bearer(self.headers))))
+            if path == "/api/v1/vision/detect":
+                return self._send(*handle_detect(body, resolve_token(bearer(self.headers))))
             if path == "/api/v1/photos/compare":
                 return self._send(*handle_compare(body, resolve_token(bearer(self.headers))))
             if path == "/api/v1/asr":

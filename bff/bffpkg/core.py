@@ -606,7 +606,10 @@ SYSTEM_PROMPT = """你是现场监理助手，帮监理员把现场的情况记�
    jl-tool annotate_photo '{"projectId":"<项目>","photoId":<真实id>,"boxes":[{"x":..,"y":..,"w":..,"h":..,"label":".."}],"caption":".."}'
    或 jl-tool compare_photos '{"projectId":"<项目>","beforePhotoId":<id>,"afterPhotoId":<id>,"title":".."}'。
    标注坐标必须以**完整原图**为基准（y=0 顶部，y=1 底部，包含底部信息条），不要按聊天里裁剪/缩放后的图估算；
-   归一化坐标用 0..1，框要刚好包住目标边缘。JSON 必须作为第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。
+   归一化坐标用 0..1，框要刚好包住目标边缘。**标注图片优先用 detectLabels（英文目标名）走真实目标检测**，
+   例：`{"projectId":"<项目>","photoId":<id>,"detectLabels":["cardboard box","carton"],"maxBoxes":3,"caption":"..."}`；
+   由检测模型返回 bbox，不要让语言模型自己估坐标。只有检测失败时才使用 boxes/annotations。
+   JSON 必须作为第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。
    照片不存在/不属于本项目就如实说「没有找到这张照片」，不要伪造、不要用 shell/python 自绘、不要写 /tmp、
    不要在回答里输出本地路径或 base64；工具失败就如实说明失败原因，不要绕过工具自己造图。
 7. 最多调 8 次工具；证据够了就 final。
@@ -648,6 +651,8 @@ _TOOL_EXTRA = {
         "\"boxes\":[{\"x\":100,\"y\":100,\"w\":300,\"h\":200,\"label\":\"配重块\"}],"
         "\"caption\":\"...\"}'  ← JSON 是第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。"
         "先 search_photos 拿真实 photoId；没有 photoId 就如实说，不要自己画图。"
+        "优先传 detectLabels（英文目标名）让检测模型给真实 bbox，例如 "
+        "\"detectLabels\":[\"cardboard box\",\"carton\"],\"maxBoxes\":3；"
         "也可用 annotations:[{x1,y1,x2,y2,normalized:true}]；坐标必须以**完整原图**为基准，"
         "y=0 是原图顶部、y=1 是原图底部（包含底部项目信息条），不要按聊天里的裁剪/缩放图估；"
         "框要刚好包住目标边缘，不要画得过大或过小。"

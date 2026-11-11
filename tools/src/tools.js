@@ -578,10 +578,31 @@ async function bffPost(pathname, body) {
 }
 
 /** 在真实照片上标注 → 派生图 → 加入本轮回答。 */
-export async function annotatePhoto({ projectId, photoId, boxes, annotations, caption = "" }) {
+export async function annotatePhoto({ projectId, photoId, boxes, annotations, detectLabels,
+                                     maxBoxes = 20, caption = "" }) {
   if (!projectId) throw new Error("缺 projectId");
   const pid = requirePhotoId(photoId);
-  const normBoxes = normalizeBoxes(boxes, annotations);
+  let rawBoxes = boxes;
+  let rawAnnotations = annotations;
+  if ((!Array.isArray(rawBoxes) || !rawBoxes.length) &&
+      (!Array.isArray(rawAnnotations) || !rawAnnotations.length) &&
+      Array.isArray(detectLabels) && detectLabels.length) {
+    const labels = detectLabels.map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
+    const det = await bffPost("/api/v1/vision/detect", {
+      projectId, photoId: pid, labels, threshold: 0.2,
+      maxDetections: Math.max(1, Math.min(50, Number(maxBoxes) || 20)),
+    });
+    rawBoxes = (det.boxes || []).slice(0, Math.max(1, Math.min(20, Number(maxBoxes) || 20)))
+      .map((b) => ({
+        x: Number(b.x1), y: Number(b.y1),
+        w: Number(b.x2) - Number(b.x1), h: Number(b.y2) - Number(b.y1),
+        label: String(b.label || labels[0] || "").slice(0, 24),
+      }));
+    if (!rawBoxes.length) {
+      throw new Error("目标检测没有找到可标注的目标；请换一个更明确的标签，或如实告诉用户没有找到");
+    }
+  }
+  const normBoxes = normalizeBoxes(rawBoxes, rawAnnotations);
   const refs = [`photo:${pid}`];
   // 去重：同一张源照片本轮已加过 → 不重复生成资产
   const dup = sameSourceBlock(projectId, refs);

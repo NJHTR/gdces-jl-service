@@ -13,12 +13,18 @@ import io
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from . import assetsvc
 from .core import BLOB_ROOT, q
 from .biz import guard_project
+
+VISION_URL = os.environ.get("VISION_URL", "http://127.0.0.1:8083")
+VISION_DATA_ROOT = os.environ.get("VISION_DATA_ROOT", "/data")
+
 
 MAX_SRC_PIXELS = 60_000_000        # 防解压炸弹
 MAX_OUT_SIDE = 3000                # 输出长边上限
@@ -386,6 +392,78 @@ def _int_or_none(v):
         return int(v) if v not in (None, "") else None
     except (TypeError, ValueError):
         return None
+
+
+def _vision_image_path(real_path):
+    """BFF 的 data 根目录映射到 jl-vision 容器的 /data。"""
+    host_root = os.path.dirname(os.path.realpath(BLOB_ROOT))
+    rel = os.path.relpath(os.path.realpath(real_path), host_root)
+    return os.path.join(VISION_DATA_ROOT, rel)
+
+
+def detect_objects(project_id, photo_id, labels, threshold=None, max_detections=20, user=None):
+    """开放词汇检测：真实 bbox 由视觉服务返回，不让语言模型估坐标。"""
+    deny = guard_project(project_id, user)
+    if deny:
+        return deny
+    try:
+        img, row = _load_photo(project_id, photo_id)
+        real = row.get("blob_path") or os.path.join(BLOB_ROOT, (row.get("sha256") or "")[:2],
+                                                     row.get("sha256") or "")
+        labels = [str(x).strip() for x in (labels or []) if str(x).strip()][:12]
+        if not labels:
+            return 400, {"code": 400, "message": "labels 必填"}
+        body = {
+            "path": _vision_image_path(real),
+            "labels": labels,
+            "threshold": 0.25 if threshold is None else max(0.0, min(1.0, float(threshold))),
+            "max_detections": max(1, min(50, int(max_detections or 20))),
+        }
+        req = urllib.request.Request(
+            VISION_URL.rstrip("/") + "/detect",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        boxes = []
+        for b in data.get("boxes") or []:
+            x1, y1, x2, y2 = [float(b.get(k, 0)) for k in ("x1", "y1", "x2", "y2")]
+            boxes.append({
+                "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+                "score": float(b.get("score") or 0),
+                "label": str(b.get("label") or ""),
+                "x": x1, "y": y1, "w": max(0.0, x2 - x1), "h": max(0.0, y2 - y1),
+            })
+        boxes.sort(key=lambda b: b["score"], reverse=True)
+        return 200, {
+            "code": 0,
+            "data": {
+                "width": data.get("width"), "height": data.get("height"),
+                "elapsedMs": data.get("elapsedMs"), "model": data.get("model"),
+                "boxes": boxes[:body["max_detections"]],
+            },
+        }
+    except urllib.error.URLError as e:
+        return 503, {"code": 503, "message": "视觉服务不可用: %r" % (e,)}
+    except assetsvc.AssetError as e:
+        return e.code, {"code": e.code, "message": e.message}
+    except Exception as e:
+        sys.stderr.write("[vision] detect 失败: %r\n" % (e,))
+        return 500, {"code": 500, "message": "目标检测失败: %r" % (e,)}
+
+
+def handle_detect(body, user=None):
+    pid = (body.get("projectId") or "").strip()
+    if not pid:
+        return 400, {"code": 400, "message": "projectId 必填"}
+    photo_id = _int_or_none(body.get("photoId"))
+    if not photo_id:
+        return 400, {"code": 400, "message": "photoId 必填"}
+    return detect_objects(pid, photo_id, body.get("labels") or [],
+                          threshold=body.get("threshold"),
+                          max_detections=_int_or_none(body.get("maxDetections")) or 20,
+                          user=user)
 
 
 def handle_annotate(body, user=None):
