@@ -584,8 +584,10 @@ paths:
       description: |
         小程序打开时只调这一个接口，减少往返。
         v2 投影：assistant 消息带 traceVersion/events/taskId/lastSeq（与 /messages 同源，
-        历史无 task_event 的任务 traceVersion=1）；最后一条 assistant 消息还带 run；
-        顶层也带最新 assistant 的 traceVersion/lastSeq/run，客户端只用 bootstrap 也能判定 v2。
+        历史无 task_event 的任务 traceVersion=1）；**每条有 v2 事件的 assistant 消息都带
+        对应 task 的 run**（与 GET /tasks/{id} 的 run 同源，含 status/stepCount），
+        客户端刷新后直接按 run.status 渲染 L1，不必从事件推断；
+        顶层也带最新 assistant 的 traceVersion/lastSeq/run。
       parameters:
         - $ref: '#/components/parameters/ProjectId'
       responses:

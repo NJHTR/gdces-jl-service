@@ -293,6 +293,22 @@ def main():
             (PROJECT, UID, PREFIX + "-boot-msg", "bootstrap 投影回答",
              json.dumps(tm.project_message_trace(t8), ensure_ascii=False), "调了 查规范",
              t8, json.dumps({"text": "bootstrap 投影回答"}, ensure_ascii=False)))
+        # 第二条 v2 历史消息：bootstrap 必须每条 assistant 都带 run（QA task-22）
+        t9 = new_task(core, "bootstrap2")
+        task_ids.append(t9)
+        tm.start_run(t9)
+        s9 = tm.append_event(t9, "tool", "boot2 步骤", phase="act",
+                             status="running", step_id="b9",
+                             meta={"tool": "search_standards", "label": "boot2 步骤"})
+        tm.finish_event(t9, s9, "failed", error="模拟失败命令")
+        tm.finish_run(t9, "succeeded", summary="有失败步骤但 run 成功")
+        mid2 = core.exec_sql(
+            "INSERT INTO message (project_id, user_id, client_id, role, text, trace, "
+            "trace_sum, ms, task_id, sync, answer) "
+            "VALUES (%s,%s,%s,'assistant',%s,%s,%s,100,%s,1,%s)",
+            (PROJECT, UID, PREFIX + "-boot-msg2", "bootstrap 第二条",
+             json.dumps(tm.project_message_trace(t9), ensure_ascii=False), "调了 查规范",
+             t9, json.dumps({"text": "bootstrap 第二条"}, ensure_ascii=False)))
         # 预热线程会连引擎；单测里替换掉，避免测试期间额外起会话
         _orig_client = getattr(agent, "_client", None)
         agent._client = lambda *a, **k: (_ for _ in ()).throw(
@@ -305,6 +321,8 @@ def main():
         bdata = bpayload.get("data") or {}
         bmsg = [m for m in (bdata.get("msgs") or [])
                 if m.get("type") == "agent" and m.get("id") == "a%d" % mid]
+        bmsg2 = [m for m in (bdata.get("msgs") or [])
+                 if m.get("type") == "agent" and m.get("id") == "a%d" % mid2]
         check("bootstrap 返回 assistant 消息", bool(bmsg), repr(bdata.get("msgs"))[:200])
         if bmsg:
             bm = bmsg[0]
@@ -313,19 +331,30 @@ def main():
             eq("bootstrap 消息 events 数", len(bm.get("events") or []), tm.last_seq(t8))
             eq("bootstrap 消息 lastSeq", bm.get("lastSeq"), tm.last_seq(t8))
             eq("bootstrap 消息 run.status", (bm.get("run") or {}).get("status"), "running")
+            eq("bootstrap 消息 run 与 /tasks 同源", bm.get("run"), tm.run_view(t8))
             eq("bootstrap 顶层 traceVersion=2", bdata.get("traceVersion"), 2)
-            eq("bootstrap 顶层 lastSeq", bdata.get("lastSeq"), tm.last_seq(t8))
             check("bootstrap 顶层带 run", bool(bdata.get("run")))
-            code2, mpayload = agent.handle_messages(
-                {"projectId": PROJECT, "after": mid - 1})
-            mm = [m for m in (mpayload.get("data") or {}).get("list") or []
-                  if m.get("id") == mid]
+        check("bootstrap 第二条 assistant 也带 run", bool(bmsg2), repr(bdata.get("msgs"))[:200])
+        if bmsg2:
+            bm2 = bmsg2[0]
+            eq("bootstrap 第二条 run.status（有失败步骤仍 succeeded）",
+               (bm2.get("run") or {}).get("status"), "succeeded")
+            eq("bootstrap 第二条 run.stepCount", (bm2.get("run") or {}).get("stepCount"), 1)
+            eq("bootstrap 第二条 run 与 /tasks 同源", bm2.get("run"), tm.run_view(t9))
+            eq("bootstrap 顶层 run 取最新 task", bdata.get("run"), tm.run_view(t9))
+        code2, mpayload = agent.handle_messages(
+            {"projectId": PROJECT, "after": min(mid, mid2) - 1})
+        mm = {m.get("id"): m for m in (mpayload.get("data") or {}).get("list") or []}
+        check("/messages 两条 assistant 都带 run",
+              bool(mm.get(mid, {}).get("run")) and bool(mm.get(mid2, {}).get("run")),
+              repr({k: bool(v.get("run")) for k, v in mm.items()}))
+        if bmsg and mm.get(mid):
             check("bootstrap 与 /messages 事件一致",
-                  bool(mm) and [e["seq"] for e in (mm[0].get("events") or [])]
-                  == [e["seq"] for e in (bm.get("events") or [])],
-                  repr([e["seq"] for e in (bm.get("events") or [])]))
+                  [e["seq"] for e in (mm[mid].get("events") or [])]
+                  == [e["seq"] for e in (bmsg[0].get("events") or [])],
+                  repr([e["seq"] for e in (bmsg[0].get("events") or [])]))
             eq("bootstrap 旧 message.trace 保留",
-               isinstance(bm.get("trace"), list) and len(bm.get("trace")) > 0, True)
+               isinstance(bmsg[0].get("trace"), list) and len(bmsg[0].get("trace")) > 0, True)
 
     except Exception:
         traceback.print_exc()

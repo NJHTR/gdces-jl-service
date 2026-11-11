@@ -258,6 +258,45 @@ def _events_for_tasks(task_ids):
     return out
 
 
+def _runs_for_tasks(task_ids):
+    """批量算每条 task 的 run 投影（bootstrap/历史消息用，避免 N+1）。
+
+    - 有 task_event 的任务：走 tracemod.run_view（与 GET /tasks/{id} 的 run 同源）。
+    - 无事件的旧任务：不从 run_view 查（返回 stepCount=0 的旧投影由调用方按 v1 处理）。
+    """
+    ids = []
+    for t in task_ids or []:
+        try:
+            n = int(t)
+        except (TypeError, ValueError):
+            continue
+        if n > 0 and n not in ids:
+            ids.append(n)
+    if not ids:
+        return {}
+    try:
+        rows = q("SELECT id, status, started_at, finished_at, error FROM task WHERE id IN ("
+                 + ",".join(["%s"] * len(ids)) + ")", tuple(ids))
+    except Exception:
+        traceback.print_exc()
+        return {}
+    out = {}
+    for r in rows:
+        tid = int(r["id"])
+        try:
+            ev = q("SELECT COUNT(*) n FROM task_event WHERE task_id=%s", (tid,))
+            if not (ev and ev[0]["n"]):
+                continue
+        except Exception:
+            traceback.print_exc()
+            continue
+        try:
+            out[tid] = tracemod.run_view(tid, r)
+        except Exception:
+            traceback.print_exc()
+    return out
+
+
 def _legacy_trace_projection(task_id, parsed_trace):
     """message.trace 投影：事件→旧格式；保留解析出的 note/warning 等非工具条目。"""
     proj = None
@@ -336,6 +375,7 @@ def handle_messages(params):
     # trace v2：历史消息附 events（事件数组，含 append-only 的末态完成事件）；
     # message.trace 保持旧格式数组不变（旧客户端零改动）。
     ev_map = _events_for_tasks([m.get("task_id") for m in rows])
+    run_map = _runs_for_tasks([m.get("task_id") for m in rows])
     for m in rows:
         if m.get("trace") and isinstance(m["trace"], str):
             m["trace"] = json.loads(m["trace"])
@@ -347,6 +387,8 @@ def handle_messages(params):
             m["taskId"] = int(tid)
             m["traceVersion"] = 2 if evs else 1
             m["events"] = evs
+            if evs:
+                m["run"] = run_map.get(int(tid))
     return 200, {"code": 0, "data": {"list": rows, "lastId": rows[-1]["id"] if rows else after}}
 
 
@@ -844,7 +886,10 @@ def handle_bootstrap(params, user):
     # 带 traceVersion/events/taskId（否则三层 trace 会回退成旧扁平数组）。
     ev_map = _events_for_tasks([m.get("task_id") for m in rows
                                 if m.get("role") == "assistant"])
-    last_assistant_id = max([m["id"] for m in rows if m.get("role") == "assistant"] or [0])
+    # run 与 /tasks/{id} 同源；每条 v2 assistant 都要带（否则刷新后 client 只能从事件推断，
+    # 1002 有失败步骤就会被误推断成 failed），批量算避免 N+1。
+    run_map = _runs_for_tasks([m.get("task_id") for m in rows
+                               if m.get("role") == "assistant"])
     # 旧消息的 answer 里没有 artifact，但 task.doc_id 还在；批量补出来，
     # 否则重新进页面后聊天里的文书卡片会消失。
     artifact_by_task = {}
@@ -930,9 +975,10 @@ def handle_bootstrap(params, user):
                 "events": (ev_map.get(int(m["task_id"])) or []) if m.get("task_id") else [],
                 "lastSeq": ((ev_map.get(int(m["task_id"])) or [])[-1]["seq"]
                             if (m.get("task_id") and ev_map.get(int(m["task_id"]))) else 0),
-                # 最后一条 assistant 附 run，客户端刷新后可直接拿状态/步数
-                **({"run": tracemod.run_view(int(m["task_id"]))}
-                   if (m["id"] == last_assistant_id and m.get("task_id")) else {}),
+                # 每条有 v2 事件的 assistant 都附对应 task 的 run（与 /tasks run 同源）
+                **({"run": run_map[int(m["task_id"])]}
+                   if (m.get("task_id") and ev_map.get(int(m["task_id"]))
+                       and run_map.get(int(m["task_id"]))) else {}),
             })
 
     # ---- 记录（按天分组）----
@@ -1030,7 +1076,7 @@ def handle_bootstrap(params, user):
         _evs = ev_map.get(latest_task) or []
         _data["traceVersion"] = 2 if _evs else 1
         _data["lastSeq"] = _evs[-1]["seq"] if _evs else 0
-        _data["run"] = tracemod.run_view(latest_task)
+        _data["run"] = run_map.get(latest_task) or tracemod.run_view(latest_task)
     return 200, {"code": 0, "data": _data}
 
 
