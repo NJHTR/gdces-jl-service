@@ -2547,11 +2547,7 @@ def handle_task(task_id, user=None, after_seq=0):
     return 200, {"code": 0, "data": {
         # 最终态 trace 契约（旧字段全部保留，新字段 additive）
         "traceVersion": trace_version,
-        "run": (tracemod.run_view(task_id, t) if trace_version >= 2
-                else {"taskId": t["id"], "status": t["status"],
-                      "startedAt": str(t["started_at"]) if t.get("started_at") else None,
-                      "endedAt": str(t["finished_at"]) if t.get("finished_at") else None,
-                      "summary": t.get("error") or "", "stepCount": 0}),
+        "run": tracemod.run_view(task_id, t),
         "lastSeq": last_seq,
         "events": events,
         "progress": progress,
