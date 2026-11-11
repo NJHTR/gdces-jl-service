@@ -605,7 +605,8 @@ SYSTEM_PROMPT = """你是现场监理助手，帮监理员把现场的情况记�
    不要用文字描述代替图片。要标注/圈出/对比时，再执行
    jl-tool annotate_photo '{"projectId":"<项目>","photoId":<真实id>,"boxes":[{"x":..,"y":..,"w":..,"h":..,"label":".."}],"caption":".."}'
    或 jl-tool compare_photos '{"projectId":"<项目>","beforePhotoId":<id>,"afterPhotoId":<id>,"title":".."}'。
-   JSON 必须作为第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。
+   标注坐标必须以**完整原图**为基准（y=0 顶部，y=1 底部，包含底部信息条），不要按聊天里裁剪/缩放后的图估算；
+   归一化坐标用 0..1，框要刚好包住目标边缘。JSON 必须作为第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。
    照片不存在/不属于本项目就如实说「没有找到这张照片」，不要伪造、不要用 shell/python 自绘、不要写 /tmp、
    不要在回答里输出本地路径或 base64；工具失败就如实说明失败原因，不要绕过工具自己造图。
 7. 最多调 8 次工具；证据够了就 final。
@@ -647,6 +648,9 @@ _TOOL_EXTRA = {
         "\"boxes\":[{\"x\":100,\"y\":100,\"w\":300,\"h\":200,\"label\":\"配重块\"}],"
         "\"caption\":\"...\"}'  ← JSON 是第二个命令行参数（argv），不要用 echo/管道/stdin/heredoc。"
         "先 search_photos 拿真实 photoId；没有 photoId 就如实说，不要自己画图。"
+        "也可用 annotations:[{x1,y1,x2,y2,normalized:true}]；坐标必须以**完整原图**为基准，"
+        "y=0 是原图顶部、y=1 是原图底部（包含底部项目信息条），不要按聊天里的裁剪/缩放图估；"
+        "框要刚好包住目标边缘，不要画得过大或过小。"
     ),
     "compare_photos": (
         "用法：jl-tool compare_photos '{\"projectId\":\"<项目>\",\"beforePhotoId\":<id>,"

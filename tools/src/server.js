@@ -215,6 +215,7 @@ const TOOLS = [
       "不会生成或伪造现场照片；没有真实 photoId 就不要调用。" +
       "同一张照片本轮重复调用会自动去重；单轮最多 9 张图。调完在正文里照常写一句话即可。" +
       "要标注必须给标注框：只用 caption 不会画出任何圈，不算完成标注。" +
+      "坐标以完整原图为基准（含底部项目信息条），不要按聊天里裁剪/缩放后的图估算；框要刚好包住目标。" +
       "优先用 boxes（原图像素 x/y/w/h）；也兼容 annotations（x1/y1/x2/y2，可为 0..1 归一化）。" +
       "若改用命令行调用，格式是 argv JSON：jl-tool annotate_photo '{\"projectId\":\"...\",\"photoId\":<id>,\"boxes\":[...]}'；" +
       "不要用 echo/管道/stdin/heredoc，也禁止用 shell/python/Pillow 自己画图或写 /tmp。工具失败就如实告诉用户失败原因，不要绕过。",
@@ -241,7 +242,7 @@ const TOOLS = [
         },
         annotations: {
           type: "array",
-          description: "boxes 的兼容别名；使用 x1/y1/x2/y2 四角坐标，可为 0..1 归一化",
+          description: "boxes 的兼容别名；使用 x1/y1/x2/y2 四角坐标，可为 0..1 归一化（相对完整原图）",
           items: {
             type: "object",
             properties: {
