@@ -181,7 +181,12 @@ def _save_and_commit(project_id, data, user, origin, producer, caption, source_r
 
 # ---------------------------------------------------------------- annotate_photo
 def _norm_boxes(boxes, w, h):
-    """校验/裁剪标注框；返回 [(x1,y1,x2,y2,label,raw_index)]；全无效抛 400。"""
+    """校验/裁剪标注框；返回 [(x1,y1,x2,y2,label,raw_index)]；全无效抛 400。
+
+    兼容两类模型输出：
+      · boxes: [{x,y,w,h}]，像素坐标
+      · annotations: [{x1,y1,x2,y2}]，可为 0..1 归一化
+    """
     if boxes in (None, ""):
         return []
     if not isinstance(boxes, list):
@@ -193,14 +198,34 @@ def _norm_boxes(boxes, w, h):
         if not isinstance(b, dict):
             continue
         try:
-            x = float(b.get("x")); y = float(b.get("y"))
-            bw = float(b.get("w")); bh = float(b.get("h"))
+            if any(k in b for k in ("x1", "y1", "x2", "y2")):
+                x1 = float(b.get("x1")); y1 = float(b.get("y1"))
+                x2 = float(b.get("x2")); y2 = float(b.get("y2"))
+                unit = bool(b.get("normalized")) or (
+                    all(0.0 <= v <= 1.0 for v in (x1, y1, x2, y2))
+                )
+                if unit:
+                    x1, y1, x2, y2 = x1 * w, y1 * h, x2 * w, y2 * h
+                if x2 <= x1 or y2 <= y1:
+                    continue
+            else:
+                x = float(b.get("x")); y = float(b.get("y"))
+                bw = float(b.get("w")); bh = float(b.get("h"))
+                if bw <= 0 or bh <= 0:
+                    continue
+                unit = bool(b.get("normalized")) or (
+                    all(0.0 <= v <= 1.0 for v in (x, y, bw, bh)) and
+                    x + bw <= 1.0 and y + bh <= 1.0
+                )
+                if unit:
+                    x, y, bw, bh = x * w, y * h, bw * w, bh * h
+                x1, y1, x2, y2 = x, y, x + bw, y + bh
         except (TypeError, ValueError):
             continue
-        if bw <= 0 or bh <= 0:
-            continue
-        x1, y1 = max(0.0, min(float(w), x)), max(0.0, min(float(h), y))
-        x2, y2 = max(0.0, min(float(w), x + bw)), max(0.0, min(float(h), y + bh))
+        x1 = max(0.0, min(float(w), x1))
+        y1 = max(0.0, min(float(h), y1))
+        x2 = max(0.0, min(float(w), x2))
+        y2 = max(0.0, min(float(h), y2))
         if x2 - x1 < 4 or y2 - y1 < 4:
             continue
         label = _safe_text(b.get("label") or "", 24)

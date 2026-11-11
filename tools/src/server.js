@@ -214,6 +214,8 @@ const TOOLS = [
       "photoId 必须是先用 search_photos 查到的真实 id，不能编；它只给原图画框/编号/标签，图上会带「派生图·基于现场照片」角标，**不是现场原图**。" +
       "不会生成或伪造现场照片；没有真实 photoId 就不要调用。" +
       "同一张照片本轮重复调用会自动去重；单轮最多 9 张图。调完在正文里照常写一句话即可。" +
+      "要标注必须给标注框：只用 caption 不会画出任何圈，不算完成标注。" +
+      "优先用 boxes（原图像素 x/y/w/h）；也兼容 annotations（x1/y1/x2/y2，可为 0..1 归一化）。" +
       "若改用命令行调用，格式是 argv JSON：jl-tool annotate_photo '{\"projectId\":\"...\",\"photoId\":<id>,\"boxes\":[...]}'；" +
       "不要用 echo/管道/stdin/heredoc，也禁止用 shell/python/Pillow 自己画图或写 /tmp。工具失败就如实告诉用户失败原因，不要绕过。",
     inputSchema: {
@@ -231,9 +233,26 @@ const TOOLS = [
               y: { type: "number" },
               w: { type: "number" },
               h: { type: "number" },
+              normalized: { type: "boolean", description: "为 true 时 x/y/w/h 使用 0..1 归一化" },
               label: { type: "string", description: "框旁短标签，如 裂缝 / 整改前后" },
             },
             required: ["x", "y", "w", "h"],
+          },
+        },
+        annotations: {
+          type: "array",
+          description: "boxes 的兼容别名；使用 x1/y1/x2/y2 四角坐标，可为 0..1 归一化",
+          items: {
+            type: "object",
+            properties: {
+              x1: { type: "number" },
+              y1: { type: "number" },
+              x2: { type: "number" },
+              y2: { type: "number" },
+              normalized: { type: "boolean", description: "为 true 时四角坐标使用 0..1 归一化" },
+              label: { type: "string" },
+            },
+            required: ["x1", "y1", "x2", "y2"],
           },
         },
         caption: { type: "string", description: "图片底部说明（可选，别写外链）" },

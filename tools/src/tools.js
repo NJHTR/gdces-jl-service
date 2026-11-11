@@ -516,19 +516,47 @@ function requirePhotoId(photoId, field = "photoId") {
   return n;
 }
 
-function normalizeBoxes(boxes) {
-  if (boxes === undefined || boxes === null) return [];
-  if (!Array.isArray(boxes)) throw new Error("boxes 必须是数组 [{x,y,w,h,label?}]");
-  if (boxes.length > 20) throw new Error("标注框最多 20 个");
-  return boxes.map((b, i) => {
+function normalizeBoxes(boxes, annotations) {
+  const raw = Array.isArray(boxes) && boxes.length
+    ? boxes
+    : (Array.isArray(annotations) ? annotations : boxes);
+  if (!Array.isArray(raw)) {
+    throw new Error("缺少标注框：annotate_photo 必须提供 boxes 或 annotations");
+  }
+  if (!raw.length) {
+    // 保留 caption-only 的兼容路径；只要调用方给了 annotations，就必须真的能解析出框。
+    if (Array.isArray(annotations) && annotations.length) {
+      throw new Error("annotations 里没有有效标注框（需要 x1/y1/x2/y2）");
+    }
+    return [];
+  }
+  if (raw.length > 20) throw new Error("标注框最多 20 个");
+  return raw.map((b, i) => {
     if (!b || typeof b !== "object") throw new Error(`boxes[${i}] 不是对象`);
     const out = {};
-    for (const k of ["x", "y", "w", "h"]) {
-      const v = Number(b[k]);
-      if (!Number.isFinite(v)) throw new Error(`boxes[${i}].${k} 必须是数字`);
-      out[k] = v;
+    const hasCorners = b.x1 !== undefined || b.y1 !== undefined || b.x2 !== undefined || b.y2 !== undefined;
+    if (hasCorners) {
+      for (const k of ["x1", "y1", "x2", "y2"]) {
+        const v = Number(b[k]);
+        if (!Number.isFinite(v)) throw new Error(`annotations[${i}].${k} 必须是数字`);
+        out[k] = v;
+      }
+      if (out.x2 <= out.x1 || out.y2 <= out.y1) throw new Error(`annotations[${i}] 右下角必须大于左上角`);
+      const unit = b.normalized !== false &&
+        [out.x1, out.y1, out.x2, out.y2].every((v) => v >= 0 && v <= 1);
+      out.normalized = !!unit;
+    } else {
+      for (const k of ["x", "y", "w", "h"]) {
+        const v = Number(b[k]);
+        if (!Number.isFinite(v)) throw new Error(`boxes[${i}].${k} 必须是数字`);
+        out[k] = v;
+      }
+      if (out.w <= 0 || out.h <= 0) throw new Error(`boxes[${i}] 宽高必须大于 0`);
+      const unit = b.normalized === true ||
+        ([out.x, out.y, out.w, out.h].every((v) => v >= 0 && v <= 1) &&
+          out.x + out.w <= 1 && out.y + out.h <= 1);
+      out.normalized = !!unit;
     }
-    if (out.w <= 0 || out.h <= 0) throw new Error(`boxes[${i}] 宽高必须大于 0`);
     if (b.label !== undefined) out.label = String(b.label).slice(0, 24);
     return out;
   });
@@ -550,10 +578,10 @@ async function bffPost(pathname, body) {
 }
 
 /** 在真实照片上标注 → 派生图 → 加入本轮回答。 */
-export async function annotatePhoto({ projectId, photoId, boxes, caption = "" }) {
+export async function annotatePhoto({ projectId, photoId, boxes, annotations, caption = "" }) {
   if (!projectId) throw new Error("缺 projectId");
   const pid = requirePhotoId(photoId);
-  const normBoxes = normalizeBoxes(boxes);
+  const normBoxes = normalizeBoxes(boxes, annotations);
   const refs = [`photo:${pid}`];
   // 去重：同一张源照片本轮已加过 → 不重复生成资产
   const dup = sameSourceBlock(projectId, refs);
