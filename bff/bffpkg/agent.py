@@ -117,8 +117,11 @@ def _tool_event_def(tool):
 
 
 def _emit_tool_start(task_id, tool, label, args_text, cid, *, attempt=1,
-                     retry_of_seq=None, status="running", parent_seq=None):
+                     retry_of_seq=None, status="running", parent_seq=None,
+                     kind_override=None):
     kind, phase, icon = _tool_event_def(tool)
+    if kind_override:
+        kind = kind_override
     name = label or tool
     if attempt and int(attempt) > 1:
         name = "重试·" + (name or tool)
@@ -130,6 +133,52 @@ def _emit_tool_start(task_id, tool, label, args_text, cid, *, attempt=1,
         retry_of_seq=(int(retry_of_seq) if retry_of_seq else None),
         meta={"tool": tool, "label": label or tool, "icon": icon,
               "args": (args_text or "")[:300], "legacy_kind": "cmd"})
+
+
+class _TurnCancelled(Exception):
+    """用户取消：终止引擎流，但不得把 run 改成 failed/done。"""
+
+
+def _finish_running_steps(task_id, status, error=None):
+    """取消/中断收尾：给仍 running 的 step 追加终态完成事件（append-only）。"""
+    try:
+        rows = q("SELECT seq FROM task_event WHERE task_id=%s AND status IN "
+                 "('running','retrying') ORDER BY seq", (task_id,))
+        for r in rows:
+            tracemod.finish_event(task_id, r["seq"], status,
+                                  error=(str(error)[:4000] if error else None))
+    except Exception:
+        traceback.print_exc()
+
+
+_JL_TOOL_RE = re.compile(r"jl-tool\s+([a-z_]+)")
+_JL_TOOL_ARGS_RE = re.compile(r"jl-tool\s+[a-z_]+\s+'(.*)'")
+_SHELL_READ_RE = re.compile(r"(^|\s)(cat|head|tail|less|grep|rg|sed|awk|find)\s")
+_SHELL_IMAGE_RE = re.compile(r"(python|pillow|imagedraw|convert|magick|annotate|draw)")
+_SHELL_WRITE_RE = re.compile(r"(>|tee\s|touch\s|mkdir\s|open\([^)]*['\"]w)")
+
+
+def _tool_from_cmd(cmdstr):
+    """命令 → (工具名/展示名, args, kind_override)；shell 命令也要可见。"""
+    m = _JL_TOOL_RE.search(cmdstr)
+    if m:
+        label = m.group(1)
+        args = {}
+        mm = _JL_TOOL_ARGS_RE.search(cmdstr)
+        if mm:
+            try:
+                args = json.loads(mm.group(1).replace('\\"', '"'))
+            except ValueError:
+                args = {}
+        return label, args, None
+    low = cmdstr.lower()
+    if _SHELL_READ_RE.search(low):
+        return "shell_read", {}, "file_read"
+    if _SHELL_IMAGE_RE.search(low):
+        return "shell_image", {}, "image_read"
+    if _SHELL_WRITE_RE.search(low):
+        return "shell_write", {}, "file_write"
+    return "shell", {}, None
 
 
 def _emit_tool_finish(task_id, seq, ok, output_text=None, error=None, secs=None,
@@ -311,11 +360,19 @@ def handle_task_retry(task_id):
         "INSERT INTO task (project_id, user_id, client_id, kind, payload, status, trace_version) "
         "VALUES (%s,%s,%s,'chat',%s,'queued',2)",
         (t["project_id"], t["user_id"], f"retry-{task_id}-{int(time.time())}",
-         json.dumps({"text": text, "retriedFrom": task_id}, ensure_ascii=False)))
+         json.dumps({"text": text, "retriedFrom": task_id,
+                     "attempt": int((payload or {}).get("attempt") or 1) + 1},
+                    ensure_ascii=False)))
     try:
+        # 旧 run 保留原 attempt；重试关系写在两边（旧：重试为新任务；新：由谁重试/第几次）
+        tracemod.append_event(task_id, "status", "重试为新任务", phase="finish",
+                              status="retrying",
+                              summary="已重试为新任务 %s" % new_id,
+                              meta={"retriedTo": new_id})
         tracemod.append_event(new_id, "status", "重试任务", phase="plan", status="pending",
                               summary="由任务 %s 重试" % task_id,
-                              meta={"retriedFrom": task_id})
+                              meta={"retriedFrom": task_id,
+                                    "attempt": int((payload or {}).get("attempt") or 1) + 1})
     except Exception:
         traceback.print_exc()
     threading.Thread(target=run_turn,
@@ -1065,6 +1122,14 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
         final_text = ""
         corrected = False
         for step in range(6):
+            # 取消检查：取消后不再继续用模型/工具
+            try:
+                st = q("SELECT status FROM task WHERE id=%s", (task_id,))
+                if st and st[0].get("status") == "cancelled":
+                    _finish_running_steps(task_id, "cancelled", "用户取消")
+                    return
+            except Exception:
+                traceback.print_exc()
             raw = llm(history)
             sys.stderr.write(f"[loop] step{step} raw: {raw[:300]!r}\n")
             obj = parse_step(raw)
@@ -1811,7 +1876,18 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         before = q("SELECT COALESCE(MAX(id),0) AS m FROM doc WHERE project_id=%s", (project_id,))
         doc_before = before[0]["m"] if before else 0
 
+        # plan：只存"任务理解"摘要，不存 reasoning/CoT 原文
+        try:
+            _plan_sum = ("任务理解：" + (text or "").strip()[:100]) if text else "任务理解"
+            tracemod.append_event(task_id, "plan", "任务理解", phase="plan",
+                                  status="succeeded", started=True, finished=True,
+                                  summary=_plan_sum[:300])
+        except Exception:
+            traceback.print_exc()
+
         steps, by_cmd_id, lines = [], {}, []
+        failed_tool, last_tool_seq = {}, None
+        line_no = 0
         if proc is None and ENGINE_MODE != "appserver":
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                     text=True, bufsize=1, env=ENGINE_ENV)
@@ -1846,26 +1922,73 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                 ev = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            line_no += 1
+            if line_no % 10 == 0:
+                # 取消：CAS 已由 cancel_run 落终态；这里尽快停引擎，避免继续跑/写
+                try:
+                    st = q("SELECT status FROM task WHERE id=%s", (task_id,))
+                    if st and st[0].get("status") == "cancelled":
+                        if proc is not None:
+                            proc.kill()
+                        raise _TurnCancelled()
+                except _TurnCancelled:
+                    raise
+                except Exception:
+                    traceback.print_exc()
             it = ev.get("item") or {}
-            if (it.get("type") or "").lower() != "command_execution":
+            itype = (it.get("type") or "").lower()
+
+            # ---- 子智能体：单行摘要，parentSeq=最近的工具 step（不嵌套展开）----
+            if itype in ("sub_agent_activity", "collab_tool_call"):
+                if itype == "collab_tool_call":
+                    names = {"spawn": "派子 agent", "wait": "等子 agent 回报",
+                             "send_message": "给子 agent 发消息", "interrupt": "打断子 agent",
+                             "close": "收掉子 agent", "list": "看有哪些子 agent"}
+                    nm = names.get(it.get("tool") or "", "子 agent 协作")
+                else:
+                    stage = it.get("kind") or ""
+                    model = it.get("model") or ""
+                    nm = ("派子 agent" + ("（%s）" % model if model else "")
+                          if stage in ("", "started") else "子 agent " + (stage or "活动"))
+                try:
+                    tracemod.append_event(task_id, "subagent", nm[:120], phase="act",
+                                          status="succeeded", started=True, finished=True,
+                                          parent_seq=last_tool_seq,
+                                          summary=json.dumps(it, ensure_ascii=False)[:300])
+                except Exception:
+                    traceback.print_exc()
+                continue
+
+            # ---- 引擎自带的联网搜索：只能看到 query ----
+            if itype == "web_search":
+                query = it.get("query") or ""
+                action = it.get("action") or {}
+                qs = action.get("queries") or ([query] if query else [])
+                label = "联网搜索：" + "；".join([x for x in qs if x][:3] or ["（未给查询词）"])
+                try:
+                    tracemod.append_event(task_id, "tool", "联网搜索", phase="gather",
+                                          status="succeeded", started=True, finished=True,
+                                          summary=label[:300],
+                                          meta={"tool": "web_search", "label": label[:80],
+                                                "icon": "search", "legacy_kind": "note"})
+                except Exception:
+                    traceback.print_exc()
+                continue
+
+            if itype != "command_execution":
                 continue
 
             cid = it.get("id") or ""
             cmdstr = (it.get("command") or "").replace("\n", " ")
-            m = re.search(r"jl-tool\s+([a-z_]+)", cmdstr)
-            if not m:
+            if not cmdstr:
                 continue
-            label = m.group(1)
-            args = {}
-            mm = re.search(r"jl-tool\s+[a-z_]+\s+'(.*)'", cmdstr)
-            if mm:
-                try:
-                    args = json.loads(mm.group(1).replace('\\"', '"'))
-                except Exception:
-                    args = {}
-            text_label = describe_tool(label, args)
-            if len(text_label) > 22:
-                text_label = text_label[:21] + "…"
+            tool, args, kind_override = _tool_from_cmd(cmdstr)
+            if tool.startswith("shell"):
+                text_label = cmdstr[:60]
+            else:
+                text_label = describe_tool(tool, args)
+                if len(text_label) > 22:
+                    text_label = text_label[:21] + "…"
 
             now = time.time()
             if cid in by_cmd_id:
@@ -1877,26 +2000,51 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     ok = (it.get("status") not in ("failed", "error")
                           and it.get("exitCode") in (None, 0))
                     out = (it.get("aggregatedOutput") or it.get("output") or "")
+                    ec = it.get("exitCode")
                     err = it.get("error") or (
-                        "exit code %r" % it.get("exitCode")
-                        if it.get("exitCode") not in (None, 0) else None)
-                    _emit_tool_finish(task_id, cur.get("_seq"), ok, out, err, cur["secs"])
+                        None if ec in (None, 0) else "exit code %r" % (ec,))
+                    cseq = _emit_tool_finish(task_id, cur.get("_seq"), ok, out, err,
+                                             cur["secs"])
+                    if cseq:
+                        cur["_done_seq"] = cseq
+                        last_tool_seq = cseq
+                        if not ok:
+                            failed_tool[cur.get("tool")] = {
+                                "seq": cseq, "attempt": int(cur.get("_attempt") or 1)}
+                        else:
+                            failed_tool.pop(cur.get("tool"), None)
             else:
-                step = {"label": text_label, "tool": label,
+                attempt = 1
+                retry_of = None
+                if tool in failed_tool:
+                    attempt = int(failed_tool[tool].get("attempt") or 1) + 1
+                    retry_of = failed_tool[tool].get("seq")
+                step = {"label": text_label, "tool": tool,
                         "state": "running" if it.get("status") == "in_progress" else "done",
-                        "t0": now}
+                        "t0": now, "_attempt": attempt, "_retry_of": retry_of}
                 if step["state"] == "done":
                     step["secs"] = 0
                     step.pop("t0", None)
                 step["_seq"] = _emit_tool_start(
-                    task_id, label, text_label,
-                    json.dumps(args, ensure_ascii=False)[:2000], cid)
+                    task_id, tool, text_label,
+                    json.dumps(args, ensure_ascii=False)[:2000], cid,
+                    kind_override=kind_override, attempt=attempt,
+                    retry_of_seq=retry_of,
+                    status=("retrying" if attempt > 1 else "running"))
                 if step["state"] == "done":
-                    _emit_tool_finish(task_id, step["_seq"],
-                                      it.get("status") not in ("failed", "error")
-                                      and it.get("exitCode") in (None, 0),
-                                      it.get("aggregatedOutput") or it.get("output") or "",
-                                      it.get("error"), 0)
+                    ok = (it.get("status") not in ("failed", "error")
+                          and it.get("exitCode") in (None, 0))
+                    ec = it.get("exitCode")
+                    cseq = _emit_tool_finish(
+                        task_id, step["_seq"], ok,
+                        it.get("aggregatedOutput") or it.get("output") or "",
+                        it.get("error") or (None if ec in (None, 0)
+                                            else "exit code %r" % (ec,)), 0)
+                    if cseq:
+                        step["_done_seq"] = cseq
+                        last_tool_seq = cseq
+                        if not ok:
+                            failed_tool[tool] = {"seq": cseq, "attempt": attempt}
                 steps.append(step)
                 by_cmd_id[cid] = step
             _set_progress(task_id, steps)
@@ -2091,6 +2239,9 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
 
         _post_turn_learn(project_id, user_id, text, final_text, trace)
 
+    except _TurnCancelled:
+        _finish_running_steps(task_id, "cancelled", "用户取消")
+        sys.stderr.write(f"[trace] task {task_id} 用户取消，已停止引擎\n")
     except subprocess.TimeoutExpired:
         _fail_running_steps(task_id, "超时（10 分钟）")
         try:
@@ -2615,10 +2766,20 @@ def handle_task_event_detail(task_id, seq, user=None):
     deny = guard_project(t["project_id"], user)
     if deny:
         return deny
-    ev_rows = q("SELECT visibility FROM task_event WHERE task_id=%s AND seq=%s",
+    ev_rows = q("SELECT visibility, created_at FROM task_event WHERE task_id=%s AND seq=%s",
                 (int(task_id), int(seq)))
     if not ev_rows:
         return 404, {"code": 404, "message": "事件不存在"}
+    # TTL：超过保留期的详情不再返回（事件行由 GC 清理）
+    try:
+        ttl_days = int(os.environ.get("TRACE_TTL_DAYS", "30"))
+        created = ev_rows[0].get("created_at")
+        if created and (time.time() - created.timestamp()) > ttl_days * 86400:
+            return 410, {"code": 410, "message": "该事件详情已过期（trace 保留 %d 天）"
+                         % ttl_days}
+    except (TypeError, ValueError, OSError) as e:
+        sys.stderr.write("[trace] detail TTL 检查失败 task=%s seq=%s: %r\n"
+                         % (task_id, seq, e))
     vis = ev_rows[0].get("visibility") or "project"
     creator = None
     try:

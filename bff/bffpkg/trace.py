@@ -685,6 +685,25 @@ def gc(ttl_days=None):
             sys.stderr.write("[trace] GC %s 失败: %r\n" % (tid, e))
     if n:
         sys.stderr.write("[trace] GC 清理 %d 条事件\n" % n)
+    # 已删除任务留下的孤儿目录/文件也清掉（任务删除时 purge_task 是首选，这里兜底）
+    try:
+        if os.path.isdir(TRACE_ROOT):
+            alive = {str(r["id"]) for r in q("SELECT id FROM task")}
+            for fn in os.listdir(TRACE_ROOT):
+                d = os.path.join(TRACE_ROOT, fn)
+                if not os.path.isdir(d) or fn in alive or not fn.isdigit():
+                    continue
+                for sub in os.listdir(d):
+                    try:
+                        os.remove(os.path.join(d, sub))
+                    except OSError as e:
+                        sys.stderr.write("[trace] GC 删孤儿文件失败 %s: %r\n" % (sub, e))
+                try:
+                    os.rmdir(d)
+                except OSError as e:
+                    sys.stderr.write("[trace] GC 删孤儿目录失败 %s: %r\n" % (d, e))
+    except Exception as e:
+        sys.stderr.write("[trace] GC 孤儿目录扫描失败: %r\n" % (e,))
     return n
 
 

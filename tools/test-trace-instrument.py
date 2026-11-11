@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""task-17 埋点/状态/重试/取消/投影回归。
+
+    cd /home/baize/jl-service
+    python3 tools/test-trace-instrument.py
+
+只动临时 task（client_id 前缀 trace-instr-），测试后清事件/文件/任务/消息。
+"""
+import json
+import os
+import sys
+import time
+import traceback
+
+ROOT = os.environ.get("JL_ROOT") or "/home/baize/jl-service"
+PROJECT = os.environ.get("JL_TEST_PROJECT") or "test-sandbox"
+UID = int(os.environ.get("JL_TEST_USER", "99999"))
+PREFIX = "trace-instr-%d" % int(time.time() * 1000)
+PASSES, FAILS = [], []
+
+
+def check(name, cond, detail=""):
+    if cond:
+        PASSES.append(name)
+        print("  PASS  %s" % name)
+    else:
+        FAILS.append((name, detail))
+        print("  FAIL  %s  %s" % (name, detail))
+
+
+def eq(name, got, want, detail=""):
+    check(name, got == want, detail or ("got=%r want=%r" % (got, want)))
+
+
+def load():
+    bff = os.path.join(ROOT, "bff")
+    if bff not in sys.path:
+        sys.path.insert(0, bff)
+    import bffpkg.core as core
+    import bffpkg.agent as agent
+    import bffpkg.trace as tm
+    return core, agent, tm
+
+
+def new_task(core, label, text="埋点回归"):
+    cid = "%s-%s-%d" % (PREFIX, label, int(time.time() * 1000) % 10_000_000)
+    tid = core.exec_sql(
+        "INSERT INTO task (project_id, user_id, client_id, kind, payload, status, "
+        "trace_version) VALUES (%s,%s,%s,'chat',%s,'queued',2)",
+        (PROJECT, UID, cid, json.dumps({"text": text}, ensure_ascii=False)))
+    return tid
+
+
+def main():
+    core, agent, tm = load()
+    print("=== task-17 埋点回归 project=%s prefix=%s ===" % (PROJECT, PREFIX))
+    tm.ensure_trace_schema(force=True)
+    task_ids = []
+    try:
+        # ---- 1) 工具名 → kind/phase 映射 ----
+        eq("search_photos→image_read", agent._tool_event_def("search_photos")[0], "image_read")
+        eq("create_doc_draft→artifact", agent._tool_event_def("create_doc_draft")[0], "artifact")
+        eq("validate_doc→validation", agent._tool_event_def("validate_doc")[0], "validation")
+        eq("caption_photo→file_write", agent._tool_event_def("caption_photo")[0], "file_write")
+        eq("shell cat→file_read",
+           agent._tool_from_cmd("cat records/rules.md")[2], "file_read")
+        eq("shell python 绘图→image_read",
+           agent._tool_from_cmd("python3 draw.py")[2], "image_read")
+        eq("shell 重定向→file_write",
+           agent._tool_from_cmd("echo x > out.txt")[2], "file_write")
+        eq("普通 shell→tool", agent._tool_from_cmd("ls -la")[2], None)
+
+        # ---- 2) 10 个失败命令全部可见（append-only 完成事件 + error）----
+        t1 = new_task(core, "fail10")
+        task_ids.append(t1)
+        eq("start_run", tm.start_run(t1), True)
+        tm.append_event(t1, "plan", "任务理解", phase="plan", status="succeeded",
+                        started=True, finished=True, summary="跑 10 个失败命令")
+        comp_seqs = []
+        for i in range(10):
+            s = tm.append_event(t1, "tool", "失败命令%d" % i, phase="act",
+                                status="running", started=True,
+                                step_id="fail-%d" % i,
+                                meta={"tool": "search_standards", "label": "失败命令%d" % i})
+            c = tm.finish_event(t1, s, "failed",
+                                output_text="stderr line %d" % i,
+                                error="exit code %d" % (i + 1))
+            comp_seqs.append(c)
+        evs = tm.events_after(t1, 0)
+        fails = [e for e in evs if e["status"] == "failed"]
+        eq("10 个失败完成事件都可见", len(fails), 10)
+        check("失败事件都带 error 详情",
+              all(e.get("error") for e in fails), repr([e.get("error") for e in fails[:3]]))
+        check("失败完成事件 parentSeq 指起始",
+              all(e.get("parentSeq") for e in fails), repr([e.get("parentSeq") for e in fails[:3]]))
+        check("失败完成事件 stepId 唯一（不串线）",
+              len({e.get("stepId") for e in fails}) == 10,
+              repr([e.get("stepId") for e in fails]))
+        tr = tm.project_message_trace(t1)
+        eq("旧投影：10 条失败命令", sum(1 for x in (tr or []) if not x.get("ok")), 10)
+        tm.finish_run(t1, "failed", summary="10 个命令失败", error="失败")
+        eq("turn failed → run failed", tm.run_view(t1)["status"], "failed")
+
+        # ---- 3) 重试树：attempt/retryOfSeq ----
+        t2 = new_task(core, "retry")
+        task_ids.append(t2)
+        tm.start_run(t2)
+        s0 = tm.append_event(t2, "tool", "第一次", phase="act", status="running",
+                             started=True, attempt=1, step_id="r-1")
+        c0 = tm.finish_event(t2, s0, "failed", error="boom")
+        s1 = tm.append_event(t2, "tool", "重试·第一次", phase="act", status="retrying",
+                             started=True, attempt=2, retry_of_seq=c0, step_id="r-2")
+        c1 = tm.finish_event(t2, s1, "succeeded", output_text="ok")
+        evs = tm.events_after(t2, 0)
+        retry_ev = [e for e in evs if e["seq"] == s1][0]
+        eq("重试 attempt=2", retry_ev["attempt"], 2)
+        eq("重试 retryOfSeq=上一次完成 seq", retry_ev["retryOfSeq"], c0)
+        eq("旧 attempt 保留", [e["seq"] for e in evs if e["seq"] == c0], [c0])
+        eq("旧 attempt 完成态仍 failed",
+           [e for e in evs if e["seq"] == c0][0]["status"], "failed")
+        check("完成事件树 parentSeq", any(e["seq"] == c1 and e["parentSeq"] == s1 for e in evs))
+
+        # ---- 4) 子智能体 parentSeq / 单行摘要 ----
+        t3 = new_task(core, "subagent")
+        task_ids.append(t3)
+        tm.start_run(t3)
+        s_tool = tm.append_event(t3, "tool", "查规范", phase="gather", status="running",
+                                 started=True, step_id="st-1")
+        c_tool = tm.finish_event(t3, s_tool, "succeeded", output_text="规范结果")
+        s_sub = tm.append_event(t3, "subagent", "派子 agent", phase="act",
+                                status="succeeded", started=True, finished=True,
+                                parent_seq=c_tool, summary="子 agent 复核通过")
+        sub = [e for e in tm.events_after(t3, 0) if e["seq"] == s_sub][0]
+        eq("子智能体 parentSeq 指父 step", sub["parentSeq"], c_tool)
+        eq("子智能体 kind", sub["kind"], "subagent")
+        check("子智能体单行摘要", bool(sub.get("summary")), repr(sub.get("summary")))
+
+        # ---- 5) 取消：CAS + 迟到 done 不覆盖 + 未完成 step 收尾 ----
+        t4 = new_task(core, "cancel")
+        task_ids.append(t4)
+        tm.start_run(t4)
+        run_seq = tm.append_event(t4, "tool", "长命令", phase="act", status="running",
+                                  started=True, step_id="cx-1")
+        eq("cancel_run", tm.cancel_run(t4, reason="测试取消"), True)
+        eq("取消后 DB cancelled",
+           core.q("SELECT status FROM task WHERE id=%s", (t4,))[0]["status"], "cancelled")
+        eq("取消后不能 finish_run", tm.finish_run(t4, "succeeded"), False)
+        late = core.exec_rowcount(
+            "UPDATE task SET status='done' WHERE id=%s AND status='running'", (t4,))
+        eq("迟到 done CAS 命中 0", late, 0)
+        agent._finish_running_steps(t4, "cancelled", "用户取消")
+        cx = [e for e in tm.events_after(t4, 0)
+              if e.get("parentSeq") == run_seq and e["status"] == "cancelled"]
+        eq("未完成 step 被追加 cancelled 完成事件", len(cx), 1)
+        # 已取消任务 run_turn 不再开跑（不产生消息）
+        n_msg = core.q("SELECT COUNT(*) n FROM message WHERE task_id=%s", (t4,))[0]["n"]
+        agent.run_turn(t4, PROJECT, UID, "取消任务不应再跑")
+        eq("取消任务 run_turn 不开跑", core.q("SELECT COUNT(*) n FROM message WHERE task_id=%s",
+                                              (t4,))[0]["n"], n_msg)
+
+        # ---- 6) 产物 / 长输出 / 截断 / detail ----
+        t5 = new_task(core, "artifact")
+        task_ids.append(t5)
+        tm.start_run(t5)
+        big = ("x" * 120 + "\n") * 120
+        s5 = tm.append_event(t5, "artifact", "生成产物", phase="finish", status="running",
+                             started=True, step_id="art-1")
+        c5 = tm.finish_event(t5, s5, "succeeded", output_text=big,
+                             meta_extra={"artifacts": [
+                                 {"type": "doc", "docId": 1, "name": "监理通知单"},
+                                 {"type": "image", "assetId": "01J00000000000000000000000",
+                                  "name": "现场图"}]})
+        ev5 = [e for e in tm.events_after(t5, 0) if e["seq"] == c5][0]
+        eq("完成事件 truncated", ev5["truncated"], True)
+        check("完成事件 artifacts", len(ev5.get("artifacts") or []) == 2,
+              repr(ev5.get("artifacts")))
+        det = tm.event_detail(t5, c5)
+        eq("detail artifacts", len(det.get("artifacts") or []), 2)
+        check("detail 输出完整", len(det.get("output") or "") >= len(big) - 50,
+              (len(det.get("output") or ""), len(big)))
+        code, payload = agent.handle_task_event_detail(t5, c5, None)
+        eq("detail 接口 200", code, 200)
+        # TTL：把 created_at 改老 → 410
+        core.exec_sql("UPDATE task_event SET created_at=DATE_SUB(NOW(), INTERVAL 90 DAY) "
+                      "WHERE task_id=%s", (t5,))
+        code, payload = agent.handle_task_event_detail(t5, c5, None)
+        eq("超期 detail 410", code, 410)
+        core.exec_sql("UPDATE task_event SET created_at=NOW() WHERE task_id=%s", (t5,))
+
+        # ---- 7) 实时/历史一致 + 旧客户端不变 ----
+        t6 = new_task(core, "consistency")
+        task_ids.append(t6)
+        tm.start_run(t6)
+        for i in range(4):
+            s = tm.append_event(t6, "tool", "步骤%d" % i, phase="act", status="running",
+                                started=True, step_id="c-%d" % i,
+                                meta={"tool": "search_standards", "label": "步骤%d" % i})
+            tm.finish_event(t6, s, "succeeded", output_text="结果%d" % i)
+        core.exec_sql(
+            "INSERT INTO message (project_id, user_id, client_id, role, text, trace, task_id, sync) "
+            "VALUES (%s,%s,%s,'assistant',%s,%s,%s,1)",
+            (PROJECT, UID, PREFIX + "-msg-" + str(t6), "一致性回答",
+             json.dumps(tm.project_message_trace(t6), ensure_ascii=False), t6))
+        code, payload = agent.handle_task(t6, None, 0)
+        rt = payload.get("data") or {}
+        code2, payload2 = agent.handle_task_trace(t6, {"after_seq": "0"}, None)
+        full = payload2.get("data") or {}
+        eq("实时 events == 历史全量", [e["seq"] for e in rt.get("events") or []],
+           [e["seq"] for e in full.get("events") or []])
+        a_msgs = [m for m in rt.get("messages") or [] if m.get("role") == "assistant"]
+        eq("历史 message.events 一致",
+           [e["seq"] for e in (a_msgs[0].get("events") or [])],
+           [e["seq"] for e in full.get("events") or []])
+        check("旧客户端 message.trace 仍是旧数组",
+              isinstance(a_msgs[0].get("trace"), list)
+              and all(("tool" in x) for x in (a_msgs[0].get("trace") or [])),
+              repr(a_msgs[0].get("trace"))[:200])
+        eq("旧客户端顶层 status 仍是 done/failed 旧值", rt.get("status"), "running")
+        eq("run.status 投影 running", (rt.get("run") or {}).get("status"), "running")
+
+        # ---- 8) 删除任务清理 ----
+        t7 = new_task(core, "purge")
+        task_ids.append(t7)
+        tm.start_run(t7)
+        s7 = tm.append_event(t7, "tool", "待删", phase="act", status="succeeded",
+                             output_text="bye")
+        ref = [e for e in tm.events_after(t7, 0) if e["seq"] == s7][0].get("outputRef")
+        tm.purge_task(t7)
+        eq("purge 后无事件", tm.events_after(t7, 0), [])
+        check("purge 后 gz 删除",
+              not (ref and os.path.exists(
+                  os.path.join(os.path.dirname(os.path.dirname(tm.TRACE_ROOT)), ref))))
+
+    except Exception:
+        traceback.print_exc()
+        check("测试脚本无异常", False, "见 traceback")
+    finally:
+        for tid in task_ids:
+            try:
+                tm.purge_task(tid)
+            except Exception:
+                traceback.print_exc()
+        try:
+            core.exec_sql("DELETE FROM message WHERE client_id LIKE %s", (PREFIX + "%",))
+            core.exec_sql("DELETE FROM task WHERE client_id LIKE %s", (PREFIX + "%",))
+        except Exception:
+            traceback.print_exc()
+        left = core.q("SELECT COUNT(*) n FROM task WHERE client_id LIKE %s", (PREFIX + "%",))
+        eq("测试数据已清理", int(left[0]["n"]), 0)
+
+    print("\n==== 结果：%d 通过 / %d 失败 ====" % (len(PASSES), len(FAILS)))
+    for name, detail in FAILS:
+        print("  FAIL %s  %s" % (name, detail))
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
