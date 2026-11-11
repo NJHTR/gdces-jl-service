@@ -149,13 +149,51 @@ CREATE TABLE IF NOT EXISTS task (
   status      ENUM('queued','running','done','failed','cancelled') NOT NULL DEFAULT 'queued',
   result      JSON NULL,
   error       TEXT NULL,
+  progress    JSON NULL COMMENT '旧字段：事件投影的兼容视图（只给旧客户端）',
+  event_seq   BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'per-task 事件序号（BFF sequencer）',
+  trace_version TINYINT NOT NULL DEFAULT 2 COMMENT '1=旧扁平 trace / 2=task_event',
   started_at  DATETIME(3) NULL,
   finished_at DATETIME(3) NULL,
   created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_client (client_id),
   KEY idx_status (status, created_at),
   KEY idx_proj (project_id, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='异步任务';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='异步任务（= run）';
+
+-- ============ 执行 trace 事件账本（最终态） ============
+-- append-only；BFF 是唯一写者；seq 由 task.event_seq 原子发号，UNIQUE(task_id,seq)。
+-- 事件行只存 ≤4KB preview，完整 output 落 data/trace/<task>/<seq>.json.gz。
+CREATE TABLE IF NOT EXISTS task_event (
+  id             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  task_id        BIGINT UNSIGNED NOT NULL,
+  seq            BIGINT UNSIGNED NOT NULL,
+  parent_seq     BIGINT UNSIGNED NULL,
+  step_id        VARCHAR(40) NULL,
+  kind           ENUM('plan','tool','file_read','file_write','image_read','subagent',
+                      'artifact','validation','note','error','status') NOT NULL,
+  phase          VARCHAR(16) NULL,
+  name           VARCHAR(128) NOT NULL,
+  status         ENUM('pending','running','succeeded','failed','retrying','skipped',
+                      'cancelled') NOT NULL DEFAULT 'pending',
+  summary        VARCHAR(512) NULL,
+  input_preview  TEXT NULL,
+  output_preview TEXT NULL,
+  output_ref     VARCHAR(255) NULL,
+  output_bytes   BIGINT NULL,
+  truncated      TINYINT NOT NULL DEFAULT 0,
+  error_detail   TEXT NULL,
+  visibility     ENUM('project','private','admin') NOT NULL DEFAULT 'project',
+  attempt        INT NOT NULL DEFAULT 1,
+  retry_of_seq   BIGINT UNSIGNED NULL,
+  started_at     DATETIME(3) NULL,
+  ended_at       DATETIME(3) NULL,
+  meta           JSON NULL COMMENT '内部扩展：旧 trace 投影用 tool/icon/args',
+  created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_task_seq (task_id, seq),
+  KEY idx_task_status (task_id, status),
+  KEY idx_task_kind (task_id, kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='执行 trace 事件账本（append-only）';
 
 -- ============ 审计 ============
 CREATE TABLE IF NOT EXISTS audit_log (

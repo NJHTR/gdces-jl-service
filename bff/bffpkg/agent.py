@@ -20,10 +20,11 @@ import pymysql
 留 Python：它跟子进程、文件、git 打交道。
 """
 from .appserver import _client, run_isolated, run_stream
-from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, ensure_image_fallback, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
+from .core import (ADMIN_HTML, HOMES_ROOT, ALLOWED_TOOLS, AUTH_REQUIRED, BLOB_ROOT, BOLD_RE, ENGINE, ENGINE_CLIENT, ENGINE_ENV, ENGINE_MODE, ENV, GAP_INLINE_RE, GAP_SPLIT_RE, JL_TOOL_BIN, KIND_TO_ICON, KIND_TO_TINT, LEARN_PROMPT, LLM_MODEL, LLM_URL, MAX_CONCURRENT, NOTIFY, NUM_RE, PORT, REF_RE, ROOT, STATE_TO_ST, SYSTEM_PROMPT, TOKEN_TTL_HOURS, TURN_SLOTS, WEEK, WS_ROOT, _USER_LOCKS, _USER_LOCKS_GUARD, _bigrams, _day_label, _hash_token, _rerender_if_project, _split_num, allowed_tools, bearer, build_answer, clean_reply, db, describe_tool, ensure_image_fallback, exec_rowcount, exec_sql, extract_from_items, get_project, handle_login, handle_logout, issue_token, llm, load_env, ms_label, notify_worker, on_notification, parse_step, q, q1, resolve_token, rich_reply, rich_segments, run_tool, similar, split_gaps, transcribe_audio, validate_fields, materialize_images, tool_manual)
 from .biz import (append_manifest, audit, update_doc_file, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, render_user_memory, store_blob, is_image_sha)
 from .memcandidate import extract_memory_candidates
 from . import assetsvc
+from . import trace as tracemod
 
 
 # ---------------------------------------------------------------- Engine
@@ -90,7 +91,88 @@ def engine():
     return ENGINE_CLIENT
 
 
-# ---------------------------------------------------------------- handle_messages
+# ---------------------------------------------------------------- trace 事件辅助
+# kind 映射：旧 trace 的 tool 名 → 新事件 kind/中文动作；UI 折叠用 kind/phase。
+_TOOL_KIND = {
+    "search_standards": ("tool", "understand", "search"),
+    "search_records": ("tool", "gather", "search"),
+    "search_photos": ("image_read", "gather", "cam"),
+    "get_schema": ("tool", "plan", "doc"),
+    "validate_doc": ("validation", "act", "check"),
+    "create_doc_draft": ("artifact", "act", "doc"),
+    "get_project": ("tool", "understand", "run"),
+    "get_context": ("tool", "understand", "run"),
+    "caption_photo": ("file_write", "act", "doc"),
+    "record_review": ("validation", "finish", "check"),
+    "recall_memory": ("tool", "gather", "run"),
+    "propose_rule": ("validation", "finish", "check"),
+    "annotate_photo": ("image_read", "act", "cam"),
+    "compare_photos": ("image_read", "act", "cam"),
+    "send_photo": ("image_read", "act", "cam"),
+}
+
+
+def _tool_event_def(tool):
+    return _TOOL_KIND.get(tool, ("tool", "act", "run"))
+
+
+def _emit_tool_start(task_id, tool, label, args_text, cid):
+    kind, phase, icon = _tool_event_def(tool)
+    return tracemod.append_event(
+        task_id, kind, label or tool, phase=phase, status="running", started=True,
+        step_id=cid, input_text=args_text or "",
+        summary=label or tool, meta={"tool": tool, "label": label or tool,
+                                     "icon": icon, "args": (args_text or "")[:300],
+                                     "legacy_kind": "cmd"})
+
+
+def _emit_tool_finish(task_id, seq, ok, output_text=None, error=None, secs=None):
+    if not seq:
+        return
+    meta_update = {"secs": round(secs, 1)} if secs is not None else None
+    if ok:
+        tracemod.finish_event(task_id, seq, "succeeded", output_text=output_text,
+                              summary=None)
+    else:
+        tracemod.finish_event(task_id, seq, "failed", output_text=output_text,
+                              error=error or "工具执行失败")
+    # secs 记到 meta 里，旧 trace 投影能带上
+    if meta_update:
+        try:
+            exec_sql("UPDATE task_event SET meta=JSON_MERGE_PATCH(COALESCE(meta,'{}'), %s) "
+                     "WHERE task_id=%s AND seq=%s",
+                     (json.dumps(meta_update, ensure_ascii=False), task_id, seq))
+        except Exception as e:
+            sys.stderr.write("[trace] 写 secs 失败 task=%s seq=%s: %r\n" % (task_id, seq, e))
+
+
+def _legacy_trace_projection(task_id, parsed_trace):
+    """message.trace 投影：事件→旧格式；保留解析出的 note/warning 等非工具条目。"""
+    proj = None
+    try:
+        proj = tracemod.project_message_trace(task_id)
+    except Exception:
+        traceback.print_exc()
+    if not proj:
+        return parsed_trace
+    extras = [x for x in (parsed_trace or [])
+              if (x.get("kind") or "cmd") not in ("cmd", "shell")]
+    return proj + extras
+
+
+def _fail_running_steps(task_id, error):
+    """异常/超时收尾：把仍 running 的 step 标 failed，别让它们永远转圈。"""
+    try:
+        rows = q("SELECT seq FROM task_event WHERE task_id=%s AND status='running' "
+                 "ORDER BY seq", (task_id,))
+        for r in rows:
+            try:
+                tracemod.finish_event(task_id, r["seq"], "failed",
+                                      error=(str(error) or "执行中断")[:4000])
+            except Exception:
+                traceback.print_exc()
+    except Exception:
+        traceback.print_exc()
 def _photos_from_parts(parts):
     """从消息 parts 里还原图片 URL。聊天历史只存 blob sha，不还原就永远显示 [图片]。"""
     if isinstance(parts, str):
@@ -165,10 +247,16 @@ def handle_task_retry(task_id):
         return 400, {"code": 400, "message": "原任务没有文本，无法重试"}
 
     new_id = exec_sql(
-        "INSERT INTO task (project_id, user_id, client_id, kind, payload, status) "
-        "VALUES (%s,%s,%s,'chat',%s,'queued')",
+        "INSERT INTO task (project_id, user_id, client_id, kind, payload, status, trace_version) "
+        "VALUES (%s,%s,%s,'chat',%s,'queued',2)",
         (t["project_id"], t["user_id"], f"retry-{task_id}-{int(time.time())}",
-         json.dumps({"text": text}, ensure_ascii=False)))
+         json.dumps({"text": text, "retriedFrom": task_id}, ensure_ascii=False)))
+    try:
+        tracemod.append_event(new_id, "status", "重试任务", phase="plan", status="pending",
+                              summary="由任务 %s 重试" % task_id,
+                              meta={"retriedFrom": task_id})
+    except Exception:
+        traceback.print_exc()
     threading.Thread(target=run_turn,
                      args=(new_id, t["project_id"], t["user_id"], text), daemon=True).start()
     return 200, {"code": 0, "data": {"taskId": new_id, "retriedFrom": task_id}}
@@ -188,11 +276,20 @@ def sweeper():
     while True:
         time.sleep(60)
         try:
-            n = exec_sql("UPDATE task SET status='failed', error='超时（15 分钟未完成）', "
-                         "finished_at=NOW(3) WHERE status='running' "
-                         "AND started_at < DATE_SUB(NOW(3), INTERVAL 15 MINUTE)")
-            if n:
-                sys.stderr.write(f"[sweeper] {n} 个任务判超时\n")
+            rows = q("SELECT id FROM task WHERE status='running' "
+                     "AND started_at < DATE_SUB(NOW(3), INTERVAL 15 MINUTE)")
+            for r in rows:
+                _fail_running_steps(r["id"], "超时（15 分钟未完成）")
+                try:
+                    tracemod.append_event(r["id"], "error", "执行超时", phase="finish",
+                                          status="failed", summary="超时（15 分钟未完成）",
+                                          error="超时（15 分钟未完成）", finished=True)
+                except Exception:
+                    traceback.print_exc()
+                if tracemod.finish_run(r["id"], "failed",
+                                       summary="超时（15 分钟未完成）",
+                                       error="超时（15 分钟未完成）"):
+                    sys.stderr.write(f"[sweeper] task {r['id']} 判超时\n")
         except Exception:
             traceback.print_exc()
 
@@ -553,7 +650,9 @@ def handle_task_cancel(task_id, user=None):
         return deny
     if t["status"] in ("done", "failed", "cancelled"):
         return 409, {"code": 409, "message": f"任务已{t['status']}，不能取消"}
-    exec_sql("UPDATE task SET status='cancelled', finished_at=NOW(3) WHERE id=%s", (task_id,))
+    # CAS：只有 queued/running 能被取消；终态一旦写入，迟到的 done 也覆盖不了它
+    if not tracemod.cancel_run(task_id, reason="用户取消"):
+        return 409, {"code": 409, "message": "任务已结束，不能取消"}
     audit(t["project_id"], user["id"] if user else 1, "task.cancel", f"task:{task_id}", "")
     return 200, {"code": 0, "data": {"id": task_id, "status": "cancelled"}}
 
@@ -884,7 +983,9 @@ def run_agent_loop(task_id, project_id, user_id, text):
     """模型决定调哪个工具，BFF 负责执行 —— 不依赖引擎的 shell"""
     # 排队：拿不到槽位就等，任务状态停在 queued
     with TURN_SLOTS:
-        exec_sql("UPDATE task SET status='running', started_at=NOW(3) WHERE id=%s", (task_id,))
+        if not tracemod.start_run(task_id):
+            sys.stderr.write("[trace] task %s 状态不允许开跑（已取消/终态）\n" % task_id)
+            return
         _run_agent_loop_inner(task_id, project_id, user_id, text)
 
 
@@ -924,7 +1025,13 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
             if obj.get("action") == "tool":
                 name = obj.get("tool") or ""
                 args = obj.get("args") or {}
+                t0 = time.time()
+                seq = _emit_tool_start(task_id, name, describe_tool(name, args),
+                                       json.dumps(args, ensure_ascii=False)[:2000],
+                                       "loop-%d" % step)
                 ok, res = run_tool(name, args)
+                _emit_tool_finish(task_id, seq, ok, res if ok else None,
+                                  (None if ok else res), time.time() - t0)
                 trace.append({
                     "tool": name,
                     "icon": "search" if "search" in name else ("doc" if "create" in name else "run"),
@@ -958,14 +1065,19 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
         trace_sum = ("调了 " + "、".join(short.get(t["tool"], t["tool"]) for t in ok_steps[:3])) if ok_steps else None
         # 这条路径没有多模态 blocks；正文若声称有图，补明确提示
         final_text = ensure_image_fallback(final_text, [])
+        trace_proj = _legacy_trace_projection(task_id, trace)
 
         exec_sql(
             "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync) "
             "VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1)",
             (project_id, user_id, f"r-{task_id}-{int(time.time())}", clean_reply(final_text),
-             json.dumps(trace, ensure_ascii=False) if trace else None, trace_sum, ms, task_id))
+             json.dumps(trace_proj, ensure_ascii=False) if trace_proj else None, trace_sum,
+             ms, task_id))
 
-        exec_sql("UPDATE task SET status='done', finished_at=NOW(3) WHERE id=%s", (task_id,))
+        n_done = exec_rowcount("UPDATE task SET finished_at=NOW(3) "
+                               "WHERE id=%s AND status='running'", (task_id,))
+        if n_done == 1:
+            tracemod.finish_run(task_id, "succeeded", summary=trace_sum or "已完成")
         sys.stderr.write(f"[loop] task {task_id} done ({ms}ms, {len(trace)} 次工具)\n")
 
         # 收尾后学一手：这轮有没有值得记住的习惯/规矩
@@ -973,8 +1085,15 @@ def _run_agent_loop_inner(task_id, project_id, user_id, text):
 
     except Exception as e:
         traceback.print_exc()
-        exec_sql("UPDATE task SET status='failed', error=%s, finished_at=NOW(3) WHERE id=%s",
-                 (str(e)[:900], task_id))
+        _fail_running_steps(task_id, str(e))
+        try:
+            tracemod.append_event(task_id, "error", "执行失败", phase="finish",
+                                  status="failed", summary=str(e)[:300],
+                                  output_text=str(e)[:4000], error=str(e)[:4000],
+                                  finished=True)
+        except Exception:
+            traceback.print_exc()
+        tracemod.finish_run(task_id, "failed", summary="执行失败", error=str(e)[:900])
 
 
 # ---------------------------------------------------------------- _drain_cites
@@ -1694,6 +1813,13 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                     cur["state"] = "done"
                     cur["secs"] = round(now - cur.get("t0", now), 1)
                     cur.pop("t0", None)
+                    ok = (it.get("status") not in ("failed", "error")
+                          and it.get("exitCode") in (None, 0))
+                    out = (it.get("aggregatedOutput") or it.get("output") or "")
+                    err = it.get("error") or (
+                        "exit code %r" % it.get("exitCode")
+                        if it.get("exitCode") not in (None, 0) else None)
+                    _emit_tool_finish(task_id, cur.get("_seq"), ok, out, err, cur["secs"])
             else:
                 step = {"label": text_label, "tool": label,
                         "state": "running" if it.get("status") == "in_progress" else "done",
@@ -1701,11 +1827,26 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                 if step["state"] == "done":
                     step["secs"] = 0
                     step.pop("t0", None)
+                step["_seq"] = _emit_tool_start(
+                    task_id, label, text_label,
+                    json.dumps(args, ensure_ascii=False)[:2000], cid)
+                if step["state"] == "done":
+                    _emit_tool_finish(task_id, step["_seq"],
+                                      it.get("status") not in ("failed", "error")
+                                      and it.get("exitCode") in (None, 0),
+                                      it.get("aggregatedOutput") or it.get("output") or "",
+                                      it.get("error"), 0)
                 steps.append(step)
                 by_cmd_id[cid] = step
             _set_progress(task_id, steps)
         if proc is not None:
             proc.wait()
+
+        # 退出码是真相：None（进程没正常结束）/非 0 都不能算成功
+        if proc is not None:
+            rc = proc.returncode
+            if rc is None or rc != 0:
+                raise RuntimeError("引擎进程退出异常（exit code=%r）" % (rc,))
 
         now_end = time.time()
         for st in steps:
@@ -1823,14 +1964,25 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
                 answer["warning"] = "%d 份文书文件没登记入库：%s" % (
                     len(orphans), "、".join(orphans[:3]))
                 sys.stderr.write("[doc] 未入库文书 %d 份：%s\n" % (len(orphans), orphans[:3]))
+                try:
+                    tracemod.append_event(
+                        task_id, "note", "没入库的文书", phase="finish",
+                        status="succeeded", summary="%d 份文书文件没登记入库" % len(orphans),
+                        input_text="、".join(orphans[:5]))
+                except Exception:
+                    traceback.print_exc()
         except Exception as exc:
             sys.stderr.write("[doc] 对账失败：%s\n" % exc)
+
+        # message.trace 旧字段 = 事件投影（无事件回退解析出的旧 trace）
+        trace_proj = _legacy_trace_projection(task_id, trace)
 
         message_id = exec_sql(
             "INSERT INTO message (project_id, user_id, client_id, role, text, trace, trace_sum, ms, task_id, sync, cites, answer) "
             "VALUES (%s,%s,%s,'assistant',%s,%s,%s,%s,%s,1,%s,%s)",
             (project_id, user_id, f"r-{task_id}-{int(time.time())}", clean_reply(final_text),
-             json.dumps(trace, ensure_ascii=False) if trace else None, trace_sum, ms, task_id,
+             json.dumps(trace_proj, ensure_ascii=False) if trace_proj else None, trace_sum,
+             ms, task_id,
              json.dumps(cites, ensure_ascii=False) if cites else None,
              json.dumps(answer, ensure_ascii=False) if answer else None))
 
@@ -1848,17 +2000,26 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         result_obj = {"review": "pending"} if review_on else {}
         if blocks:
             result_obj["blocks"] = blocks
-        exec_sql("UPDATE task SET status='done', thread_id=%s, doc_id=%s, result=%s, "
-                 "finished_at=NOW(3) WHERE id=%s",
-                 (thread_id, done_doc,
-                  json.dumps(result_obj, ensure_ascii=False) if result_obj else None, task_id))
+        # done 用 CAS（只从 running 进入）：已被取消/终态的任务不允许被迟到的 done 覆盖
+        n_done = exec_rowcount(
+            "UPDATE task SET thread_id=%s, doc_id=%s, result=%s, finished_at=NOW(3) "
+            "WHERE id=%s AND status='running'",
+            (thread_id, done_doc,
+             json.dumps(result_obj, ensure_ascii=False) if result_obj else None, task_id))
+        if n_done == 1:
+            tracemod.finish_run(task_id, "succeeded", summary=trace_sum or "已完成")
+        else:
+            tracemod.append_event(task_id, "note", "结果未覆盖终态", phase="finish",
+                                  status="skipped",
+                                  summary="任务已被取消/已结束，本次 done 不覆盖")
+            sys.stderr.write("[trace] task %s 已取消/终态，done 不覆盖\n" % task_id)
         sys.stderr.write(f"[cli] task {task_id} done ({ms}ms, {len(trace)} 次命令, "
                          f"review={'pending' if review_on else 'off'})\n")
 
         if review_on:
             threading.Thread(target=_review_async,
                              args=(task_id, project_id, user_id, text, images, doc_row["id"],
-                                   final_text, message_id, answer, trace, ms, trace_sum,
+                                   final_text, message_id, answer, trace_proj, ms, trace_sum,
                                    cites, started),
                              daemon=True).start()
             sys.stderr.write("[review] task %s 复核已转后台（message=%s doc=%s）\n"
@@ -1868,13 +2029,27 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         _post_turn_learn(project_id, user_id, text, final_text, trace)
 
     except subprocess.TimeoutExpired:
-        exec_sql("UPDATE task SET status='failed', error='超时（10 分钟）', finished_at=NOW(3) WHERE id=%s",
-                 (task_id,))
+        _fail_running_steps(task_id, "超时（10 分钟）")
+        try:
+            tracemod.append_event(task_id, "error", "执行超时", phase="finish",
+                                  status="failed", summary="超时（10 分钟）",
+                                  error="超时（10 分钟）", finished=True)
+        except Exception:
+            traceback.print_exc()
+        tracemod.finish_run(task_id, "failed", summary="超时（10 分钟）",
+                            error="超时（10 分钟）")
         sys.stderr.write(f"[cli] task {task_id} 超时\n")
     except Exception as e:
         traceback.print_exc()
-        exec_sql("UPDATE task SET status='failed', error=%s, finished_at=NOW(3) WHERE id=%s",
-                 (str(e)[:900], task_id))
+        _fail_running_steps(task_id, str(e))
+        try:
+            tracemod.append_event(task_id, "error", "执行失败", phase="finish",
+                                  status="failed", summary=str(e)[:300],
+                                  output_text=str(e)[:4000], error=str(e)[:4000],
+                                  finished=True)
+        except Exception:
+            traceback.print_exc()
+        tracemod.finish_run(task_id, "failed", summary="执行失败", error=str(e)[:900])
 
 
 # ---------------------------------------------------------------- _user_lock
@@ -1894,7 +2069,10 @@ def run_turn(task_id, project_id, user_id, text, images=None):
     # 这样同一个人连发三条，后两条会等前一条做完 —— 不会三个 turn 同时改同一个工作区。
     with _user_lock(project_id, user_id):
         with TURN_SLOTS:
-            exec_sql("UPDATE task SET status='running', started_at=NOW(3) WHERE id=%s", (task_id,))
+            # queued→running 是 CAS：已被取消/终态的任务不再开跑（防止迟到 done 覆盖取消）
+            if not tracemod.start_run(task_id):
+                sys.stderr.write("[trace] task %s 状态不允许开跑（已取消/终态）\n" % task_id)
+                return
             # appserver 和 cli 用的是同一套"引擎跑一轮"，区别只在事件从哪来
             if ENGINE_MODE in ("cli", "appserver"):
                 _run_cli_turn(task_id, project_id, user_id, text, images)
@@ -2137,7 +2315,7 @@ def handle_chat(body, headers=None):
 
 
 # ---------------------------------------------------------------- handle_task
-def handle_task(task_id, user=None):
+def handle_task(task_id, user=None, after_seq=0):
     rows = q("SELECT * FROM task WHERE id=%s", (task_id,))
     if not rows:
         return 404, {"code": 404, "message": "任务不存在"}
@@ -2145,6 +2323,23 @@ def handle_task(task_id, user=None):
     deny = guard_project(t["project_id"], user)
     if deny:
         return deny
+
+    # trace 事件（增量）：traceVersion=2 时客户端可只取 seq>after_seq
+    try:
+        after_seq = max(0, int(after_seq or 0))
+    except (TypeError, ValueError):
+        after_seq = 0
+    last_seq = 0
+    events = []
+    trace_version = int(t.get("trace_version") or 1)
+    try:
+        last_seq = tracemod.last_seq(task_id)
+        events = tracemod.events_after(task_id, after_seq)
+    except Exception:
+        traceback.print_exc()
+    if last_seq > 0:
+        trace_version = 2
+
     msgs = q("SELECT id, role, text, trace, trace_sum, ms, cites, answer FROM message WHERE task_id=%s ORDER BY id",
              (task_id,))
     # 排队位置：同一个人还有几条排在前面
@@ -2204,6 +2399,14 @@ def handle_task(task_id, user=None):
             progress = json.loads(progress)
         except Exception:
             progress = None
+    # 事件投影优先：task.progress 只是旧客户端兼容视图
+    if trace_version >= 2 and last_seq > 0:
+        try:
+            proj_steps = tracemod.project_progress(task_id)
+            if proj_steps:
+                progress = proj_steps
+        except Exception:
+            traceback.print_exc()
 
     # 这一轮产出的文书（按任务开始时间之后新建的那份）
     artifact = None
@@ -2244,7 +2447,40 @@ def handle_task(task_id, user=None):
             poll_blocks = a["blocks"]
             break
 
+    # 最后一条 assistant 消息的 trace 用事件投影（旧客户端渲染不变；旧任务回退旧字段）
+    latest_assistant = None
+    for m in reversed(msgs):
+        if m.get("role") == "assistant":
+            latest_assistant = m["id"]
+            break
+    trace_proj = None
+    if trace_version >= 2 and last_seq > 0 and latest_assistant:
+        try:
+            trace_proj = tracemod.project_message_trace(task_id)
+        except Exception:
+            traceback.print_exc()
+
+    def _msg_trace(m):
+        raw = m["trace"]
+        if m["id"] == latest_assistant and trace_proj:
+            return trace_proj
+        if isinstance(raw, str):
+            try:
+                return json.loads(raw) if raw else None
+            except ValueError:
+                return None
+        return raw or None
+
     return 200, {"code": 0, "data": {
+        # 最终态 trace 契约（旧字段全部保留，新字段 additive）
+        "traceVersion": trace_version,
+        "run": (tracemod.run_view(task_id, t) if trace_version >= 2
+                else {"taskId": t["id"], "status": t["status"],
+                      "startedAt": str(t["started_at"]) if t.get("started_at") else None,
+                      "endedAt": str(t["finished_at"]) if t.get("finished_at") else None,
+                      "summary": t.get("error") or "", "stepCount": 0}),
+        "lastSeq": last_seq,
+        "events": events,
         "progress": progress,
         "reviewStatus": review_state,
         "reviewVerdict": review_verdict,
@@ -2258,12 +2494,81 @@ def handle_task(task_id, user=None):
         "createdAt": str(t["created_at"]), "finishedAt": str(t["finished_at"]),
         "messages": [
             {"id": m["id"], "role": m["role"], "text": m["text"],
-             "trace": json.loads(m["trace"]) if m["trace"] else None,
+             "trace": _msg_trace(m),
                           "traceSum": m["trace_sum"], "ms": m["ms"], "msLabel": ms_label(m["ms"]),
              "cites": json.loads(m["cites"]) if isinstance(m["cites"], str) else (m["cites"] or []),
              "answer": _answer_of(m)}
             for m in msgs
         ],
     }}
+
+
+# ---------------------------------------------------------------- handle_task_trace
+def handle_task_trace(task_id, params=None, user=None):
+    """GET /api/v1/tasks/{id}/trace：历史全量事件（可 after_seq 增量）。"""
+    params = params or {}
+    rows = q("SELECT * FROM task WHERE id=%s", (task_id,))
+    if not rows:
+        return 404, {"code": 404, "message": "任务不存在"}
+    t = rows[0]
+    deny = guard_project(t["project_id"], user)
+    if deny:
+        return deny
+    try:
+        after_seq = max(0, int(q1(params, "after_seq", 0) or 0))
+    except (TypeError, ValueError):
+        after_seq = 0
+    try:
+        last_seq = tracemod.last_seq(task_id)
+        events = tracemod.events_after(task_id, after_seq, limit=2000)
+    except Exception:
+        traceback.print_exc()
+        return 500, {"code": 500, "message": "读取 trace 失败"}
+    return 200, {"code": 0, "data": {
+        "traceVersion": 2 if last_seq > 0 else int(t.get("trace_version") or 1),
+        "run": tracemod.run_view(task_id, t),
+        "lastSeq": last_seq,
+        "events": events,
+    }}
+
+
+# ---------------------------------------------------------------- handle_task_event_detail
+def handle_task_event_detail(task_id, seq, user=None):
+    """GET /api/v1/tasks/{id}/events/{seq}/detail：完整 output（权限/脱敏/TTL）。"""
+    rows = q("SELECT * FROM task WHERE id=%s", (task_id,))
+    if not rows:
+        return 404, {"code": 404, "message": "任务不存在"}
+    t = rows[0]
+    deny = guard_project(t["project_id"], user)
+    if deny:
+        return deny
+    ev_rows = q("SELECT visibility FROM task_event WHERE task_id=%s AND seq=%s",
+                (int(task_id), int(seq)))
+    if not ev_rows:
+        return 404, {"code": 404, "message": "事件不存在"}
+    vis = ev_rows[0].get("visibility") or "project"
+    creator = None
+    try:
+        creator = int(t.get("user_id") or 0)
+    except (TypeError, ValueError):
+        creator = None
+    uid = None
+    try:
+        uid = int((user or {}).get("id")) if user else None
+    except (TypeError, ValueError):
+        uid = None
+    if vis == "private" and user and creator and uid != creator:
+        from .biz import can_confirm_project_rule
+        if not can_confirm_project_rule(t["project_id"], user):
+            return 403, {"code": 403, "message": "该事件详情仅本人/管理员可见"}
+    if vis == "admin":
+        from .biz import can_confirm_project_rule
+        if not can_confirm_project_rule(t["project_id"], user):
+            return 403, {"code": 403, "message": "该事件详情仅项目管理员可见"}
+    detail = tracemod.event_detail(task_id, seq)
+    if detail is None:
+        return 404, {"code": 404, "message": "事件不存在"}
+    detail["taskId"] = int(task_id)
+    return 200, {"code": 0, "data": detail}
 
 

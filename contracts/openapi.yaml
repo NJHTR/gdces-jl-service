@@ -617,9 +617,18 @@ paths:
     get:
       tags: [任务]
       x-owner: agent
-      summary: 任务详情（前端轮询这个看进度）
+      summary: 任务详情（前端轮询这个看进度；支持 trace 增量）
+      description: |
+        traceVersion=2 时返回 run + 增量 events：只返回 seq>after_seq 的事件（升序）。
+        旧字段（status/progress/messages 等）全部保留，旧客户端忽略新字段即可。
+        run.status 取值 succeeded/partial/failed/cancelled/queued/running；
+        顶层 status 仍是旧值（done/failed/...），旧客户端不受影响。
       parameters:
         - $ref: '#/components/parameters/TaskId'
+        - name: after_seq
+          in: query
+          description: 只返回 seq 大于该值的事件（增量轮询用；省略=从头）
+          schema: { type: integer, default: 0, minimum: 0 }
       responses:
         '200':
           description: 成功
@@ -631,6 +640,45 @@ paths:
                   - type: object
                     properties:
                       data: { $ref: '#/components/schemas/Task' }
+
+  /api/v1/tasks/{taskId}/trace:
+    get:
+      tags: [任务]
+      x-owner: agent
+      summary: 历史全量 trace（事件账本；支持 after_seq 增量）
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: after_seq
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: '成功：{traceVersion, run, lastSeq, events[]}'
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/TraceView' }
+
+  /api/v1/tasks/{taskId}/events/{seq}/detail:
+    get:
+      tags: [任务]
+      x-owner: agent
+      summary: 单条事件完整输出（大输出按需读；脱敏；权限校验）
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: seq
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: '成功：{seq,kind,name,status,error,truncated,outputBytes,output,source}'
+        '403': { description: 无权查看该事件详情（private/admin） }
+        '404': { description: 任务/事件不存在 }
 
   /api/v1/tasks/{taskId}/cancel:
     post:
@@ -1354,6 +1402,77 @@ components:
             多模态 answer.blocks v1（_pollTask 可直接用；也可从 messages[].answer.blocks 取）。
             客户端没在 chat.body.capabilities 里 opt-in 时为空数组。
           items: { $ref: '#/components/schemas/AnswerBlock' }
+        # ---------------- 最终态 trace（additive；旧客户端忽略）
+        traceVersion:
+          type: integer
+          enum: [1, 2]
+          description: 1=旧扁平 trace；2=task_event 事件账本
+        run: { $ref: '#/components/schemas/TraceRun' }
+        lastSeq:
+          type: integer
+          description: 当前任务最大事件序号（增量轮询游标）
+        events:
+          type: array
+          description: seq>after_seq 的事件，按 seq 升序
+          items: { $ref: '#/components/schemas/TaskEvent' }
+
+    TraceRun:
+      type: object
+      properties:
+        taskId: { type: integer }
+        status:
+          type: string
+          enum: [queued, running, succeeded, partial, failed, cancelled]
+          description: run 终态（旧 task.status=done 在投影层映射为 succeeded）
+        startedAt: { type: string, nullable: true }
+        endedAt: { type: string, nullable: true }
+        summary: { type: string }
+        stepCount: { type: integer }
+
+    TraceView:
+      type: object
+      properties:
+        traceVersion: { type: integer, enum: [1, 2] }
+        run: { $ref: '#/components/schemas/TraceRun' }
+        lastSeq: { type: integer }
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/TaskEvent' }
+
+    TaskEvent:
+      type: object
+      description: |
+        append-only 执行事件。seq 同 task 单调无空洞；running 只允许一次 CAS 到终态，
+        终态不可回写；重试/纠正追加新事件（retryOfSeq）。大输出只给 preview，
+        完整内容走 /tasks/{id}/events/{seq}/detail。
+      properties:
+        seq: { type: integer }
+        stepId: { type: string, nullable: true }
+        parentSeq: { type: integer, nullable: true }
+        kind:
+          type: string
+          enum: [plan, tool, file_read, file_write, image_read, subagent, artifact,
+                 validation, note, error, status]
+        phase:
+          type: string
+          nullable: true
+          enum: [understand, plan, gather, act, finish]
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed, retrying, skipped, cancelled]
+        name: { type: string, description: 中文动作名 }
+        summary: { type: string, nullable: true }
+        inputPreview: { type: string, nullable: true, description: 参数摘要（≤4KB，脱敏） }
+        outputPreview: { type: string, nullable: true, description: 输出前 4KB（脱敏） }
+        outputRef: { type: string, nullable: true, description: data/trace/<task>/<seq>.json.gz }
+        outputBytes: { type: integer, nullable: true }
+        truncated: { type: boolean }
+        error: { type: string, nullable: true }
+        attempt: { type: integer }
+        retryOfSeq: { type: integer, nullable: true }
+        startedAt: { type: string, nullable: true }
+        endedAt: { type: string, nullable: true }
+        visibility: { type: string, enum: [project, private, admin] }
 
     Message:
       type: object

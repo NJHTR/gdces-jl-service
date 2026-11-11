@@ -20,7 +20,8 @@ from .jobs import list_jobs, run_now, start as start_jobs
 from .knowledge import sync_standards
 from .biz import (
     handle_review_record, handle_observations, handle_rule_propose, handle_rule_proposals, handle_rule_decide, handle_review_appeal, handle_review_appeals, handle_appeal_decide, handle_memory_metrics, handle_asr, append_manifest, audit, default_project_id, guard_project, handle_admin, handle_audit, handle_blob, handle_doc_get, handle_doc_register, handle_doc_patch, handle_docs_list, handle_geo_reverse, handle_photo_list, handle_photo_patch, handle_photo_index, handle_photo_index, handle_photo_caption, handle_photo_search, parse_multipart_full, handle_project_create, handle_project_get, handle_project_list, handle_project_save, handle_project_files, handle_standard, handle_standards_search, handle_stats, handle_upload, handle_weather, member_of, render_project_memory, store_blob, handle_doc_validate, handle_doc_schema)
-from .agent import (Engine, _cites_from_output, _parse_cli_jsonl, _run_agent_loop_inner, _run_cli_turn, _set_progress, _user_lock, build_context, engine, handle_bootstrap, handle_chat, handle_memory_create, handle_memory_delete, handle_memory_list, handle_memory_patch, handle_messages, handle_memory_recall, handle_task, handle_task_cancel, handle_task_list, handle_task_retry, learn_from_turn, render_agents_md, run_agent_loop, run_turn, sweeper)
+from .agent import (Engine, _cites_from_output, _parse_cli_jsonl, _run_agent_loop_inner, _run_cli_turn, _set_progress, _user_lock, build_context, engine, handle_bootstrap, handle_chat, handle_memory_create, handle_memory_delete, handle_memory_list, handle_memory_patch, handle_messages, handle_memory_recall, handle_task, handle_task_cancel, handle_task_event_detail, handle_task_list, handle_task_retry, handle_task_trace, learn_from_turn, render_agents_md, run_agent_loop, run_turn, sweeper)
+from . import trace as tracemod
 from .memcandidate import (ensure_memory_candidate_table, handle_candidate_create,
                            handle_candidate_decide, handle_candidate_list)
 from .assetsvc import (delete_asset, ensure_asset_table, get_asset_content, get_asset_meta,
@@ -182,9 +183,26 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(*handle_observations(pid, status, usr))
             if path == "/api/v1/tasks":
                 return self._send(*handle_task_list(parse_qs(urlparse(self.path).query)))
+            # 最终态 trace：增量任务视图 / 历史全量 / 事件详情
             m = re.match(r"^/api/v1/tasks/(\d+)$", path)
             if m:
-                return self._send(*handle_task(int(m.group(1)), resolve_token(bearer(self.headers))))
+                qs_task = parse_qs(urlparse(self.path).query)
+                try:
+                    after_seq = int(q1(qs_task, "after_seq", 0) or 0)
+                except (TypeError, ValueError):
+                    after_seq = 0
+                return self._send(*handle_task(
+                    int(m.group(1)), resolve_token(bearer(self.headers)), after_seq))
+            m = re.match(r"^/api/v1/tasks/(\d+)/trace$", path)
+            if m:
+                return self._send(*handle_task_trace(
+                    int(m.group(1)), parse_qs(urlparse(self.path).query),
+                    resolve_token(bearer(self.headers))))
+            m = re.match(r"^/api/v1/tasks/(\d+)/events/(\d+)/detail$", path)
+            if m:
+                return self._send(*handle_task_event_detail(
+                    int(m.group(1)), int(m.group(2)),
+                    resolve_token(bearer(self.headers))))
             if path == "/api/v1/memories/recall":
                 return self._send(*handle_memory_recall(
                     parse_qs(urlparse(self.path).query),
@@ -537,6 +555,11 @@ def main():
     ensure_asset_table()
     try:
         maybe_gc()
+    except Exception:
+        traceback.print_exc()
+    # 最终态 trace：task_event 表 + task 补列（部署不传 db/，重启幂等）
+    try:
+        tracemod.ensure_trace_schema()
     except Exception:
         traceback.print_exc()
     # 监听 0.0.0.0：MCP 工具容器在 jl-net（172.19.0.0/16）里，
