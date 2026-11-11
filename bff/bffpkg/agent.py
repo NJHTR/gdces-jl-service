@@ -116,14 +116,20 @@ def _tool_event_def(tool):
     return _TOOL_KIND.get(tool, ("tool", "act", "run"))
 
 
-def _emit_tool_start(task_id, tool, label, args_text, cid):
+def _emit_tool_start(task_id, tool, label, args_text, cid, *, attempt=1,
+                     retry_of_seq=None, status="running", parent_seq=None):
     kind, phase, icon = _tool_event_def(tool)
+    name = label or tool
+    if attempt and int(attempt) > 1:
+        name = "重试·" + (name or tool)
     return tracemod.append_event(
-        task_id, kind, label or tool, phase=phase, status="running", started=True,
+        task_id, kind, name, phase=phase, status=status, started=True,
         step_id=cid, input_text=args_text or "",
-        summary=label or tool, meta={"tool": tool, "label": label or tool,
-                                     "icon": icon, "args": (args_text or "")[:300],
-                                     "legacy_kind": "cmd"})
+        summary=label or tool, parent_seq=parent_seq,
+        attempt=int(attempt or 1),
+        retry_of_seq=(int(retry_of_seq) if retry_of_seq else None),
+        meta={"tool": tool, "label": label or tool, "icon": icon,
+              "args": (args_text or "")[:300], "legacy_kind": "cmd"})
 
 
 def _emit_tool_finish(task_id, seq, ok, output_text=None, error=None, secs=None,
@@ -208,16 +214,15 @@ def _legacy_trace_projection(task_id, parsed_trace):
 
 
 def _fail_running_steps(task_id, error):
-    """异常/超时收尾：把仍 running 的 step 标 failed，别让它们永远转圈。"""
+    """异常/超时收尾：给仍 running 的 step 追加 failed 完成事件，别让它们永远转圈。"""
     try:
-        rows = q("SELECT seq FROM task_event WHERE task_id=%s AND status='running' "
-                 "ORDER BY seq", (task_id,))
+        rows = q("SELECT seq, step_id, tool FROM (SELECT e.seq, e.step_id, "
+                 "JSON_UNQUOTE(JSON_EXTRACT(e.meta,'$.tool')) AS tool FROM task_event e "
+                 "WHERE e.task_id=%s AND e.status='running') x", (task_id,))
         for r in rows:
-            try:
-                tracemod.finish_event(task_id, r["seq"], "failed",
-                                      error=(str(error) or "执行中断")[:4000])
-            except Exception:
-                traceback.print_exc()
+            if tracemod.finish_event(task_id, r["seq"], "failed",
+                                     error=(str(error) or "执行中断")[:4000]):
+                continue
     except Exception:
         traceback.print_exc()
 def _photos_from_parts(parts):
@@ -2397,6 +2402,9 @@ def handle_task(task_id, user=None, after_seq=0):
         traceback.print_exc()
     if last_seq > 0:
         trace_version = 2
+    else:
+        # 历史任务没有事件账本 → 必须回 v1，不能因为列默认值 2 让客户端以为"v2 空"
+        trace_version = 1
 
     msgs = q("SELECT id, role, text, trace, trace_sum, ms, cites, answer FROM message WHERE task_id=%s ORDER BY id",
              (task_id,))
@@ -2594,7 +2602,7 @@ def handle_task_trace(task_id, params=None, user=None):
         traceback.print_exc()
         return 500, {"code": 500, "message": "读取 trace 失败"}
     return 200, {"code": 0, "data": {
-        "traceVersion": 2 if last_seq > 0 else int(t.get("trace_version") or 1),
+        "traceVersion": 2 if last_seq > 0 else 1,
         "run": tracemod.run_view(task_id, t),
         "lastSeq": last_seq,
         "events": events,

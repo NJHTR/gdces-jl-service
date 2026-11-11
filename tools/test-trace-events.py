@@ -260,14 +260,14 @@ def main():
                   isinstance(hm.get("trace"), list)
                   and (hm["trace"][0].get("tool") if hm["trace"] else False),
                   repr(hm.get("trace"))[:200])
-        # 旧任务（无事件）回退旧字段
+        # 旧任务（列默认 trace_version=2 但无事件）必须回 v1，避免客户端以为 v2 空
         old = new_task(core, client=PREFIX + "-old", payload={"text": "旧任务"})
         task_ids.append(old)
-        core.exec_sql("UPDATE task SET trace_version=1, status='done', progress=%s WHERE id=%s",
+        core.exec_sql("UPDATE task SET status='done', progress=%s WHERE id=%s",
                       (json.dumps([{"label": "旧步骤", "state": "done"}]), old))
         code, payload = agent.handle_task(old, None, 0)
         od = payload.get("data") or {}
-        eq("旧任务 traceVersion=1", od.get("traceVersion"), 1)
+        eq("无事件历史任务 traceVersion=1（不是 v2 空）", od.get("traceVersion"), 1)
         eq("旧任务无 events", od.get("events"), [])
         check("旧任务 progress 回退旧值",
               (od.get("progress") or [{}])[0].get("label") == "旧步骤", repr(od.get("progress")))
