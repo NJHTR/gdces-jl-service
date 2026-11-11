@@ -135,6 +135,11 @@ def main():
         eq("子智能体 parentSeq 指父 step", sub["parentSeq"], c_tool)
         eq("子智能体 kind", sub["kind"], "subagent")
         check("子智能体单行摘要", bool(sub.get("summary")), repr(sub.get("summary")))
+        # 回报事件：与派发同 parentSeq → L1 stepCount 合并计 1（不按两条算）
+        tm.append_event(t3, "subagent", "子 agent 回报", phase="act",
+                        status="succeeded", started=True, finished=True,
+                        parent_seq=c_tool, summary="复核通过")
+        eq("stepCount 把 subagent 派发/回报合并计 1", tm.step_count(t3), 2)
 
         # ---- 5) 取消：CAS + 迟到 done 不覆盖 + 未完成 step 收尾 ----
         t4 = new_task(core, "cancel")

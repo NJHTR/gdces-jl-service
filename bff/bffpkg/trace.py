@@ -505,13 +505,37 @@ def _events_collapsed(task_id, kinds=None, limit=None):
     return out
 
 
-def step_count(task_id):
-    """已完成的 step 数：按 stepId 折叠后状态为终态的个数（父 run 状态独立）。"""
+def _step_items(task_id):
+    """折叠后的「可见工作项」：同 stepId 合并起止；subagent 按 parentSeq 合并派发/回报。
+
+    引擎会收到“派子 agent”(seq20) 与“子 agent 回报”(seq21) 两条；L2 把这对显示成一行，
+    L1 步数必须与之一致（否则 stepCount=22 / totalSteps=21）。
+    """
     rows = _events_collapsed(task_id)
-    n = 0
+    out, sub_idx = [], {}
     for r in rows:
         if r.get("kind") == "status":
             continue
+        if r.get("kind") == "subagent":
+            key = ("subagent", r.get("parent_seq") or ("seq:%s" % r["seq"]))
+            if key in sub_idx:
+                out[sub_idx[key]] = r          # 保留最新一条（rows 已按 seq 升序）
+            else:
+                sub_idx[key] = len(out)
+                out.append(r)
+        else:
+            out.append(r)
+    return out
+
+
+def step_count(task_id):
+    """已完成工作项数：按 stepId 折叠；subagent 派发/回报按 parentSeq 合并计 1。
+
+    L1 步数必须 == L2 可见步骤（client 把 subagent 对归并成一行），所以这里不能
+    把派发和回报各算一步。
+    """
+    n = 0
+    for r in _step_items(task_id):
         if r.get("status") in ("succeeded", "failed", "cancelled", "skipped", "retrying"):
             n += 1
     return n
@@ -578,9 +602,9 @@ def event_detail(task_id, seq):
 def project_progress(task_id, limit=12):
     """把事件投影成旧 task.progress: [{label,tool,state,secs}]（按 stepId 折叠）。"""
     try:
-        rows = _events_collapsed(
-            task_id, kinds=("tool", "file_read", "file_write", "image_read",
-                            "artifact", "validation", "subagent", "plan"))
+        rows = [r for r in _step_items(task_id)
+                if r.get("kind") in ("tool", "file_read", "file_write", "image_read",
+                                     "artifact", "validation", "subagent", "plan")]
     except Exception:
         return None
     if not rows:

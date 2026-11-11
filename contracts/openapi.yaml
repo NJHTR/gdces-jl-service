@@ -1437,7 +1437,9 @@ components:
             折叠后的工作项数：按 stepId（无 stepId 用 seq 兜底）合并起止事件后，
             状态为终态（succeeded/failed/cancelled/skipped/retrying）的事件数；
             包含 plan/artifact/subagent/validation 等工作项，**不含** kind=status
-            （开始/结束/取消这类 run 级状态事件）。例如 843 的 41 条事件折叠后为 22。
+            （开始/结束/取消这类 run 级状态事件）。
+            子智能体的「派发」与「回报」两条事件按 parentSeq 合并计 1（L1 步数 == L2 可见步骤）。
+            例如 843 的 41 条事件折叠后 stepCount=21（含 subagent 对合并）。
 
     TraceView:
       type: object
