@@ -126,24 +126,71 @@ def _emit_tool_start(task_id, tool, label, args_text, cid):
                                      "legacy_kind": "cmd"})
 
 
-def _emit_tool_finish(task_id, seq, ok, output_text=None, error=None, secs=None):
+def _emit_tool_finish(task_id, seq, ok, output_text=None, error=None, secs=None,
+                      artifacts=None):
+    """追加终态事件（append-only）：同 stepId、parent_seq=起始事件，客户端按 stepId upsert。"""
     if not seq:
+        return None
+    extra = {}
+    if secs is not None:
+        extra["secs"] = round(secs, 1)
+    if artifacts:
+        extra["artifacts"] = artifacts
+    return tracemod.finish_event(task_id, seq, "succeeded" if ok else "failed",
+                                 output_text=output_text, error=error,
+                                 meta_extra=extra or None)
+
+
+def _emit_artifacts(task_id, blocks, doc_row):
+    """本轮产物（图片/文书）作为只读 artifact 事件挂到账本，供 L3 缩略图。"""
+    arts = []
+    for b in blocks or []:
+        if not isinstance(b, dict) or b.get("type") != "image_ref":
+            continue
+        if not b.get("assetId"):
+            continue
+        arts.append({"type": "image", "assetId": b["assetId"],
+                     "name": (b.get("caption") or "现场照片")[:80],
+                     "mime": b.get("mime") or ""})
+    if doc_row:
+        name = (doc_row.get("kind") or "文书")
+        if doc_row.get("obj"):
+            name += " · " + doc_row["obj"]
+        arts.append({"type": "doc", "docId": doc_row.get("id"), "name": name[:120]})
+    if not arts:
         return
-    meta_update = {"secs": round(secs, 1)} if secs is not None else None
-    if ok:
-        tracemod.finish_event(task_id, seq, "succeeded", output_text=output_text,
-                              summary=None)
-    else:
-        tracemod.finish_event(task_id, seq, "failed", output_text=output_text,
-                              error=error or "工具执行失败")
-    # secs 记到 meta 里，旧 trace 投影能带上
-    if meta_update:
+    try:
+        tracemod.append_event(task_id, "artifact", "生成产物", phase="finish",
+                              status="succeeded",
+                              summary="、".join(a["name"] for a in arts[:4]),
+                              meta={"artifacts": arts})
+    except Exception as e:
+        sys.stderr.write("[trace] 写 artifact 事件失败 task=%s: %r\n" % (task_id, e))
+
+
+def _events_for_tasks(task_ids):
+    """批量取多个 task 的事件（历史消息投影用），返回 {task_id: [event_view]}。"""
+    ids = []
+    for t in task_ids or []:
         try:
-            exec_sql("UPDATE task_event SET meta=JSON_MERGE_PATCH(COALESCE(meta,'{}'), %s) "
-                     "WHERE task_id=%s AND seq=%s",
-                     (json.dumps(meta_update, ensure_ascii=False), task_id, seq))
-        except Exception as e:
-            sys.stderr.write("[trace] 写 secs 失败 task=%s seq=%s: %r\n" % (task_id, seq, e))
+            n = int(t)
+        except (TypeError, ValueError):
+            continue
+        if n > 0 and n not in ids:
+            ids.append(n)
+    if not ids:
+        return {}
+    try:
+        rows = q("SELECT * FROM task_event WHERE task_id IN ("
+                 + ",".join(["%s"] * len(ids)) + ") ORDER BY task_id, seq",
+                 tuple(ids))
+    except Exception:
+        traceback.print_exc()
+        return {}
+    out = {}
+    for r in rows:
+        out.setdefault(int(r["task_id"]), []).append(tracemod._event_view(r))
+    return out
 
 
 def _legacy_trace_projection(task_id, parsed_trace):
@@ -222,11 +269,20 @@ def handle_messages(params):
         args.append(int(user_id))
     sql += " ORDER BY id LIMIT 100"
     rows = q(sql, args)
+    # trace v2：历史消息附 events（事件数组，含 append-only 的末态完成事件）；
+    # message.trace 保持旧格式数组不变（旧客户端零改动）。
+    ev_map = _events_for_tasks([m.get("task_id") for m in rows])
     for m in rows:
         if m.get("trace") and isinstance(m["trace"], str):
             m["trace"] = json.loads(m["trace"])
         _normalize_message_photos(m)
         m["createdAt"] = str(m.pop("created_at", ""))
+        tid = m.get("task_id")
+        if tid:
+            evs = ev_map.get(int(tid)) or []
+            m["taskId"] = int(tid)
+            m["traceVersion"] = 2 if evs else 1
+            m["events"] = evs
     return 200, {"code": 0, "data": {"list": rows, "lastId": rows[-1]["id"] if rows else after}}
 
 
@@ -1954,6 +2010,8 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
         final_text = ensure_image_fallback(final_text, blocks)
 
         answer = build_answer(doc_row, cites, final_text, blocks)
+        # L3 产物/图片引用：只读 artifact 事件（图片 asset 短链由读侧现签）
+        _emit_artifacts(task_id, blocks, doc_row)
 
         # 对账：文件写了但没入库的，要让人看见（不然用户以为系统里有，其实没有）
         try:
@@ -2471,6 +2529,13 @@ def handle_task(task_id, user=None, after_seq=0):
                 return None
         return raw or None
 
+    # 历史/回放用：给每条 assistant 消息附完整事件数组（客户端按 message.events 用 v2）
+    try:
+        events_all = tracemod.events_after(task_id, 0, limit=2000)
+    except Exception:
+        traceback.print_exc()
+        events_all = []
+
     return 200, {"code": 0, "data": {
         # 最终态 trace 契约（旧字段全部保留，新字段 additive）
         "traceVersion": trace_version,
@@ -2497,7 +2562,11 @@ def handle_task(task_id, user=None, after_seq=0):
              "trace": _msg_trace(m),
                           "traceSum": m["trace_sum"], "ms": m["ms"], "msLabel": ms_label(m["ms"]),
              "cites": json.loads(m["cites"]) if isinstance(m["cites"], str) else (m["cites"] or []),
-             "answer": _answer_of(m)}
+             "answer": _answer_of(m),
+             # v2：历史回放用事件数组（message.trace 仍是旧格式，旧客户端不变）
+             "taskId": int(t["id"]) if m["role"] == "assistant" else None,
+             "traceVersion": trace_version if m["role"] == "assistant" else None,
+             "events": events_all if m["role"] == "assistant" else []}
             for m in msgs
         ],
     }}

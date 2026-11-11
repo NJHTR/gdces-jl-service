@@ -106,12 +106,18 @@ def main():
         task_ids.append(t3)
         tm.start_run(t3)
         s = tm.append_event(t3, "tool", "长任务", phase="act", status="running",
-                            started=True, output_text="x" * 100)
-        eq("finish running→succeeded", tm.finish_event(t3, s, "succeeded",
-                                                       output_text="done"), True)
-        eq("终态不可回写（再次 finish=False）", tm.finish_event(t3, s, "failed"), False)
-        eq("非 running 的 finish 也失败",
-           tm.finish_event(t3, 1, "succeeded"), False)   # seq1 是 start_run 的 status 事件
+                            step_id="step-t3", started=True, output_text="x" * 100)
+        n_start = len(tm.events_after(t3, 0))
+        c = tm.finish_event(t3, s, "succeeded", output_text="done")
+        check("完成是追加新事件（new seq>起始 seq）", isinstance(c, int) and c > s, c)
+        c_ev = [e for e in tm.events_after(t3, 0) if e["seq"] == c][0]
+        eq("完成事件 parentSeq=起始 seq", c_ev["parentSeq"], s)
+        eq("完成事件同 stepId", c_ev["stepId"], "step-t3")
+        start_ev = [e for e in tm.events_after(t3, 0) if e["seq"] == s][0]
+        eq("起始事件仍 running（append-only，不原地改）", start_ev["status"], "running")
+        eq("重复 finish 幂等返回同一完成 seq", tm.finish_event(t3, s, "failed"), c)
+        eq("幂等不新增事件", len(tm.events_after(t3, 0)), n_start + 1)
+        eq("已终态事件不能再 finish", tm.finish_event(t3, 1, "succeeded"), None)
 
         # ---- 4) run 状态机：succeeded/cancelled/failed 终态 ----
         ok = tm.finish_run(t3, "succeeded", summary="完成")
@@ -166,9 +172,10 @@ def main():
         big += ("password=MYSQL_SECRET_123 token=abc123def456 phone=13800138000 "
                 "path=/tmp/secret-file.png\n")
         s7 = tm.append_event(t7, "tool", "大输出工具", phase="act", status="running",
-                             started=True)
-        tm.finish_event(t7, s7, "succeeded", output_text=big, error=None)
-        ev = [e for e in tm.events_after(t7, 0) if e["seq"] == s7][0]
+                             step_id="big-tool", started=True)
+        s7c = tm.finish_event(t7, s7, "succeeded", output_text=big, error=None)
+        ev = [e for e in tm.events_after(t7, 0) if e["seq"] == s7c][0]
+        eq("完成事件 status 终态", ev["status"], "succeeded")
         check("preview <= 4KB+截断标记", len(ev["outputPreview"] or "") <= 4300,
               len(ev["outputPreview"] or ""))
         eq("大输出标记 truncated", ev["truncated"], True)
@@ -177,7 +184,7 @@ def main():
               repr(ev.get("outputBytes")))
         raw = open(os.path.join(trace_base, ev["outputRef"]), "rb").read()
         check("落盘文件是 gzip", raw[:2] == b"\x1f\x8b")
-        detail = tm.event_detail(t7, s7)
+        detail = tm.event_detail(t7, s7c)
         eq("detail source=file", detail["source"], "file")
         check("detail 输出完整长度（脱敏后仍完整）", len(detail["output"] or "") >= len(big) - 200,
               (len(detail["output"] or ""), len(big)))
@@ -193,6 +200,21 @@ def main():
         s8 = tm.append_event(t7, "note", "私密备注", phase="finish", status="succeeded",
                              visibility="private")
         eq("visibility 落库 private", tm.events_after(t7, s8 - 1)[0]["visibility"], "private")
+
+        # 产物引用（L3）：artifact 事件 + detail 都带 artifacts，图片短链由后端现签
+        s_art = tm.append_event(t7, "artifact", "生成产物", phase="finish", status="succeeded",
+                                meta={"artifacts": [
+                                    {"type": "doc", "docId": 123, "name": "监理通知单"},
+                                    {"type": "image",
+                                     "assetId": "01J00000000000000000000000",
+                                     "name": "现场标注图"}]})
+        art_ev = [e for e in tm.events_after(t7, s_art - 1) if e["seq"] == s_art][0]
+        check("事件带 artifacts", isinstance(art_ev.get("artifacts"), list)
+              and len(art_ev["artifacts"]) == 2, repr(art_ev.get("artifacts")))
+        eq("artifact docId", art_ev["artifacts"][0].get("docId"), "123")
+        art_detail = tm.event_detail(t7, s_art)
+        check("detail 带 artifacts", len(art_detail.get("artifacts") or []) == 2,
+              repr(art_detail.get("artifacts")))
 
         # ---- 7) 旧投影 ----
         prog = tm.project_progress(t7)
@@ -224,6 +246,20 @@ def main():
               all(e["seq"] > 3 for e in (data2.get("events") or []))
               and len(data2.get("events") or []) < len(data.get("events") or []),
               len(data2.get("events") or []))
+        # 历史消息：message.trace 保持旧数组；v2 走 message.events
+        mid = core.q("SELECT id FROM message WHERE task_id=%s ORDER BY id DESC LIMIT 1",
+                     (t7,))[0]["id"]
+        code, payload = agent.handle_messages({"projectId": PROJECT, "after": mid - 1})
+        hist = [m for m in (payload.get("data") or {}).get("list") or [] if m["id"] == mid]
+        check("handle_messages 找到历史消息", bool(hist), repr(payload)[:200])
+        if hist:
+            hm = hist[0]
+            eq("历史消息 traceVersion=2", hm.get("traceVersion"), 2)
+            check("历史消息带 events", len(hm.get("events") or []) > 0)
+            check("历史 message.trace 仍是旧数组",
+                  isinstance(hm.get("trace"), list)
+                  and (hm["trace"][0].get("tool") if hm["trace"] else False),
+                  repr(hm.get("trace"))[:200])
         # 旧任务（无事件）回退旧字段
         old = new_task(core, client=PREFIX + "-old", payload={"text": "旧任务"})
         task_ids.append(old)
@@ -241,7 +277,7 @@ def main():
         eq("trace 接口 200", code, 200)
         check("trace 接口全量事件", len((payload.get("data") or {}).get("events") or [])
               == tm.last_seq(t7))
-        code, payload = agent.handle_task_event_detail(t7, s7, None)
+        code, payload = agent.handle_task_event_detail(t7, s7c, None)
         eq("detail 接口 200", code, 200)
         eq("detail 接口 source", (payload.get("data") or {}).get("source"), "file")
 

@@ -273,49 +273,58 @@ def append_event(task_id, kind, name, *, phase=None, status="pending", summary=N
 
 
 def finish_event(task_id, seq, status="succeeded", *, summary=None, output_text=None,
-                 error=None, output_ref=None):
-    """把 running 的 step CAS 到终态；终态不可回写（返回 False 表示已终态/不存在）。"""
+                 error=None, output_ref=None, meta_extra=None):
+    """步骤完成：**追加**一条新事件（同 stepId、parent_seq=起始事件 seq），不原地改已有行。
+
+    客户端按 stepId upsert：后到的终态事件覆盖先前的 running 事件。
+    返回完成事件的 seq；若起始事件已是终态/不存在返回 None；重复完成幂等返回已有 seq。
+    """
     ensure_trace_schema()
     task_id, seq = int(task_id), int(seq)
     status = (status or "").strip()
     if status not in TERMINAL_STEP:
         raise ValueError("终态只能是 %r" % (TERMINAL_STEP,))
-    pv, truncated, out_bytes = None, False, None
-    if output_text is not None:
-        pv, truncated, out_bytes = preview(output_text)
-        if output_ref is None:
-            output_ref, out_bytes = store_output(task_id, seq, output_text)
-    sets = ["status=%s", "ended_at=NOW(3)"]
-    args = [status]
-    if summary is not None:
-        sets.append("summary=%s")
-        args.append(redact(str(summary))[:512])
-    if pv is not None:
-        sets.append("output_preview=%s")
-        args.append(pv)
-        sets.append("truncated=%s")
-        args.append(1 if truncated else 0)
-        sets.append("output_bytes=%s")
-        args.append(out_bytes)
-    if output_ref is not None:
-        sets.append("output_ref=%s")
-        args.append(output_ref)
-    if error is not None:
-        sets.append("error_detail=%s")
-        args.append(redact(str(error))[:4000])
-    sql = ("UPDATE task_event SET " + ", ".join(sets) +
-           " WHERE task_id=%s AND seq=%s AND status='running'")
-    args.extend([task_id, seq])
-    n = exec_rowcount(sql, tuple(args))
-    return n == 1
+    rows = q("SELECT * FROM task_event WHERE task_id=%s AND seq=%s", (task_id, seq))
+    if not rows:
+        return None
+    start = rows[0]
+    if start.get("status") in TERMINAL_STEP:
+        return None
+    done = q("SELECT seq FROM task_event WHERE task_id=%s AND parent_seq=%s "
+             "AND status IN ('succeeded','failed','skipped','cancelled') "
+             "ORDER BY seq LIMIT 1", (task_id, seq))
+    if done:
+        return int(done[0]["seq"])
+    meta = {}
+    raw_meta = start.get("meta")
+    if isinstance(raw_meta, str):
+        try:
+            meta = json.loads(raw_meta or "{}")
+        except ValueError:
+            meta = {}
+    elif isinstance(raw_meta, dict):
+        meta = dict(raw_meta)
+    if meta_extra:
+        meta.update(meta_extra)
+    meta["startSeq"] = seq
+    return append_event(
+        task_id, start.get("kind"), start.get("name"),
+        phase=start.get("phase"), status=status,
+        summary=(summary if summary is not None else start.get("summary")),
+        output_text=output_text, error=error, parent_seq=seq,
+        step_id=start.get("step_id"), visibility=start.get("visibility") or "project",
+        attempt=int(start.get("attempt") or 1),
+        retry_of_seq=(start.get("retry_of_seq") or None),
+        meta=meta, started=True, finished=True, output_ref=output_ref)
 
 
 def finish_event_by_step(task_id, step_id, status="succeeded", **kw):
-    """按 step_id 找 running 事件并 CAS 到终态（工具 command id 配对用）。"""
+    """按 step_id 找未完成的起始事件并追加终态事件（工具 command id 配对用）。"""
     rows = q("SELECT seq FROM task_event WHERE task_id=%s AND step_id=%s "
-             "AND status='running' ORDER BY seq DESC LIMIT 1", (int(task_id), str(step_id)))
+             "AND status IN ('running','retrying','pending') ORDER BY seq DESC LIMIT 1",
+             (int(task_id), str(step_id)))
     if not rows:
-        return False
+        return None
     return finish_event(task_id, rows[0]["seq"], status=status, **kw)
 
 
@@ -424,6 +433,8 @@ def _event_view(row):
         "startedAt": str(row["started_at"]) if row.get("started_at") else None,
         "endedAt": str(row["ended_at"]) if row.get("ended_at") else None,
         "visibility": row.get("visibility") or "project",
+        # 只读产物引用（图片现签短链；不复制证据）
+        "artifacts": _artifacts_of(meta),
         # 内部字段不对外（meta 里的 tool/icon 给旧投影用）
     }
 
@@ -441,10 +452,69 @@ def last_seq(task_id):
     return int(rows[0]["s"] or 0)
 
 
+# ---------------------------------------------------------------- 产物引用（只读）
+def _artifacts_of(meta):
+    """事件 meta.artifacts → 契约 artifacts[]；图片 asset 现签短链，不复制证据。"""
+    arts = (meta or {}).get("artifacts") if isinstance(meta, dict) else None
+    out = []
+    if not isinstance(arts, list):
+        return out
+    for a in arts[:8]:
+        if not isinstance(a, dict):
+            continue
+        item = {"type": str(a.get("type") or "asset")[:16]}
+        for k in ("assetId", "docId", "photoId", "name", "caption", "mime"):
+            if a.get(k) not in (None, ""):
+                item[k] = str(a[k])[:255]
+        if item.get("assetId"):
+            try:
+                from . import assetsvc
+                row = assetsvc._row(item["assetId"])
+                if row:
+                    item["url"] = assetsvc.sign_asset_url(item["assetId"])
+                    item["mime"] = row.get("mime") or item.get("mime")
+                    item["bytes"] = int(row.get("size") or 0)
+            except Exception as e:
+                sys.stderr.write("[trace] 签 artifact 失败 %s: %r\n" % (item.get("assetId"), e))
+        out.append(item)
+    return out
+
+
+def _events_collapsed(task_id, kinds=None, limit=None):
+    """按 step 折叠事件：同一 stepId（无则按 seq）以最大 seq 为准。
+
+    返回 [(seq, kind, name, status, started_at, ended_at, meta, output_preview,
+            error_detail, parent_seq)]，按首个事件出现顺序。
+    """
+    sql = "SELECT * FROM task_event WHERE task_id=%s"
+    args = [int(task_id)]
+    if kinds:
+        sql += " AND kind IN (" + ",".join(["%s"] * len(kinds)) + ")"
+        args.extend(kinds)
+    sql += " ORDER BY seq ASC"
+    rows = q(sql, tuple(args))
+    latest, order = {}, []
+    for r in rows:
+        key = r.get("step_id") or ("seq:%s" % r["seq"])
+        if key not in latest:
+            order.append(key)
+        latest[key] = r
+    out = [latest[k] for k in order]
+    if limit:
+        out = out[-int(limit):]
+    return out
+
+
 def step_count(task_id):
-    rows = q("SELECT COUNT(*) AS n FROM task_event WHERE task_id=%s AND status IN "
-             "('succeeded','failed','cancelled','skipped','retrying')", (int(task_id),))
-    return int(rows[0]["n"] or 0)
+    """已完成的 step 数：按 stepId 折叠后状态为终态的个数（父 run 状态独立）。"""
+    rows = _events_collapsed(task_id)
+    n = 0
+    for r in rows:
+        if r.get("kind") == "status":
+            continue
+        if r.get("status") in ("succeeded", "failed", "cancelled", "skipped", "retrying"):
+            n += 1
+    return n
 
 
 def run_view(task_id, task_row=None):
@@ -475,12 +545,22 @@ def event_detail(task_id, seq):
     if not rows:
         return None
     row = rows[0]
+    meta = row.get("meta")
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta or "{}")
+        except ValueError:
+            meta = {}
+    elif not isinstance(meta, dict):
+        meta = {}
     out = {"seq": int(seq), "kind": row.get("kind"), "name": row.get("name"),
            "status": row.get("status"), "error": row.get("error_detail"),
            "truncated": bool(row.get("truncated")),
            "outputBytes": int(row["output_bytes"]) if row.get("output_bytes") is not None
            else None,
-           "output": None, "source": "none"}
+           "output": None, "source": "none",
+           # L3 产物/图片：只读引用，短签由后端现签
+           "artifacts": _artifacts_of(meta)}
     data = load_output(task_id, seq) if row.get("output_ref") else None
     if data and data.get("text") is not None:
         out["output"] = data["text"]
@@ -496,12 +576,11 @@ def event_detail(task_id, seq):
 
 # ---------------------------------------------------------------- 旧字段投影
 def project_progress(task_id, limit=12):
-    """把事件投影成旧 task.progress: [{label,tool,state,secs}]。"""
+    """把事件投影成旧 task.progress: [{label,tool,state,secs}]（按 stepId 折叠）。"""
     try:
-        rows = q("SELECT seq, kind, name, status, started_at, ended_at, meta "
-                 "FROM task_event WHERE task_id=%s AND kind IN "
-                 "('tool','file_read','file_write','image_read','artifact','validation',"
-                 "'subagent','plan') ORDER BY seq ASC", (int(task_id),))
+        rows = _events_collapsed(
+            task_id, kinds=("tool", "file_read", "file_write", "image_read",
+                            "artifact", "validation", "subagent", "plan"))
     except Exception:
         return None
     if not rows:
@@ -514,40 +593,33 @@ def project_progress(task_id, limit=12):
                 meta = json.loads(meta or "{}")
             except ValueError:
                 meta = {}
-        tool = (meta or {}).get("tool") or r.get("kind")
+        meta = meta or {}
         secs = None
         if r.get("started_at") and r.get("ended_at"):
             try:
                 secs = round((r["ended_at"] - r["started_at"]).total_seconds(), 1)
             except Exception:
                 secs = None
-        if r.get("status") in ("running", "retrying", "pending"):
-            state = "running"
-        else:
-            state = "done"
-        step = {"label": (meta or {}).get("label") or r.get("name"), "tool": tool,
-                "state": state}
-        if state == "running":
-            step["secs"] = secs or 0
-        else:
-            step["secs"] = secs or 0
-        steps.append(step)
+        state = ("running" if r.get("status") in ("running", "retrying", "pending")
+                 else "done")
+        steps.append({"label": meta.get("label") or r.get("name"),
+                      "tool": meta.get("tool") or r.get("kind"),
+                      "state": state, "secs": secs or 0})
     return steps
 
 
 def project_message_trace(task_id, fallback=None, limit=120):
-    """把事件投影成旧 message.trace（cmd/shell/note 条目）；无事件回退 fallback。"""
+    """把事件投影成旧 message.trace（按 stepId 折叠，一条工具一项）；无事件回退 fallback。"""
     try:
-        rows = q("SELECT seq, kind, name, status, output_preview, error_detail, "
-                 "started_at, ended_at, meta FROM task_event WHERE task_id=%s AND kind IN "
-                 "('tool','file_read','file_write','image_read','artifact','validation',"
-                 "'subagent','note') ORDER BY seq ASC LIMIT %s", (int(task_id), int(limit)))
+        rows = _events_collapsed(
+            task_id, kinds=("tool", "file_read", "file_write", "image_read",
+                            "artifact", "validation", "subagent", "note"))
     except Exception:
         return fallback
     if not rows:
         return fallback
     out = []
-    for r in rows:
+    for r in rows[-int(limit):]:
         meta = r.get("meta")
         if isinstance(meta, str):
             try:

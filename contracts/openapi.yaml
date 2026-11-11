@@ -1442,13 +1442,18 @@ components:
     TaskEvent:
       type: object
       description: |
-        append-only 执行事件。seq 同 task 单调无空洞；running 只允许一次 CAS 到终态，
-        终态不可回写；重试/纠正追加新事件（retryOfSeq）。大输出只给 preview，
-        完整内容走 /tasks/{id}/events/{seq}/detail。
+        append-only 执行事件。seq 同 task 单调无空洞，**不原地改已有行**：
+        步骤开始时追加 running 事件；完成/失败时再追加一条新事件（新 seq、同 stepId、
+        parentSeq=起始事件 seq、status=终态、输出/错误在终态事件上）。
+        客户端按 stepId（或 (stepId,seq)）upsert：后到的终态覆盖 running。
+        大输出只给 preview，完整内容走 /tasks/{id}/events/{seq}/detail。
       properties:
         seq: { type: integer }
         stepId: { type: string, nullable: true }
-        parentSeq: { type: integer, nullable: true }
+        parentSeq:
+          type: integer
+          nullable: true
+          description: 完成事件指向起始事件 seq；子智能体/嵌套步骤也用它指父 step
         kind:
           type: string
           enum: [plan, tool, file_read, file_write, image_read, subagent, artifact,
@@ -1473,6 +1478,24 @@ components:
         startedAt: { type: string, nullable: true }
         endedAt: { type: string, nullable: true }
         visibility: { type: string, enum: [project, private, admin] }
+        artifacts:
+          type: array
+          description: |
+            只读产物引用（L3 缩略图/跳转用）：图片给现签 url，文书给 docId；
+            只引用不复制证据。detail 端点同样返回该字段。
+          items:
+            type: object
+            properties:
+              type: { type: string, enum: [image, doc, file, asset] }
+              assetId: { type: string, nullable: true }
+              docId:
+                oneOf: [{ type: integer }, { type: string }]
+                nullable: true
+              photoId: { type: integer, nullable: true }
+              url: { type: string, nullable: true, description: 图片短签（仅 image 且资产存在时） }
+              name: { type: string, nullable: true }
+              mime: { type: string, nullable: true }
+              bytes: { type: integer, nullable: true }
 
     Message:
       type: object
@@ -1485,7 +1508,9 @@ components:
         traceSum: { type: string, example: 调了 查规范、写文书 }
         trace:
           type: array
-          description: 执行时间线（note 是它说的话，cmd 是它做的事）
+          description: |
+            旧格式执行时间线（note/cmd/shell）。v2 任务仍保留该字段（旧客户端不变）；
+            新客户端请读 taskId/traceVersion/events。
           items:
             type: object
             properties:
@@ -1495,6 +1520,22 @@ components:
               output: { type: string }
               secs: { type: number }
               ok: { type: boolean }
+        taskId:
+          type: integer
+          nullable: true
+          description: 该消息所属 run（task）；user 消息为空
+        traceVersion:
+          type: integer
+          nullable: true
+          enum: [1, 2]
+          description: 2=该 run 有事件账本；历史消息的 v2 视图走 events
+        events:
+          type: array
+          nullable: true
+          description: |
+            v2 历史回放：该 run 的完整事件数组（append-only，含 running 与末态完成事件；
+            客户端按 stepId upsert）。旧客户端忽略；message.trace 仍是旧格式。
+          items: { $ref: '#/components/schemas/TaskEvent' }
         cites:
           type: array
           description: 引用（从工具真实输出里提取，不是模型编的）
