@@ -2589,6 +2589,27 @@ def handle_chat(body, headers=None):
     # 出图请求：在用户消息后追加硬规则，堵住"shell/python 自绘 + /tmp 路径"的绕过
     prompt_text = _image_turn_guard(prompt_text)
 
+    # 图片附件必须把 sha 与项目 photoId 对齐后再交给模型：
+    # 用户从聊天导入的图可能已经入库，也可能只在 blob 里；
+    # 不告诉模型，它就会去 search_photos 猜，最后误答"不在照片库"。
+    if images:
+        att_lines = []
+        for im in images:
+            sha = (im.get("blob") or im.get("sha") or "").strip()
+            if not sha:
+                continue
+            rows = q("SELECT id FROM photo WHERE project_id=%s AND sha256=%s "
+                     "ORDER BY id DESC LIMIT 1", (project_id, sha))
+            if rows:
+                att_lines.append("- sha=%s → 项目照片 photoId=%s；标注时直接用 photoId" %
+                                 (sha, rows[0]["id"]))
+            else:
+                att_lines.append("- sha=%s → 未入库；标注时用 uploadBlob=%s" % (sha, sha))
+        if att_lines:
+            prompt_text += ("\n\n【本轮图片附件对照】\n" + "\n".join(att_lines) +
+                            "\n标注请调用 annotate_photo，并同时传 detectLabels（英文目标名）；"
+                            "不要 search_photos 猜 photoId，也不要自己估坐标。")
+
     deny = guard_project(project_id, resolve_token(bearer(headers)))
     if deny:
         return deny
