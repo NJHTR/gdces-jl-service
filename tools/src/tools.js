@@ -578,17 +578,19 @@ async function bffPost(pathname, body) {
 }
 
 /** 在真实照片上标注 → 派生图 → 加入本轮回答。 */
-export async function annotatePhoto({ projectId, photoId, boxes, annotations, detectLabels,
-                                     maxBoxes = 20, caption = "" }) {
+export async function annotatePhoto({ projectId, photoId, uploadBlob, boxes, annotations,
+                                     detectLabels, maxBoxes = 20, caption = "" }) {
   if (!projectId) throw new Error("缺 projectId");
-  const pid = requirePhotoId(photoId);
+  const blob = String(uploadBlob || "").trim();
+  const pid = photoId ? requirePhotoId(photoId) : null;
+  if (!pid && !blob) throw new Error("photoId 或 uploadBlob 必填");
   let rawBoxes = boxes;
   let rawAnnotations = annotations;
   if (Array.isArray(detectLabels) && detectLabels.length) {
     // detectLabels 是首选路径：即使模型同时塞了 boxes，也以检测结果为准。
     const labels = detectLabels.map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
     const det = await bffPost("/api/v1/vision/detect", {
-      projectId, photoId: pid, labels, threshold: 0.2,
+      projectId, ...(pid ? { photoId: pid } : { blob }), labels, threshold: 0.2,
       maxDetections: Math.max(1, Math.min(50, Number(maxBoxes) || 20)),
     });
     rawBoxes = (det.boxes || []).slice(0, Math.max(1, Math.min(20, Number(maxBoxes) || 20)))
@@ -606,19 +608,20 @@ export async function annotatePhoto({ projectId, photoId, boxes, annotations, de
       + "例如 {\"detectLabels\":[\"cardboard box\",\"carton\"],\"maxBoxes\":3}");
   }
   const normBoxes = normalizeBoxes(rawBoxes, rawAnnotations);
-  const refs = [`photo:${pid}`];
+  const refs = pid ? [`photo:${pid}`] : [`blob:${blob}`];
   // 去重：同一张源照片本轮已加过 → 不重复生成资产
   const dup = sameSourceBlock(projectId, refs);
   if (dup) {
     return { ok: true, duplicated: true, assetId: dup.assetId, caption: dup.caption,
-             note: "这张照片已在本次回答里，未重复生成" };
+             note: "这张图片已在本次回答里，未重复生成" };
   }
   const existing = readBlocks(projectId);
   if (countBlocks(existing, "image_ref") >= IMAGE_BLOCK_CAP) {
     throw new Error(`本轮图片已达上限 ${IMAGE_BLOCK_CAP} 张，未加入回答；请先回答文字`);
   }
   const data = await bffPost("/api/v1/photos/annotate", {
-    projectId, photoId: pid, boxes: normBoxes, caption: String(caption || "").slice(0, 120),
+    projectId, ...(pid ? { photoId: pid } : { blob }),
+    boxes: normBoxes, caption: String(caption || "").slice(0, 120),
   });
   const block = sanitizeBlock(data.block, "image_ref");
   const merged = mergeBlock(projectId, block);

@@ -217,6 +217,7 @@ const TOOLS = [
       "要标注必须给标注框：只用 caption 不会画出任何圈，不算完成标注。" +
       "**首选 detectLabels**：用开放词汇检测模型返回真实 bbox；不要让语言模型自己估坐标。" +
       "detectLabels 用英文目标名，如 [\"cardboard box\",\"carton\"]、[\"worker\",\"safety helmet\"]；maxBoxes 控制取前几个。" +
+      "聊天里直接上传的图片用 uploadBlob（本轮附件提示里会给出 sha）；项目照片用 photoId；二者至少一个。" +
       "只有检测不可用时才用 boxes/annotations 手动画框。" +
       "坐标以完整原图为基准（含底部项目信息条），不要按聊天里裁剪/缩放后的图估算；框要刚好包住目标。" +
       "boxes 为原图像素 x/y/w/h；annotations 为 x1/y1/x2/y2，可为 0..1 归一化。" +
@@ -226,7 +227,8 @@ const TOOLS = [
       type: "object",
       properties: {
         projectId: { type: "string" },
-        photoId: { type: "number", description: "真实照片 id（先用 search_photos 查）" },
+        photoId: { type: "number", description: "项目照片 id（和 uploadBlob 二选一）" },
+        uploadBlob: { type: "string", description: "用户本轮直接上传图片的 blob sha（和 photoId 二选一）" },
         detectLabels: {
           type: "array",
           description: "首选：英文开放词汇目标名，交给检测模型返回真实 bbox",
@@ -267,7 +269,7 @@ const TOOLS = [
         },
         caption: { type: "string", description: "图片底部说明（可选，别写外链）" },
       },
-      required: ["projectId", "photoId", "detectLabels"],
+      required: ["projectId", "detectLabels"],
     },
   },
   {

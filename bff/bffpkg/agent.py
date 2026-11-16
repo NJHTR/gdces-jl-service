@@ -1939,6 +1939,28 @@ def _run_cli_turn(task_id, project_id, user_id, text, images=None):
             hint += ("\n\n【本轮附件】这一条消息带了 %d 张图片（已作为附件传给你）。\n"
                      "请只针对这几张回答；历史对话里出现过的图片不要重复描述，"
                      "除非用户明确问起。" % len(images))
+            blobs = []
+            for p in images:
+                if isinstance(p, dict):
+                    b = (p.get("blob") or p.get("sha") or "").strip()
+                else:
+                    # appserver/CLI 路径是 /tmp/jl-img/<sha>.jpg，sha 就是附件 id
+                    b = os.path.basename(str(p)).split(".")[0].strip()
+                if len(b) == 64 and all(c in "0123456789abcdef" for c in b.lower()):
+                    blobs.append(b)
+            if blobs:
+                att_map = []
+                for b in blobs:
+                    rows = q("SELECT id FROM photo WHERE project_id=%s AND sha256=%s "
+                             "ORDER BY id DESC LIMIT 1", (project_id, b))
+                    if rows:
+                        att_map.append("%s → 项目照片 photoId=%s（标注直接用 photoId）" % (b, rows[0]["id"]))
+                    else:
+                        att_map.append("%s → 未入库，标注用 uploadBlob" % b)
+                hint += ("\n【图片附件对照】" + "\n".join(att_map) +
+                         "\n需要标注/圈出这些上传图片时，调用 annotate_photo："
+                         "优先用上面的 photoId；没有 photoId 就用 uploadBlob=sha；"
+                         "同时传 detectLabels（英文目标名）。不要 search_photos 猜 photoId，也不要用坐标手估。")
         # 两种后端共用后面的解析：事件来源不同，事件形状一样
         proc = None
         if ENGINE_MODE == "appserver":

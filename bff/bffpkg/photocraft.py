@@ -109,6 +109,32 @@ def _load_photo(project_id, photo_id):
     return img, row
 
 
+def _load_blob_image(blob_sha):
+    """读聊天上传的 blob（用户直接发的图，不在 photo 表里）。"""
+    sha = str(blob_sha or "").strip()
+    if not sha or len(sha) != 64 or any(c not in "0123456789abcdef" for c in sha.lower()):
+        raise assetsvc.AssetError(400, "blob 不是合法的 sha256")
+    path = os.path.join(BLOB_ROOT, sha[:2], sha)
+    real = os.path.realpath(path)
+    blob_root = os.path.realpath(BLOB_ROOT)
+    if not real.startswith(blob_root + os.sep) or not os.path.isfile(real):
+        raise assetsvc.AssetError(404, "图片附件不存在")
+    try:
+        with open(real, "rb") as f:
+            data = f.read()
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception as e:
+        raise assetsvc.AssetError(400, "图片附件无法解析: %r" % (e,))
+    if img.width * img.height > MAX_SRC_PIXELS:
+        raise assetsvc.AssetError(413, "原图像素过大")
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGB")
+    return img, {"id": None, "sha256": sha, "blob_path": real, "place": None,
+                 "shot_at": None, "created_at": None}
+
+
 def _source_line(row):
     """来源水印用：现场照片 #id · 日期 · 部位。"""
     bits = ["现场照片 #%s" % row["id"]]
@@ -242,13 +268,22 @@ def _norm_boxes(boxes, w, h):
 
 
 def annotate_photo(project_id, photo_id, boxes, caption=None, user=None,
-                   task_id=None, message_id=None):
-    """在真实照片上画框/编号/标签 → 派生图资产 + image_ref block。"""
+                   task_id=None, message_id=None, blob_sha=None):
+    """在真实照片/聊天上传图上画框/编号/标签 → 派生图资产 + image_ref block。"""
     deny = guard_project(project_id, user)
     if deny:
         return deny
     try:
-        img, row = _load_photo(project_id, photo_id)
+        if photo_id:
+            img, row = _load_photo(project_id, photo_id)
+            refs = ["photo:%s" % row["id"]]
+            default_caption = "标注图 · 现场照片 #%s" % row["id"]
+        elif blob_sha:
+            img, row = _load_blob_image(blob_sha)
+            refs = ["blob:%s" % blob_sha]
+            default_caption = "标注图 · 上传图片"
+        else:
+            return 400, {"code": 400, "message": "photoId 或 blob 必填"}
         w, h = img.size
         norm = _norm_boxes(boxes, w, h)
         draw = ImageDraw.Draw(img, "RGBA")
@@ -274,7 +309,7 @@ def annotate_photo(project_id, photo_id, boxes, caption=None, user=None,
                 draw.rectangle([tx - 3, ty - 2, tx + tw + 3, ty + th + 2],
                                fill=(0, 0, 0, 150))
                 draw.text((tx, ty), label, font=lf, fill=(255, 255, 255, 250))
-        text = _safe_text(caption, 80) or ("标注图 · 现场照片 #%s" % row["id"])
+        text = _safe_text(caption, 80) or default_caption
         img = _draw_bottom_text(img, text)
         img = _draw_badge(img)
         img = _fit(img)
@@ -285,10 +320,10 @@ def annotate_photo(project_id, photo_id, boxes, caption=None, user=None,
         data = buf.getvalue()
         if len(data) > MAX_OUTPUT_BYTES:
             raise assetsvc.AssetError(413, "派生图超过 %dMB" % (MAX_OUTPUT_BYTES // (1024 * 1024)))
-        ph = _prompt_hash({"op": "annotate", "photoId": photo_id, "boxes": boxes,
-                           "caption": caption or ""})
+        ph = _prompt_hash({"op": "annotate", "photoId": photo_id, "blob": blob_sha,
+                           "boxes": boxes, "caption": caption or ""})
         return _save_and_commit(project_id, data, user, "derived", "annotate",
-                                text, ["photo:%s" % row["id"]], task_id, message_id, ph)
+                                text, refs, task_id, message_id, ph)
     except assetsvc.AssetError as e:
         return e.code, {"code": e.code, "message": e.message}
     except Exception as e:
@@ -401,15 +436,22 @@ def _vision_image_path(real_path):
     return os.path.join(VISION_DATA_ROOT, rel)
 
 
-def detect_objects(project_id, photo_id, labels, threshold=None, max_detections=20, user=None):
+def detect_objects(project_id, photo_id, labels, threshold=None, max_detections=20, user=None,
+                   blob_sha=None):
     """开放词汇检测：真实 bbox 由视觉服务返回，不让语言模型估坐标。"""
     deny = guard_project(project_id, user)
     if deny:
         return deny
     try:
-        img, row = _load_photo(project_id, photo_id)
-        real = row.get("blob_path") or os.path.join(BLOB_ROOT, (row.get("sha256") or "")[:2],
-                                                     row.get("sha256") or "")
+        if photo_id:
+            img, row = _load_photo(project_id, photo_id)
+            real = row.get("blob_path") or os.path.join(BLOB_ROOT, (row.get("sha256") or "")[:2],
+                                                         row.get("sha256") or "")
+        elif blob_sha:
+            img, row = _load_blob_image(blob_sha)
+            real = row["blob_path"]
+        else:
+            return 400, {"code": 400, "message": "photoId 或 blob 必填"}
         labels = [str(x).strip() for x in (labels or []) if str(x).strip()][:12]
         if not labels:
             return 400, {"code": 400, "message": "labels 必填"}
@@ -458,12 +500,13 @@ def handle_detect(body, user=None):
     if not pid:
         return 400, {"code": 400, "message": "projectId 必填"}
     photo_id = _int_or_none(body.get("photoId"))
-    if not photo_id:
-        return 400, {"code": 400, "message": "photoId 必填"}
+    blob_sha = (body.get("blob") or "").strip()
+    if not photo_id and not blob_sha:
+        return 400, {"code": 400, "message": "photoId 或 blob 必填"}
     return detect_objects(pid, photo_id, body.get("labels") or [],
                           threshold=body.get("threshold"),
                           max_detections=_int_or_none(body.get("maxDetections")) or 20,
-                          user=user)
+                          user=user, blob_sha=blob_sha or None)
 
 
 def handle_annotate(body, user=None):
@@ -471,11 +514,13 @@ def handle_annotate(body, user=None):
     if not pid:
         return 400, {"code": 400, "message": "projectId 必填"}
     photo_id = _int_or_none(body.get("photoId"))
-    if not photo_id:
-        return 400, {"code": 400, "message": "photoId 必填"}
+    blob_sha = (body.get("blob") or "").strip()
+    if not photo_id and not blob_sha:
+        return 400, {"code": 400, "message": "photoId 或 blob 必填"}
     return annotate_photo(pid, photo_id, body.get("boxes") or [], caption=body.get("caption"),
                           user=user, task_id=_int_or_none(body.get("taskId")),
-                          message_id=_int_or_none(body.get("messageId")))
+                          message_id=_int_or_none(body.get("messageId")),
+                          blob_sha=blob_sha or None)
 
 
 def handle_compare(body, user=None):
